@@ -1,0 +1,485 @@
+/**
+ * Domain schema.
+ *
+ * The invariants encoded here are documented in CLAUDE.md and justified in
+ * docs/decisions.md. The load-bearing ones:
+ *
+ *   - `institutionId` on every campus-scoped table (expansion is campus-by-campus)
+ *   - `course` is durable; codes live in `courseCodeAlias` with term validity
+ *   - `(tutor, course)` is the core relationship, not `tutor`
+ *   - a user can be both tutor and student
+ *   - money is integer minor units
+ *   - reliability is timestamped facts only
+ */
+
+import {
+  pgTable,
+  pgEnum,
+  uuid,
+  text,
+  integer,
+  boolean,
+  timestamp,
+  date,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+
+/* -------------------------------------------------------------------------- */
+/* enums                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export const kycStatus = pgEnum("kyc_status", [
+  "not_started", // deferred until first accepted request — see decisions.md
+  "pending",
+  "verified",
+  "restricted",
+]);
+
+export const tutorCourseStatus = pgEnum("tutor_course_status", [
+  "pending_verification",
+  "active",
+  "winding_down", // graduating: no new engagements, existing ones run out
+  "retired",
+]);
+
+export const matchRequestStatus = pgEnum("match_request_status", [
+  "pending",
+  "accepted",
+  "declined", // explicit pass — never penalised
+  "expired", // silent expiry — carries a ranking penalty
+  "withdrawn", // another tutor accepted first
+]);
+
+export const engagementStatus = pgEnum("engagement_status", [
+  "active",
+  "completed",
+  "refunded",
+  "cancelled",
+]);
+
+export const sessionStatus = pgEnum("session_status", [
+  "scheduled",
+  "completed",
+  "cancelled",
+  "disputed",
+]);
+
+/** How a session's attendance was settled. Mutual confirm is adversarial — the
+ *  tutor is paid if attended, the student gets the session back if not. */
+export const attendanceResolution = pgEnum("attendance_resolution", [
+  "both_confirmed",
+  "auto_released", // confirmation window lapsed, defaulted to attended
+  "disputed",
+  "resolved_attended",
+  "resolved_not_attended",
+]);
+
+/** Timestamped facts only. Nothing subjective, nothing that proxies for ability. */
+export const reliabilityEventType = pgEnum("reliability_event_type", [
+  "attended",
+  "late_cancelled",
+  "no_showed",
+  "payment_failed",
+]);
+
+export const ledgerEntryType = pgEnum("ledger_entry_type", [
+  "package_purchase", // deferred revenue on receipt, not income
+  "session_earned", // recognised as a session is delivered
+  "tutor_payout",
+  "platform_fee",
+  "refund",
+  "guarantee_absorbed", // platform eats tutor pay on a first-session refund
+]);
+
+export const packageKind = pgEnum("package_kind", [
+  "exam_anchored", // default: ~4 sessions to the next exam
+  "through_final", // discounted upsell
+]);
+
+/* -------------------------------------------------------------------------- */
+/* institution + identity                                                     */
+/* -------------------------------------------------------------------------- */
+
+export const institution = pgTable("institution", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  emailDomain: text("email_domain").notNull(), // gates .edu verification
+  timezone: text("timezone").notNull(), // IANA
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Core user. Better Auth owns authentication; run `npx @better-auth/cli generate`
+ * and reconcile its session/account/verification tables against this before the
+ * first migration — the fields below are the shape Better Auth expects plus our
+ * campus additions.
+ */
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
+
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    /** .edu verification replaces background checks — minors are out of scope. */
+    eduVerifiedAt: timestamp("edu_verified_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("user_institution_idx").on(t.institutionId)],
+);
+
+/**
+ * Profiles are split from `user` because on a peer campus the same person is
+ * routinely both tutor and student, and their histories must not mix.
+ * `userId` is NOT NULL — there is no parent-managed account in this product.
+ */
+export const studentProfile = pgTable(
+  "student_profile",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("student_profile_user_idx").on(t.userId)],
+);
+
+export const tutorProfile = pgTable(
+  "tutor_profile",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+
+    headline: text("headline"),
+    bio: text("bio"),
+
+    stripeAccountId: text("stripe_account_id"),
+    kycStatus: kycStatus("kyc_status").notNull().default("not_started"),
+
+    expectedGraduationOn: date("expected_graduation_on"), // drives wind-down
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("tutor_profile_user_idx").on(t.userId)],
+);
+
+/* -------------------------------------------------------------------------- */
+/* catalog                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export const term = pgTable(
+  "term",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    name: text("name").notNull(), // "Fall 2026"
+    startsOn: date("starts_on").notNull(),
+    endsOn: date("ends_on").notNull(),
+  },
+  (t) => [uniqueIndex("term_institution_name_idx").on(t.institutionId, t.name)],
+);
+
+/** First-class, not a profile detail: an instructor change invalidates the wedge. */
+export const professor = pgTable(
+  "professor",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    name: text("name").notNull(),
+    department: text("department"),
+  },
+  (t) => [index("professor_institution_idx").on(t.institutionId)],
+);
+
+/**
+ * The durable course. Quality scores and tutor history attach HERE — never to a
+ * code string or an offering — so a renumbering does not fork a tutor's record.
+ */
+export const course = pgTable(
+  "course",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    title: text("title").notNull(), // "Calculus I"
+    department: text("department").notNull(),
+    /** Seeded weed-out courses launch first; the full catalog is vanity work. */
+    isSeeded: boolean("is_seeded").notNull().default(false),
+  },
+  (t) => [index("course_institution_idx").on(t.institutionId)],
+);
+
+/** Course codes get renumbered between terms. Never key on the string. */
+export const courseCodeAlias = pgTable(
+  "course_code_alias",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    courseId: uuid("course_id")
+      .notNull()
+      .references(() => course.id),
+    code: text("code").notNull(), // "MATH 125"
+    validFromTermId: uuid("valid_from_term_id").references(() => term.id),
+    validToTermId: uuid("valid_to_term_id").references(() => term.id), // null = current
+  },
+  (t) => [index("course_code_alias_code_idx").on(t.code)],
+);
+
+/** A course as actually taught: term + section + professor. */
+export const courseOffering = pgTable(
+  "course_offering",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    courseId: uuid("course_id")
+      .notNull()
+      .references(() => course.id),
+    termId: uuid("term_id")
+      .notNull()
+      .references(() => term.id),
+    professorId: uuid("professor_id").references(() => professor.id),
+    section: text("section"),
+  },
+  (t) => [
+    uniqueIndex("course_offering_unique_idx").on(t.courseId, t.termId, t.section),
+    index("course_offering_course_idx").on(t.courseId),
+  ],
+);
+
+/** Packages are anchored to these. Usually transcribed by hand from a PDF syllabus. */
+export const exam = pgTable(
+  "exam",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    courseOfferingId: uuid("course_offering_id")
+      .notNull()
+      .references(() => courseOffering.id),
+    name: text("name").notNull(), // "Exam 2"
+    occursOn: date("occurs_on").notNull(),
+  },
+  (t) => [index("exam_offering_idx").on(t.courseOfferingId)],
+);
+
+export const enrollment = pgTable(
+  "enrollment",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    studentProfileId: uuid("student_profile_id")
+      .notNull()
+      .references(() => studentProfile.id),
+    courseOfferingId: uuid("course_offering_id")
+      .notNull()
+      .references(() => courseOffering.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("enrollment_unique_idx").on(t.studentProfileId, t.courseOfferingId),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* supply: (tutor, course) is the core entity                                 */
+/* -------------------------------------------------------------------------- */
+
+export const tutorCourse = pgTable(
+  "tutor_course",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tutorProfileId: uuid("tutor_profile_id")
+      .notNull()
+      .references(() => tutorProfile.id),
+    /** Durable course, not the offering — history survives renumbering. */
+    courseId: uuid("course_id")
+      .notNull()
+      .references(() => course.id),
+
+    /** Verification: A/A- within ~4 semesters, transcript screenshot, human review. */
+    gradeEarned: text("grade_earned").notNull(),
+    takenTermId: uuid("taken_term_id")
+      .notNull()
+      .references(() => term.id),
+    takenUnderProfessorId: uuid("taken_under_professor_id").references(
+      () => professor.id,
+    ),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    status: tutorCourseStatus("status").notNull().default("pending_verification"),
+
+    /**
+     * Hidden quality score. Never shown to anyone.
+     * At launch n=0 for everyone, so ranking is a deterministic sort; the
+     * Bayesian ranker (shrinkage + bandit exploration) lands in V1.
+     */
+    scoreSampleCount: integer("score_sample_count").notNull().default(0),
+    scorePosteriorMean: integer("score_posterior_mean"), // basis points, null until n>0
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("tutor_course_unique_idx").on(t.tutorProfileId, t.courseId),
+    index("tutor_course_course_idx").on(t.courseId),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* matching: parallel asks, first acceptance wins                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A student may hold up to 3 `pending` requests at once. The first tutor to
+ * accept wins; the rest transition to `withdrawn`. Enforce the cap and the
+ * race in a transaction in the matching module, not here.
+ */
+export const matchRequest = pgTable(
+  "match_request",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    studentProfileId: uuid("student_profile_id")
+      .notNull()
+      .references(() => studentProfile.id),
+    tutorCourseId: uuid("tutor_course_id")
+      .notNull()
+      .references(() => tutorCourse.id),
+    courseOfferingId: uuid("course_offering_id")
+      .notNull()
+      .references(() => courseOffering.id),
+
+    status: matchRequestStatus("status").notNull().default("pending"),
+    /** 12h, not 24 — a student with an exam on Thursday cannot wait a day. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("match_request_student_idx").on(t.studentProfileId, t.status),
+    index("match_request_tutor_course_idx").on(t.tutorCourseId, t.status),
+  ],
+);
+
+/* -------------------------------------------------------------------------- */
+/* engagements, sessions, money                                               */
+/* -------------------------------------------------------------------------- */
+
+/** An engagement IS a course package. Many-to-many: a student takes ~4 courses. */
+export const engagement = pgTable(
+  "engagement",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    studentProfileId: uuid("student_profile_id")
+      .notNull()
+      .references(() => studentProfile.id),
+    tutorCourseId: uuid("tutor_course_id")
+      .notNull()
+      .references(() => tutorCourse.id),
+    courseOfferingId: uuid("course_offering_id")
+      .notNull()
+      .references(() => courseOffering.id),
+
+    kind: packageKind("kind").notNull().default("exam_anchored"),
+    anchorExamId: uuid("anchor_exam_id").references(() => exam.id),
+
+    sessionsPurchased: integer("sessions_purchased").notNull(),
+    pricePaidMinor: integer("price_paid_minor").notNull(), // integer minor units
+    currency: text("currency").notNull().default("usd"),
+
+    /** One guaranteed first session per student per term. */
+    guaranteeUsed: boolean("guarantee_used").notNull().default(false),
+
+    status: engagementStatus("status").notNull().default("active"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("engagement_student_idx").on(t.studentProfileId, t.status),
+    index("engagement_tutor_course_idx").on(t.tutorCourseId),
+  ],
+);
+
+export const session = pgTable(
+  "session_booking",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    engagementId: uuid("engagement_id")
+      .notNull()
+      .references(() => engagement.id),
+
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    durationMinutes: integer("duration_minutes").notNull().default(60),
+    /** No video product — the pair chooses where to meet. Free text by design. */
+    locationNote: text("location_note"),
+
+    status: sessionStatus("status").notNull().default("scheduled"),
+
+    /** Mutual confirm. Opposed incentives — see docs/decisions.md. */
+    studentConfirmedAt: timestamp("student_confirmed_at", { withTimezone: true }),
+    tutorConfirmedAt: timestamp("tutor_confirmed_at", { withTimezone: true }),
+    confirmationWindowEndsAt: timestamp("confirmation_window_ends_at", {
+      withTimezone: true,
+    }),
+    resolution: attendanceResolution("resolution"),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("session_engagement_idx").on(t.engagementId),
+    index("session_scheduled_idx").on(t.scheduledAt),
+  ],
+);
+
+/** Append-only. Facts, never judgments. Drives mechanics, never a visible score. */
+export const reliabilityEvent = pgTable(
+  "reliability_event",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    sessionId: uuid("session_id").references(() => session.id),
+    type: reliabilityEventType("type").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("reliability_event_user_idx").on(t.userId, t.occurredAt)],
+);
+
+/**
+ * Append-only ledger. Recognised revenue derives from here; the Stripe balance
+ * is float. A package purchase is deferred revenue until sessions are delivered.
+ */
+export const ledgerEntry = pgTable(
+  "ledger_entry",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    engagementId: uuid("engagement_id")
+      .notNull()
+      .references(() => engagement.id),
+    sessionId: uuid("session_id").references(() => session.id),
+
+    type: ledgerEntryType("type").notNull(),
+    amountMinor: integer("amount_minor").notNull(), // signed, integer minor units
+    currency: text("currency").notNull().default("usd"),
+
+    stripeReference: text("stripe_reference"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ledger_entry_engagement_idx").on(t.engagementId, t.occurredAt)],
+);
