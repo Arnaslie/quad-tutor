@@ -42,3 +42,6 @@ next-env.d.ts
 
 # ...but the template belongs in version control
 !.env.example
+
+# local Claude Code config and project skills
+.claude/
