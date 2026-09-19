@@ -99,5 +99,5 @@ earned.
 - Server-side logic lives in `src/server/`, not in route handlers
 - Validate external input with Zod at the boundary
 - Prefer server components; reach for `"use client"` only where interaction requires it
-- DRY - Dont' repeat yourself
+- DRY - Don't repeat yourself
 - KISS - Keep it simple stupid
