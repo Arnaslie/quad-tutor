@@ -21,7 +21,26 @@ export const EXAM_ANCHORED_SESSIONS = 4;
 export const THROUGH_FINAL_SESSIONS = 8;
 export const THROUGH_FINAL_DISCOUNT_BP = 1_000; // 10% off
 
-export type PackageKind = "exam_anchored" | "through_final";
+/**
+ * The end-of-term top-up: one session, full price, and only ever offered to a
+ * student who has already finished a package with that tutor.
+ *
+ * A cold one-off is a different product and a bad one — no dosage, a take that
+ * does not pay for the matching, and a pair who can walk after an hour. None of
+ * that applies to a renewal. The matching cost is sunk, the tutor is known, the
+ * dosage already happened, and the pair could already have left and did not.
+ *
+ * What it fixes is the tail of the term. A student who used four sessions and
+ * wants one more before finals has, without this, a choice between another
+ * four-pack that mostly auto-refunds at term end and texting the tutor
+ * directly. The second is free and easier, which is leakage at the exact moment
+ * the relationship is worth most.
+ *
+ * No discount: a top-up is convenience, never a cheaper door into the product.
+ */
+export const TOP_UP_SESSIONS = 1;
+
+export type PackageKind = "exam_anchored" | "through_final" | "top_up";
 
 export type PackageOption = {
   kind: PackageKind;
@@ -60,10 +79,55 @@ export function packageOptions(): PackageOption[] {
   ];
 }
 
+/**
+ * Deliberately not part of `packageOptions()`. That list is what a student
+ * chooses from at a first purchase, and a one-session option sitting beside the
+ * four-session default would be chosen for the wrong reason — it reads as the
+ * cheap way in rather than as what it is.
+ */
+export function topUpOption(): PackageOption {
+  const price = SESSION_PRICE_MINOR * TOP_UP_SESSIONS;
+  return {
+    kind: "top_up",
+    sessions: TOP_UP_SESSIONS,
+    priceMinor: price,
+    perSessionMinor: SESSION_PRICE_MINOR,
+    savingsMinor: 0,
+  };
+}
+
 export function packageOption(kind: PackageKind): PackageOption {
-  const option = packageOptions().find((candidate) => candidate.kind === kind);
+  const option = [...packageOptions(), topUpOption()].find(
+    (candidate) => candidate.kind === kind,
+  );
   if (!option) throw new Error(`Unknown package kind: ${kind}`);
   return option;
+}
+
+/**
+ * Whether a top-up is the right shape for the time left in the term.
+ *
+ * A package assumes roughly a session a week, so when fewer weeks remain than
+ * a package has sessions, selling one is selling sessions the term has no room
+ * for — they would auto-refund at term end, which is a refund queue and a
+ * student who feels oversold. Inside that window a single session is the
+ * honest unit.
+ *
+ * Pure, and the clock is an argument: this decides what a screen offers, and a
+ * function that reads the clock itself cannot be reasoned about from a test.
+ */
+export function topUpWindowOpen(params: {
+  sessionsRemaining: number;
+  termEndsOn: Date;
+  now: Date;
+}): boolean {
+  if (params.sessionsRemaining > 0) return false;
+
+  const msLeft = params.termEndsOn.getTime() - params.now.getTime();
+  if (msLeft <= 0) return false;
+
+  const weeksLeft = msLeft / (7 * 24 * 60 * 60 * 1000);
+  return weeksLeft < EXAM_ANCHORED_SESSIONS;
 }
 
 /**

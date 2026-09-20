@@ -39,6 +39,22 @@ recovering a few dollars. Cap at one guarantee per student per term.
 **Unused sessions auto-refund at term end.** Breakage income is a trap on a campus
 where everyone talks.
 
+**A single session exists, but only as an end-of-term top-up.** One session, full
+price, offered to a student who has finished a package with that tutor when fewer
+weeks remain in the term than a package has sessions. It is not a cheaper door into
+the product: a cold one-off has no dosage, a 22% take on $35 does not pay for
+course-level matching, and a pair who met once has no reason to come back through the
+platform. A renewal shares none of that — the matching cost is sunk, the tutor is
+known, the dosage already happened, and the pair could already have left and did not.
+
+What it fixes is the tail of the term, which the package shape gets wrong. A student
+who used four sessions and wants one more before finals otherwise chooses between
+another four-pack that mostly auto-refunds at term end and texting the tutor
+directly. The second is free and easier, so the package rule was producing leakage at
+the exact moment the relationship is worth most. Top-ups chain: a booked-but-unheld
+session leaves nothing to book, so a second can be bought before the first happens,
+which is what finals week actually looks like.
+
 **Seed ~10–30 weed-out courses. Not the full catalog.** Concentration buys patience;
 a full catalog is vanity work.
 

@@ -43,6 +43,13 @@
       "when": 1789857488444,
       "tag": "0005_harsh_sabra",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789881774047,
+      "tag": "0006_tricky_lucky_pierre",
+      "breakpoints": true
     }
   ]
 }

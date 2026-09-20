@@ -34,6 +34,14 @@ export const engagementRef = z.object({ engagementId: z.uuid() });
 
 export const slotsForRequestInput = requestRef;
 export const slotsForEngagementInput = engagementRef;
+/** The finished package a top-up is bought against, not a new relationship. */
+export const slotsForTopUpInput = engagementRef;
+
+export const purchaseTopUpInput = z.object({
+  engagementId: z.uuid(),
+  /** Must be one of the slots `slotsForTopUp` offered; checked there. */
+  slotStartsAt: z.coerce.date(),
+});
 
 export const bookSessionInput = z.object({
   engagementId: z.uuid(),
@@ -50,6 +58,8 @@ export const resolveDisputeInput = sessionRef.extend({
 
 export type SlotsForRequestInput = z.infer<typeof slotsForRequestInput>;
 export type SlotsForEngagementInput = z.infer<typeof slotsForEngagementInput>;
+export type SlotsForTopUpInput = z.infer<typeof slotsForTopUpInput>;
+export type PurchaseTopUpInput = z.infer<typeof purchaseTopUpInput>;
 export type ConfirmAttendanceInput = z.infer<typeof confirmAttendanceInput>;
 export type DenyAttendanceInput = z.infer<typeof denyAttendanceInput>;
 export type CancelSessionInput = z.infer<typeof cancelSessionInput>;

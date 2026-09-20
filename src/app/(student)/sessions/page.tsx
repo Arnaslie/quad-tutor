@@ -6,23 +6,29 @@ import { ButtonLink } from "@/components/button";
 import { Card } from "@/components/card";
 import { EmptyState } from "@/components/empty-state";
 import { formatDay } from "@/components/format";
+import { Money } from "@/components/money";
 import { PageHeader } from "@/components/page-header";
 import { SessionError } from "@/server/modules/engagements/access";
 import {
   packagesForStudent,
   sessionBoardForStudent,
+  topUpCandidates,
   type StudentPackage,
+  type TopUpCandidate,
 } from "@/server/modules/engagements/reads";
+import { PurchaseError, slotsForTopUp } from "@/server/modules/engagements/purchase";
 import { slotsForEngagement } from "@/server/modules/engagements/scheduling";
 import { requireActor } from "@/server/modules/identity/actor";
 
 import { BookNext } from "./book-next";
 import { SessionRow } from "./session-row";
+import { TopUp } from "./top-up";
 import { displayName } from "@/server/modules/identity/display-name";
 
 export const metadata: Metadata = { title: "Sessions" };
 
 const bookParam = z.uuid();
+const topUpParam = z.uuid();
 
 /**
  * The session board. One query, three buckets, in the order they matter.
@@ -46,11 +52,20 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
     return <BookingStep engagementId={booking.data} />;
   }
 
+  const rawTopUp = searchParams.topup;
+  const topping = topUpParam.safeParse(
+    Array.isArray(rawTopUp) ? rawTopUp[0] : rawTopUp,
+  );
+  if (topping.success) {
+    return <TopUpStep engagementId={topping.data} />;
+  }
+
   const justPurchased = Boolean(searchParams.package);
 
-  const [board, packages] = await Promise.all([
+  const [board, packages, topUps] = await Promise.all([
     sessionBoardForStudent(actor),
     packagesForStudent(actor),
+    topUpCandidates(actor),
   ]);
 
   const empty =
@@ -101,6 +116,17 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
         </section>
       ) : null}
 
+      {topUps.length > 0 ? (
+        <section className="flex flex-col gap-2" aria-label="One more session">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+            One more before finals?
+          </h2>
+          {topUps.map((candidate) => (
+            <TopUpCard key={candidate.engagementId} candidate={candidate} />
+          ))}
+        </section>
+      ) : null}
+
       <Section
         title="Done"
         description={
@@ -108,6 +134,106 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
         }
         items={board.past}
       />
+    </div>
+  );
+}
+
+/**
+ * The end-of-term top-up. Offered only when a package with this tutor is used
+ * up and the term is too close to its end for another package to make sense.
+ *
+ * Copy says the price before the tap, because every other button on this screen
+ * belongs to something already paid for and this one does not.
+ */
+function TopUpCard({ candidate }: { candidate: TopUpCandidate }) {
+  const tutor = displayName(candidate.tutorName, "tutor");
+  const course = candidate.courseCode ?? candidate.courseTitle;
+
+  return (
+    <Card className="flex flex-col items-start gap-3">
+      <div className="flex flex-col gap-0.5">
+        <p className="font-medium">
+          {course} · {tutor}
+        </p>
+        <p className="text-sm text-muted">
+          Your package is finished and the term ends {formatDay(candidate.termEndsOn)}.
+          Add a single session for{" "}
+          <Money minor={candidate.priceMinor} currency={candidate.currency} /> —
+          same tutor, no new request.
+        </p>
+      </div>
+
+      <ButtonLink
+        href={`/sessions?topup=${candidate.engagementId}`}
+        variant="secondary"
+      >
+        Add a session
+      </ButtonLink>
+    </Card>
+  );
+}
+
+async function TopUpStep({ engagementId }: { engagementId: string }) {
+  const actor = await requireActor();
+
+  const candidates = await topUpCandidates(actor);
+  const candidate = candidates.find((row) => row.engagementId === engagementId);
+
+  let slots: Date[] = [];
+  let problem: string | null = null;
+
+  try {
+    slots = await slotsForTopUp({ actor, engagementId });
+  } catch (error) {
+    if (error instanceof PurchaseError) problem = error.message;
+    else throw error;
+  }
+
+  if (!candidate || problem) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title="Nothing to add here" />
+        <EmptyState
+          icon="calendar"
+          title={problem ?? "That package is not yours, or it still has sessions left."}
+          description="Nothing was charged."
+          action={<ButtonLink href="/sessions">Back to your sessions</ButtonLink>}
+        />
+      </div>
+    );
+  }
+
+  const tutor = displayName(candidate.tutorName, "tutor");
+
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        eyebrow={candidate.courseCode ?? candidate.courseTitle}
+        title="Add one more session"
+        description="One session, full price, with the tutor you already worked with. Nothing renews and nothing is on a schedule."
+        action={
+          <ButtonLink href="/sessions" variant="secondary">
+            Back
+          </ButtonLink>
+        }
+      />
+
+      {slots.length === 0 ? (
+        <EmptyState
+          icon="clock"
+          title={`${tutor} has no times open right now`}
+          description="Their hours change week to week. Check back in a day or two — nothing has been charged."
+          action={<ButtonLink href="/sessions">Back to your sessions</ButtonLink>}
+        />
+      ) : (
+        <TopUp
+          engagementId={candidate.engagementId}
+          tutorName={tutor}
+          priceMinor={candidate.priceMinor}
+          currency={candidate.currency}
+          slots={slots.map((slot) => slot.toISOString())}
+        />
+      )}
     </div>
   );
 }

@@ -24,7 +24,11 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { enroll } from "@/server/modules/catalog/courses";
-import { PurchaseError, purchasePackage } from "@/server/modules/engagements/purchase";
+import {
+  PurchaseError,
+  purchasePackage,
+  purchaseTopUp,
+} from "@/server/modules/engagements/purchase";
 import {
   confirmAttendance,
   denyAttendance,
@@ -34,6 +38,7 @@ import {
   cancelSessionInput,
   confirmAttendanceInput,
   denyAttendanceInput,
+  purchaseTopUpInput,
 } from "@/server/modules/engagements/input";
 import { SessionError } from "@/server/modules/engagements/access";
 import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
@@ -217,6 +222,42 @@ export async function purchase(
   }
 
   revalidatePath("/requests");
+  revalidatePath("/sessions");
+  redirect(`/sessions?package=${engagementId}`);
+}
+
+/**
+ * One more session with a tutor whose package is finished, late in the term.
+ *
+ * Nothing about the tutor, the course or the price comes from this form — all
+ * three are read from the finished engagement, which is proved to belong to the
+ * caller. The only thing posted is which package and which time.
+ */
+export async function topUp(
+  _previous: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const actor = await requireActor();
+
+  const parsed = purchaseTopUpInput.safeParse({
+    engagementId: formData.get("engagementId"),
+    slotStartsAt: formData.get("slotStartsAt"),
+  });
+
+  if (!parsed.success) return { ok: false, error: "Pick a time for this session." };
+
+  let engagementId: string;
+  try {
+    const result = await purchaseTopUp({
+      actor,
+      engagementId: parsed.data.engagementId,
+      slotStartsAt: parsed.data.slotStartsAt,
+    });
+    engagementId = result.engagementId;
+  } catch (error) {
+    return toResult(error);
+  }
+
   revalidatePath("/sessions");
   redirect(`/sessions?package=${engagementId}`);
 }

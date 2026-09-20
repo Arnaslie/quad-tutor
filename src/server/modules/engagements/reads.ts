@@ -18,7 +18,7 @@
  * in the matching module: no cron, and every path that cares calls it.
  */
 
-import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -30,11 +30,17 @@ import {
   professor,
   sessionBooking,
   studentProfile,
+  term,
   tutorCourse,
   tutorProfile,
   user,
 } from "@/server/db/schema";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
+import {
+  topUpOption,
+  topUpWindowOpen,
+  type PackageKind,
+} from "@/server/modules/billing/pricing";
 
 import {
   onCampus,
@@ -225,7 +231,7 @@ export async function sessionBoardForTutor(tutor: TutorActor): Promise<SessionBo
  */
 export type StudentPackage = {
   engagementId: string;
-  kind: "exam_anchored" | "through_final";
+  kind: PackageKind;
   sessionsPurchased: number;
   /** Booked or delivered; a cancelled session is not one of these. */
   sessionsDelivered: number;
@@ -261,6 +267,90 @@ const remainingCount = sql<number>`greatest(0, ${engagement.sessionsPurchased} -
  * Active only: a completed or refunded package is history, and history is what
  * the session board's `past` bucket is for.
  */
+/**
+ * A tutor this student can buy one more session from.
+ *
+ * Only appears when a package with that tutor is used up *and* the term is too
+ * close to its end for another package to make sense — see `topUpWindowOpen`.
+ * Both halves matter: without the first this is a cold one-off, and without the
+ * second it undercuts the package that carries the dosage the product is for.
+ *
+ * `finishedAt` is the completed package, not a new relationship: the top-up
+ * inherits its tutor, course and offering, so no new request is sent. The
+ * tutor already said yes.
+ */
+export type TopUpCandidate = {
+  /** The finished engagement a top-up would be bought against. */
+  engagementId: string;
+  tutorName: string;
+  courseCode: string | null;
+  courseTitle: string;
+  priceMinor: number;
+  currency: string;
+  termEndsOn: string;
+};
+
+export async function topUpCandidates(actor: Actor): Promise<TopUpCandidate[]> {
+  const now = new Date();
+
+  const rows = await db
+    .select({
+      engagementId: engagement.id,
+      sessionsRemaining: remainingCount,
+      tutorName: user.name,
+      courseCode: courseCodeAlias.code,
+      courseTitle: course.title,
+      currency: engagement.currency,
+      termEndsOn: term.endsOn,
+    })
+    .from(engagement)
+    // `onCampus` checks both profiles, so both have to be in the query.
+    .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
+    .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
+    .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .innerJoin(user, eq(user.id, tutorProfile.userId))
+    .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
+    .innerJoin(course, eq(course.id, courseOffering.courseId))
+    .innerJoin(term, eq(term.id, courseOffering.termId))
+    .leftJoin(
+      courseCodeAlias,
+      and(eq(courseCodeAlias.courseId, course.id), isNull(courseCodeAlias.validToTermId)),
+    )
+    .where(
+      and(
+        eq(engagement.studentProfileId, actor.studentProfileId),
+        // `completed` closes when the last session is delivered; `active` with
+        // nothing left is the same student a moment earlier. Both are finished
+        // in the only sense that matters here.
+        inArray(engagement.status, ["active", "completed"]),
+        onCampus(actor.institutionId),
+      ),
+    )
+    .orderBy(desc(engagement.createdAt));
+
+  const option = topUpOption();
+
+  return rows
+    .filter((row) =>
+      topUpWindowOpen({
+        sessionsRemaining: row.sessionsRemaining,
+        // A bare `date` column: parsed at UTC noon so a timezone never moves it
+        // to the previous day, the same reason `formatDay` does it.
+        termEndsOn: new Date(`${row.termEndsOn}T12:00:00Z`),
+        now,
+      }),
+    )
+    .map((row) => ({
+      engagementId: row.engagementId,
+      tutorName: row.tutorName,
+      courseCode: row.courseCode,
+      courseTitle: row.courseTitle,
+      priceMinor: option.priceMinor,
+      currency: row.currency,
+      termEndsOn: row.termEndsOn,
+    }));
+}
+
 export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]> {
   return db
     .select({

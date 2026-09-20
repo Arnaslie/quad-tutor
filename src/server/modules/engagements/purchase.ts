@@ -14,17 +14,26 @@ import { and, eq, gte, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
+  courseOffering,
   engagement,
   institution,
   matchRequest,
   sessionBooking,
+  term,
   tutorAvailability,
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
 import type { Actor } from "@/server/modules/identity/actor";
 import { record } from "@/server/modules/billing/ledger";
-import { packageOption, type PackageKind } from "@/server/modules/billing/pricing";
+
+import type { Executor } from "./access";
+import {
+  packageOption,
+  topUpOption,
+  topUpWindowOpen,
+  type PackageKind,
+} from "@/server/modules/billing/pricing";
 
 import { SESSION_MINUTES } from "./attendance";
 
@@ -244,6 +253,152 @@ export async function purchasePackage(params: {
     });
 
     // Cash in, nothing earned. Recognition happens session by session.
+    await record(tx, [
+      {
+        engagementId: created.id,
+        type: "package_purchase",
+        amountMinor: option.priceMinor,
+      },
+    ]);
+
+    return { engagementId: created.id };
+  });
+}
+
+/**
+ * The finished package a top-up is bought against, proved to belong to the
+ * caller and to be inside the end-of-term window.
+ *
+ * Shared by the slot read and the purchase so the two can never disagree about
+ * eligibility — a screen that offers times for a package the write would refuse
+ * is worse than one that offers nothing.
+ */
+async function topUpSource(
+  exec: Executor,
+  params: { actor: Actor; engagementId: string },
+) {
+  const remaining = sql<number>`greatest(0, ${engagement.sessionsPurchased} - (
+    select count(*)::int from ${sessionBooking}
+    where ${sessionBooking.engagementId} = ${engagement.id}
+      and ${sessionBooking.status} <> 'cancelled'
+  ))`;
+
+  const rows = await exec
+    .select({
+      id: engagement.id,
+      studentProfileId: engagement.studentProfileId,
+      tutorCourseId: engagement.tutorCourseId,
+      courseOfferingId: engagement.courseOfferingId,
+      sessionsRemaining: remaining,
+      tutorProfileId: tutorProfile.id,
+      tutorUserId: tutorProfile.userId,
+      termEndsOn: term.endsOn,
+    })
+    .from(engagement)
+    .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
+    .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
+    .innerJoin(term, eq(term.id, courseOffering.termId))
+    .where(
+      and(
+        eq(engagement.id, params.engagementId),
+        eq(tutorProfile.institutionId, params.actor.institutionId),
+      ),
+    )
+    .limit(1);
+
+  const source = rows.at(0);
+  if (!source) throw new PurchaseError("That package no longer exists.");
+  if (source.studentProfileId !== params.actor.studentProfileId) {
+    throw new PurchaseError("That package is not yours.");
+  }
+  if (
+    !topUpWindowOpen({
+      sessionsRemaining: source.sessionsRemaining,
+      termEndsOn: new Date(`${source.termEndsOn}T12:00:00Z`),
+      now: new Date(),
+    })
+  ) {
+    throw new PurchaseError(
+      source.sessionsRemaining > 0
+        ? "You still have sessions left on that package."
+        : "The term is too far out for a single session — buy a package.",
+    );
+  }
+
+  return source;
+}
+
+/** The times a top-up can be booked at, from the tutor the package already has. */
+export async function slotsForTopUp(params: {
+  actor: Actor;
+  engagementId: string;
+}): Promise<Date[]> {
+  const source = await topUpSource(db, params);
+
+  return availableSlots({
+    tutorProfileId: source.tutorProfileId,
+    institutionId: params.actor.institutionId,
+  });
+}
+
+/**
+ * One more session with a tutor a student has already finished a package with.
+ *
+ * A separate engagement rather than sessions appended to the old one: the paid
+ * package is a closed record, and stretching `sessionsPurchased` after the fact
+ * would reprice delivered sessions — `perSessionMinor` divides price paid by
+ * sessions purchased, so every past session on that package would silently
+ * become worth less. A new engagement keeps both records true.
+ *
+ * `matchRequestId` stays null. The column is nullable for exactly this: a
+ * renewal has no new request, because the tutor already said yes and making a
+ * student ask again is friction with no signal in it.
+ *
+ * Top-ups chain, deliberately. A booked-but-unheld session leaves nothing left
+ * to book, so a second one can be bought before the first happens — which is
+ * what a student wanting two sessions in finals week actually needs. Each is
+ * its own paid engagement, so nothing about the first is repriced.
+ */
+export async function purchaseTopUp(params: {
+  actor: Actor;
+  engagementId: string;
+  slotStartsAt: Date;
+}): Promise<{ engagementId: string }> {
+  const option = topUpOption();
+
+  return db.transaction(async (tx) => {
+    const source = await topUpSource(tx, params);
+
+    if (source.tutorUserId === params.actor.userId) {
+      throw new PurchaseError("You cannot buy a session from yourself.");
+    }
+
+    // TODO(stripe): take payment here, before any row is written, same as
+    // `purchasePackage`.
+
+    const [created] = await tx
+      .insert(engagement)
+      .values({
+        studentProfileId: source.studentProfileId,
+        tutorCourseId: source.tutorCourseId,
+        courseOfferingId: source.courseOfferingId,
+        kind: "top_up",
+        // No anchor: a top-up is bought against the end of term, not against a
+        // specific exam, and inventing one would put a false date on a screen.
+        anchorExamId: null,
+        sessionsPurchased: option.sessions,
+        pricePaidMinor: option.priceMinor,
+      })
+      .returning({ id: engagement.id });
+
+    await tx.insert(sessionBooking).values({
+      engagementId: created.id,
+      scheduledAt: params.slotStartsAt,
+      durationMinutes: SESSION_MINUTES,
+      confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
+    });
+
     await record(tx, [
       {
         engagementId: created.id,

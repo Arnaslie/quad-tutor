@@ -97,6 +97,11 @@ export const ledgerEntryType = pgEnum("ledger_entry_type", [
 export const packageKind = pgEnum("package_kind", [
   "exam_anchored", // default: ~4 sessions to the next exam
   "through_final", // discounted upsell
+  // One session, full price, renewal only. It exists for the tail of the term,
+  // where a package would sell sessions the term has no room for. Never
+  // offered at a first purchase — see billing/pricing.ts for why a cold
+  // one-off and a top-up are different products.
+  "top_up",
 ]);
 
 /* -------------------------------------------------------------------------- */

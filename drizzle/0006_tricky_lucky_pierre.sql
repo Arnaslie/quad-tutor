@@ -1,0 +1,1 @@
+ALTER TYPE "public"."package_kind" ADD VALUE 'top_up';
