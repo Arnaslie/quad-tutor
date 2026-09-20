@@ -6,15 +6,21 @@
  * in CLAUDE.md.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { course, courseOffering, term, tutorCourse } from "@/server/db/schema";
+import {
+  course,
+  courseOffering,
+  matchRequest,
+  professor,
+  term,
+  tutorCourse,
+  tutorProfile,
+  user,
+} from "@/server/db/schema";
 
 import { rankCandidates, type Candidate, type ScoredCandidate } from "./score";
-
-/** How many tutors a student may have pending requests with at once. */
-export const MAX_PARALLEL_ASKS = 3;
 
 /** Requests expire at 12h — a student with an exam on Thursday cannot wait a day. */
 export const REQUEST_EXPIRY_HOURS = 12;
@@ -24,8 +30,23 @@ export const REQUEST_EXPIRY_HOURS = 12;
  * not just the list. 0 → demand capture, 1–2 → single reveal, 3+ → deck.
  * See docs/decisions.md.
  */
+/**
+ * What a card shows. Deliberately absent: any quality score, star rating or
+ * badge. The score is hidden and ranking is the only place it is expressed —
+ * see the rejected-alternatives section of docs/decisions.md.
+ */
+export type DeckCard = ScoredCandidate & {
+  tutorProfileId: string;
+  tutorName: string;
+  headline: string | null;
+  bio: string | null;
+  /** The professor the tutor took it under — the wedge, stated plainly. */
+  takenUnderProfessorName: string | null;
+  takenTermName: string;
+};
+
 export type Deck = {
-  candidates: ScoredCandidate[];
+  candidates: DeckCard[];
   presentation: "demand_capture" | "single_reveal" | "deck";
 };
 
@@ -44,6 +65,19 @@ export function presentationFor(count: number): Deck["presentation"] {
 export async function buildDeck(params: {
   courseOfferingId: string;
   institutionId: string;
+  /**
+   * The student looking at the deck. Their own tutor profile is filtered out.
+   *
+   * Required, not optional: on a peer campus the same person being on both
+   * sides is routine, and a forgotten argument here is not a missing filter,
+   * it is a student who can book themselves. Every deck has a signed-in
+   * viewer, so there is no caller this costs.
+   *
+   * Note the supply-count consequence: a course whose only tutor is the
+   * viewer is a zero-tutor deck *for them*, and `presentationFor` turns that
+   * into demand capture rather than an empty list.
+   */
+  viewerUserId: string;
 }): Promise<Deck> {
   const offering = await db
     .select({
@@ -71,15 +105,29 @@ export async function buildDeck(params: {
       gradeEarned: tutorCourse.gradeEarned,
       takenUnderProfessorId: tutorCourse.takenUnderProfessorId,
       takenTermStartsOn: term.startsOn,
+      takenTermName: term.name,
       scoreSampleCount: tutorCourse.scoreSampleCount,
       scorePosteriorMeanBp: tutorCourse.scorePosteriorMean,
+      recentSilentExpiries: silentExpiries,
+      tutorProfileId: tutorProfile.id,
+      tutorName: user.name,
+      headline: tutorProfile.headline,
+      bio: tutorProfile.bio,
+      takenUnderProfessorName: professor.name,
     })
     .from(tutorCourse)
     .innerJoin(term, eq(term.id, tutorCourse.takenTermId))
+    .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .innerJoin(user, eq(user.id, tutorProfile.userId))
+    .leftJoin(professor, eq(professor.id, tutorCourse.takenUnderProfessorId))
     .where(
       and(
         eq(tutorCourse.courseId, target.courseId),
         eq(tutorCourse.status, "active"),
+        // Redundant with the course scope above, but a tutor profile is the
+        // other way a row could belong to another campus.
+        eq(tutorProfile.institutionId, params.institutionId),
+        ne(tutorProfile.userId, params.viewerUserId),
       ),
     );
 
@@ -92,11 +140,40 @@ export async function buildDeck(params: {
       row.takenUnderProfessorId === target.professorId,
     scoreSampleCount: row.scoreSampleCount,
     scorePosteriorMeanBp: row.scorePosteriorMeanBp,
+    recentSilentExpiries: row.recentSilentExpiries,
   }));
 
-  const ranked = rankCandidates(candidates);
+  // Ranking is pure and knows only the scoring inputs, so the display fields
+  // are re-attached afterwards rather than passed through `score.ts`.
+  const display = new Map(rows.map((row) => [row.tutorCourseId, row]));
+
+  const ranked: DeckCard[] = rankCandidates(candidates).map((scored) => {
+    const row = display.get(scored.tutorCourseId)!;
+    return {
+      ...scored,
+      tutorProfileId: row.tutorProfileId,
+      tutorName: row.tutorName,
+      headline: row.headline,
+      bio: row.bio,
+      takenUnderProfessorName: row.takenUnderProfessorName,
+      takenTermName: row.takenTermName,
+    };
+  });
+
   return { candidates: ranked, presentation: presentationFor(ranked.length) };
 }
+
+/**
+ * Requests this tutor let run out rather than passing on — a correlated scalar
+ * subquery, so a tutor with no history costs nothing extra. Cast to `int`
+ * because Postgres `count()` is a bigint and would arrive as a string.
+ */
+const silentExpiries = sql<number>`(
+  select count(*)::int
+  from ${matchRequest}
+  where ${matchRequest.tutorCourseId} = ${tutorCourse.id}
+    and ${matchRequest.status} = 'expired'
+)`;
 
 /** Approximate: two terms per academic year. Good enough for recency decay. */
 function termsBetween(takenStartsOn: string, offeringStartsOn: string): number {

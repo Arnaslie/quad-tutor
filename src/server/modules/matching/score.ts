@@ -20,6 +20,12 @@ export type RankingWeights = {
   recencyDecayPerTerm: number;
   /** How far the posterior can move a tutor once n > 0. */
   posteriorWeight: number;
+  /**
+   * Penalty per request the tutor let expire in silence. An explicit pass costs
+   * nothing, ever — punishing declines makes tutors accept students they cannot
+   * serve, which is worse for everyone than a fast no.
+   */
+  silentExpiryPenalty: number;
 };
 
 /** Seed values. These belong in a database row so they can be tuned without a deploy. */
@@ -29,6 +35,7 @@ export const DEFAULT_WEIGHTS: RankingWeights = {
   gradeAMinus: 12,
   recencyDecayPerTerm: 5,
   posteriorWeight: 30,
+  silentExpiryPenalty: 15,
 };
 
 export type Candidate = {
@@ -40,6 +47,8 @@ export type Candidate = {
   scoreSampleCount: number;
   /** Basis points (0–10000), or null while n = 0. */
   scorePosteriorMeanBp: number | null;
+  /** Requests left to expire rather than declined. Counted by the caller. */
+  recentSilentExpiries: number;
 };
 
 export type ScoredCandidate = Candidate & { score: number };
@@ -60,6 +69,7 @@ export function scoreCandidate(
   if (candidate.matchesProfessor) score += weights.professorMatch;
   score += gradePoints(candidate.gradeEarned, weights);
   score -= candidate.termsSinceTaken * weights.recencyDecayPerTerm;
+  score -= candidate.recentSilentExpiries * weights.silentExpiryPenalty;
 
   // Only consulted once the tutor has a delivered-session history.
   if (candidate.scoreSampleCount > 0 && candidate.scorePosteriorMeanBp !== null) {
