@@ -119,3 +119,4 @@ earned.
   leaves the trap armed and the build fails on `fs`/`net`/`tls`
 - DRY - Don't repeat yourself
 - KISS - Keep it simple stupid
+- Chill with the comments, 95% of what i see isn't needed
