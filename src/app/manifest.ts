@@ -13,14 +13,14 @@ import type { MetadataRoute } from "next";
  * redirects — to sign-in when signed out, to `/courses` when signed in — and
  * launching into a redirect costs a frame of nothing on a cold start.
  *
- * The mark is a placeholder: crimson field, white "RT". It is deliberately not
+ * The mark is a placeholder: crimson field, white "QT". It is deliberately not
  * a logo, and it is here so the installed app is not wearing the framework's
  * default icon. Replace `public/icon-*.png` when there is a real one.
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Roll Tutor",
-    short_name: "Roll Tutor",
+    name: "Quad Tutor",
+    short_name: "Quad Tutor",
     description:
       "Peer tutors who already took your course — under your professor.",
     start_url: "/courses",
