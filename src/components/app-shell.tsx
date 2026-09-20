@@ -41,7 +41,7 @@ export function AppShell({
             href={home}
             className="shrink-0 rounded-lg text-sm font-semibold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:text-base"
           >
-            Tutor Finder
+            Roll Tutor
           </Link>
 
           {/*

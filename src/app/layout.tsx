@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Tutor Finder",
-    template: "%s · Tutor Finder",
+    default: "Roll Tutor",
+    template: "%s · Roll Tutor",
   },
   description:
     "Find a tutor who already took your course, under your professor, at the University of Alabama.",

@@ -35,7 +35,7 @@ export default async function SignInPage(props: PageProps<"/sign-in">) {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Tutor Finder</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Roll Tutor</h1>
         <p className="text-base text-muted">
           Peer tutors who already took your course — under your professor.
         </p>

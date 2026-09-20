@@ -18,7 +18,7 @@ type State =
  * the last successful send means they do not, and the intake stays under its
  * budget on the second visit as well as the first.
  */
-const NAME_KEY = "tutor-finder:name";
+const NAME_KEY = "roll-tutor:name";
 
 export function SignInForm() {
   const nameId = useId();
@@ -105,7 +105,7 @@ export function SignInForm() {
       <Field
         id={emailId}
         label="University email"
-        hint="Tutor Finder is live at the University of Alabama. Your .edu address is the verification."
+        hint="Roll Tutor is live at the University of Alabama. Your .edu address is the verification."
         error={state.status === "error" ? state.message : undefined}
       >
         <Input
