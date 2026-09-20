@@ -46,6 +46,16 @@ npm run db:seed      # idempotent local campus: courses, professors, exams, tuto
 npm run db:demo      # re-runnable: drives the real functions to a populated session board
 ```
 
+The deadlines in the product (12h request expiry, 24h confirmation window, term-end
+refunds) are only as accurate as the sweep that enforces them. `GET /api/cron` runs it,
+guarded by `CRON_SECRET` and scheduled in `vercel.json`. The reads call the same sweeps
+opportunistically, so nothing breaks without a scheduler — deadlines just drift until
+someone loads a page. Locally:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron
+```
+
 `db:seed` and `db:demo` run under `--import tsx`, not plain `node`: Node's type
 stripping uses ESM resolution and `schema.ts` imports `./auth-schema` without an
 extension. The project is not ESM either, so top-level `await` does not transform —
