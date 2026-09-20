@@ -48,7 +48,8 @@ npm run db:demo      # re-runnable: drives the real functions to a populated ses
 
 The deadlines in the product (12h request expiry, 24h confirmation window, term-end
 refunds) are only as accurate as the sweep that enforces them. `GET /api/cron` runs it,
-guarded by `CRON_SECRET` and scheduled in `vercel.json`. The reads call the same sweeps
+guarded by `CRON_SECRET` and scheduled by `.github/workflows/cron.yml`
+(Vercel's free tier caps crons at once a day, which is useless for a 12h deadline). The reads call the same sweeps
 opportunistically, so nothing breaks without a scheduler — deadlines just drift until
 someone loads a page. Locally:
 

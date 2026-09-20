@@ -1,0 +1,66 @@
+# The scheduled sweep.
+#
+# The app exposes the work at GET /api/cron; this only decides when it runs.
+# Vercel's free tier caps crons at once a day, which would make a 12-hour
+# request deadline accurate to within a day — useless. GitHub Actions schedules
+# are free at any frequency, so the timer lives here and the endpoint stays
+# hosting-agnostic.
+#
+# Scheduled workflows are best-effort: GitHub delays them under load, sometimes
+# by tens of minutes, and skips them entirely on a repository with no activity
+# for 60 days. Neither matters for deadlines measured in hours, and nothing
+# breaks when a run is missed — every sweep is idempotent and the next one
+# catches up. Do not put anything here that needs to happen at an exact minute.
+#
+# Schedules are UTC. That is not a compromise: every deadline compares
+# timestamptz against now(), so the zone the scheduler thinks in changes when
+# the sweep notices, never what it decides.
+name: cron
+
+on:
+  schedule:
+    # Every 15 minutes. A 12-hour deadline is then accurate to a quarter hour.
+    - cron: "*/15 * * * *"
+  # So a human can run it without waiting, and to prove the secret works.
+  workflow_dispatch:
+
+# Two runs sweeping at once is safe but pointless — they would each find what
+# the other already did. A delayed run should be dropped, not queued behind.
+concurrency:
+  group: cron
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run the sweep
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APP_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "APP_URL and CRON_SECRET must be set as repository secrets."
+            exit 1
+          fi
+
+          # Separate the body from the status so a 401 fails the run loudly
+          # rather than passing with an error page in the logs.
+          response=$(mktemp)
+          status=$(curl --silent --show-error --fail-with-body \
+            --max-time 120 \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            --output "${response}" \
+            --write-out "%{http_code}" \
+            "${APP_URL}/api/cron") || true
+
+          echo "status: ${status}"
+          cat "${response}"
+          echo
+
+          if [ "${status}" != "200" ]; then
+            exit 1
+          fi
