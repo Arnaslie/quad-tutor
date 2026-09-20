@@ -6,7 +6,16 @@ import { eq } from "drizzle-orm";
 
 import { db } from "./db";
 import * as schema from "./db/schema";
-import { institution } from "./db/schema";
+import { institution, studentProfile } from "./db/schema";
+
+/**
+ * Surfaced to the person on the sign-in screen, so it is exported rather than
+ * inlined: `src/app/(auth)/sign-in/page.tsx` matches on it to decide that an
+ * `?error=` it was handed is our own wording and safe to render. Two copies of
+ * this string would drift and quietly downgrade the message to the generic one.
+ */
+export const NAME_REQUIRED_MESSAGE =
+  "Add your name — tutors see it when you ask them for help.";
 
 /** Signup is gated on institutional email. Campus membership is the product boundary. */
 async function institutionForEmail(email: string) {
@@ -41,6 +50,37 @@ export const auth = betterAuth({
       if (!match) {
         return { error: "Sign up with your university email address." };
       }
+
+      // The sign-in form marks this required, but `required` is a hint to a
+      // cooperative browser — the endpoint is a reachable POST. A user row with
+      // no name renders as a card from nobody in a tutor's inbox, so the
+      // guarantee has to live at the boundary rather than in the markup.
+      const name = typeof user.name === "string" ? user.name.trim() : "";
+      if (!name) return { error: NAME_REQUIRED_MESSAGE };
+    },
+  },
+
+  /**
+   * Every user starts as a student. The profile is created with the user row
+   * rather than lazily on first page load, so `currentActor` can inner-join it
+   * and no read path has to carry a write side-effect.
+   *
+   * `validateUserInfo` has already refused any address outside a known campus,
+   * so a missing institution here is a bug, not a user error.
+   */
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (created) => {
+          const match = await institutionForEmail(created.email);
+          if (!match) return;
+
+          await db
+            .insert(studentProfile)
+            .values({ userId: created.id, institutionId: match.id })
+            .onConflictDoNothing();
+        },
+      },
     },
   },
 

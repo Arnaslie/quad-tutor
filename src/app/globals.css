@@ -1,26 +1,74 @@
 @import "tailwindcss";
 
+/**
+ * Design tokens.
+ *
+ * Two definitions per token — light and dark — and everything downstream reads
+ * the token, never a raw hex. `@theme inline` makes each one a Tailwind utility
+ * (`bg-surface`, `text-muted`, `border-border`) that resolves the CSS variable at
+ * use time, so the dark-mode swap below is the only place a colour changes.
+ *
+ * Crimson is the campus accent. It is used for one thing per screen — the action
+ * you want taken — and never for decoration. A student is about to spend $140
+ * here; loud is the wrong register.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --background: #fafaf9;
+  --surface: #ffffff;
+  --surface-sunken: #f4f4f2;
+  --foreground: #18181b;
+  --muted: #6b6b76;
+  --border: #e4e4e1;
+  --accent: #9e1b32;
+  --accent-hover: #86162a;
+  --accent-foreground: #ffffff;
+  --accent-soft: #fceef1;
+  --danger: #b42318;
+  --danger-soft: #fef3f2;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #101012;
+    --surface: #18181b;
+    --surface-sunken: #202024;
+    --foreground: #f4f4f5;
+    --muted: #a1a1ab;
+    --border: #2a2a2f;
+    --accent: #e0576f;
+    --accent-hover: #ec6f84;
+    --accent-foreground: #1a0309;
+    --accent-soft: #2a1119;
+    --danger: #f87171;
+    --danger-soft: #2a1414;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* The bottom tab bar sits on the home indicator without this. */
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
