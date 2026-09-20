@@ -389,6 +389,13 @@ export const engagement = pgTable(
       .notNull()
       .references(() => courseOffering.id),
 
+    /**
+     * The accepted request this package came out of. Unique, so a double
+     * submit cannot buy twice; null for a renewal, which has no new request —
+     * a student re-upping with a tutor they already have does not re-ask.
+     */
+    matchRequestId: uuid("match_request_id").references(() => matchRequest.id),
+
     kind: packageKind("kind").notNull().default("exam_anchored"),
     anchorExamId: uuid("anchor_exam_id").references(() => exam.id),
 
@@ -404,6 +411,7 @@ export const engagement = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (t) => [
+    uniqueIndex("engagement_match_request_idx").on(t.matchRequestId),
     index("engagement_student_idx").on(t.studentProfileId, t.status),
     index("engagement_tutor_course_idx").on(t.tutorCourseId),
   ],
@@ -424,9 +432,52 @@ export const sessionBooking = pgTable(
 
     status: sessionStatus("status").notNull().default("scheduled"),
 
+    /**
+     * When a cancellation happened and who did it.
+     *
+     * `status` alone records that a session was cancelled but not when or by
+     * whom, and that is not recoverable afterwards. The tutor-side quality
+     * score is deferred to V1 by design, but the schema and the stats job ship
+     * now precisely so the data has accumulated before the ranker exists — a
+     * tutor's late cancel is real and does matter, and today it leaves no trace
+     * at all.
+     *
+     * `cancelledByUserId` identifies a person, so: it is raw material for the
+     * per-course stats job and nothing else. It must never become an input to
+     * anything that ranks or gates on its own. The role (student or tutor) is
+     * derivable by joining through the engagement, so this stores the fact and
+     * leaves the interpretation to the reader.
+     */
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledByUserId: text("cancelled_by_user_id").references(() => user.id),
+
     /** Mutual confirm. Opposed incentives — see docs/decisions.md. */
     studentConfirmedAt: timestamp("student_confirmed_at", { withTimezone: true }),
     tutorConfirmedAt: timestamp("tutor_confirmed_at", { withTimezone: true }),
+    /**
+     * The other half of mutual confirm: "no, it did not happen." Opposed to the
+     * columns above and never set together with them.
+     *
+     * Recording the denial rather than flipping `status` straight to `disputed`
+     * is what keeps prevention ahead of penalty: one party clicking cannot
+     * freeze the session before the other has had the window to answer, and a
+     * `no_showed` fact is only written once that window has actually lapsed —
+     * never from a one-sided claim.
+     */
+    studentDeniedAt: timestamp("student_denied_at", { withTimezone: true }),
+    tutorDeniedAt: timestamp("tutor_denied_at", { withTimezone: true }),
+    /**
+     * Free text from whoever denied, for the human resolving a contested
+     * session. That is the whole of its purpose.
+     *
+     * It must never be read by `reliability/standing.ts`, by `matching/score.ts`,
+     * or by anything else that ranks, gates or scores either side. Reliability
+     * is timestamped facts only, and a free-text field is precisely the thing
+     * that erodes that invariant later — one `ilike` in a ranking query and the
+     * platform is quietly scoring people on someone's prose. The two
+     * `*DeniedAt` timestamps above are facts and carry no such restriction.
+     */
+    denialNote: text("denial_note"),
     confirmationWindowEndsAt: timestamp("confirmation_window_ends_at", {
       withTimezone: true,
     }),
@@ -476,4 +527,55 @@ export const ledgerEntry = pgTable(
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("ledger_entry_engagement_idx").on(t.engagementId, t.occurredAt)],
+);
+
+/* -------------------------------------------------------------------------- */
+/* scheduling + demand capture                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Weekly recurring windows, stored as minutes from midnight in the
+ * institution's timezone. A slot is picked from these *after* a tutor accepts —
+ * "charge only after the tutor accepts and a slot is picked" needs somewhere for
+ * the slot to come from, and asking the pair to negotiate over chat puts the
+ * booking outside the ledger.
+ *
+ * No `institutionId`: it is reached through `tutorProfile`, which is how every
+ * other child table in this schema resolves the tenant key.
+ */
+export const tutorAvailability = pgTable(
+  "tutor_availability",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tutorProfileId: uuid("tutor_profile_id")
+      .notNull()
+      .references(() => tutorProfile.id),
+    /** 0 = Sunday, matching `Date.prototype.getDay`. */
+    weekday: integer("weekday").notNull(),
+    startMinute: integer("start_minute").notNull(),
+    endMinute: integer("end_minute").notNull(),
+  },
+  (t) => [index("tutor_availability_tutor_idx").on(t.tutorProfileId)],
+);
+
+/**
+ * Supply count 0 is a real state on a fresh campus, and the decision record
+ * calls for demand capture rather than an empty screen. This is the capture:
+ * who wanted a tutor for which offering, and when.
+ */
+export const demandSignal = pgTable(
+  "demand_signal",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    studentProfileId: uuid("student_profile_id")
+      .notNull()
+      .references(() => studentProfile.id),
+    courseOfferingId: uuid("course_offering_id")
+      .notNull()
+      .references(() => courseOffering.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("demand_signal_unique_idx").on(t.studentProfileId, t.courseOfferingId),
+  ],
 );

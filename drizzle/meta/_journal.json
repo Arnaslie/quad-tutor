@@ -15,6 +15,34 @@
       "when": 1789853564122,
       "tag": "0001_awesome_lorna_dane",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789855626446,
+      "tag": "0002_common_natasha_romanoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789855919270,
+      "tag": "0003_glossy_blue_shield",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789857152451,
+      "tag": "0004_broad_thundra",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789857488444,
+      "tag": "0005_harsh_sabra",
+      "breakpoints": true
     }
   ]
 }

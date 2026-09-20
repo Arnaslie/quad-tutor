@@ -1,0 +1,3 @@
+ALTER TABLE "engagement" ADD COLUMN "match_request_id" uuid;--> statement-breakpoint
+ALTER TABLE "engagement" ADD CONSTRAINT "engagement_match_request_id_match_request_id_fk" FOREIGN KEY ("match_request_id") REFERENCES "public"."match_request"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "engagement_match_request_idx" ON "engagement" USING btree ("match_request_id");
