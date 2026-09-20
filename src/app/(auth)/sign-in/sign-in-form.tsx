@@ -149,13 +149,14 @@ function LinkSent({ email, onRestart }: { email: string; onRestart: () => void }
         <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-border bg-surface-sunken p-5">
           <h3 className="text-sm font-medium">Developing locally?</h3>
           <p className="text-sm text-muted">
-            No email provider is wired up yet. The link was printed to the
-            terminal running{" "}
-            <code className="rounded bg-background px-1 py-0.5 font-mono text-[0.85em]">npm run dev</code>. Look
-            for the two lines beginning{" "}
-            <code className="rounded bg-background px-1 py-0.5 font-mono text-[0.85em]">[magic-link]</code> and
-            open the URL on the second one. If you have lost the terminal, the
-            same lines are in{" "}
+            With no{" "}
+            <code className="rounded bg-background px-1 py-0.5 font-mono text-[0.85em]">RESEND_API_KEY</code> set,
+            mail is printed instead of sent. Look in the terminal running{" "}
+            <code className="rounded bg-background px-1 py-0.5 font-mono text-[0.85em]">npm run dev</code> for
+            the lines beginning{" "}
+            <code className="rounded bg-background px-1 py-0.5 font-mono text-[0.85em]">[email]</code> and open
+            the link in the body. If you have lost the terminal, the same lines
+            are in{" "}
             <code className="rounded bg-background px-1 py-0.5 font-mono text-[0.85em]">.next/dev/logs/next-development.log</code>.
           </p>
         </div>

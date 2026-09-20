@@ -5,6 +5,7 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { eq } from "drizzle-orm";
 
 import { db } from "./db";
+import { sendEmail } from "./modules/notifications/email";
 import * as schema from "./db/schema";
 import { institution, studentProfile } from "./db/schema";
 
@@ -96,12 +97,24 @@ export const auth = betterAuth({
           });
         }
 
-        // No email provider yet. Logging the link keeps local sign-in working
-        // without pulling in a vendor before there is a product to send from.
-        if (process.env.NODE_ENV === "production") {
-          throw new Error("sendMagicLink has no email provider configured");
-        }
-        console.log(`\n[magic-link] ${email}\n[magic-link] ${url}\n`);
+        // `sendEmail` decides how: Resend when a key is configured, the console
+        // in development when one is not, and a throw in production rather than
+        // dropping a link somebody is waiting on.
+        await sendEmail({
+          to: email,
+          subject: "Your Quad Tutor sign-in link",
+          // Plain text on purpose. A sign-in link is read in two seconds and
+          // has one job, so there is nothing for markup to add, and text
+          // renders identically in every client and filter.
+          text: [
+            "Sign in to Quad Tutor:",
+            "",
+            url,
+            "",
+            "The link works once and expires shortly.",
+            "If you did not ask for it, ignore this — nobody can sign in without it.",
+          ].join("\n"),
+        });
       },
     }),
   ],
