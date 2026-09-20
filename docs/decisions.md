@@ -5,7 +5,7 @@ Full source analysis in `docs/research/`. Where a decision came from independent
 agreement between reviewers who could not see each other's work, that is noted — it
 is the strongest signal in here.
 
-Last updated: 2026-09-18.
+Last updated: 2026-09-19.
 
 ---
 
@@ -66,12 +66,45 @@ first."
 Stating the count up front turns thinness into completeness: *"that's all of them"*
 reads honest, *"that's all we found"* reads broken.
 
+A consequence of that rule, made real by the deck filtering out the viewer's own
+tutor profile: **the same offering can present differently to different students.**
+A course with three tutors, one of whom is the student looking at it, is a
+`single_reveal` for her and a `deck` for everyone else. That is the rule working
+rather than an artifact — the count stated has to be the count the viewer can
+actually ask, or the honesty the rule buys is spent. It does mean the presentation
+is a property of (offering, viewer), not of the offering.
+
 **Double opt-in.** The tutor accepts too. On the tutor side an explicit pass costs
 nothing, ever; silent expiry carries a ranking penalty. Requests expire at 12h.
 Punishing declines makes tutors accept students they cannot serve.
 
 **Charge only after the tutor accepts and a slot is picked** — never at request time,
 or double opt-in generates a refund queue in week one.
+
+**Attendance settles on facts, and money defaults where silence is cheapest to
+undo.** This was the open adversarial-confirmation question; it is now built, and the
+shape is worth stating because each half is load-bearing:
+
+- Both parties answer. Two confirmations settle it; the confirmation window is 24h
+  and a lapse auto-releases to *attended*, which pays the tutor.
+- **Auto-release moves money but writes no reliability fact.** Money can default on
+  silence because a wrong default is refundable. A fact cannot: an `attended` row
+  minted from nobody answering is fiction, and it would quietly clear a student's
+  strikes.
+- Denial is asymmetric by role. A tutor's denial means *the student did not show*; a
+  student's means *it did not happen*. That asymmetry is what lets a `no_showed` fact
+  exist without anyone rendering a subjective judgement.
+- Confirm against deny is a dispute. It holds — no money moves, and no sweep ever
+  resolves it. A human does, at launch volume.
+- **The two answers are shown to both parties; the written note is not.** Who said
+  what and when are timestamped facts, and each side is entitled to them. The
+  `denial_note` is one party's account kept for whoever settles the case: putting the
+  accusation in front of the accused turns a disagreement into a fight, on a campus
+  where these two people have a class together on Thursday.
+
+The residual risk is unchanged and unsolved: this is still the weak point of the
+no-video decision, and it is the reason the dispute path exists rather than a
+tiebreaker rule.
 
 **Intake under 45 seconds.** Course selection is the primary input (schedule
 screenshot → OCR, with catalog type-ahead as fallback); section and professor are a
@@ -107,6 +140,24 @@ not signup, so friction doesn't land on the bottleneck.
 
 **Sessions are wherever the pair chooses. No video product.** Attendance is confirmed
 in-app by both parties.
+
+**One mobile-first responsive Next.js app — not a separate native client.** Every
+screen is authored at 390px and laddered up; parity between phone and desktop is
+structural rather than a checklist, because there is one route tree and one build. A
+second Expo/React Native client would mean a second auth integration, JSON endpoints
+in place of server actions, and roughly double the first-draft time, to reach students
+who are already on the web app.
+
+**Stripe is settled for the MVP but absent from the first draft.** Package purchase
+writes real double-entry ledger rows now — deferred on purchase, recognised per
+delivered session, tutor pay held until earned — with a single marked seam in
+`engagements/purchase.ts` where the PaymentIntent goes. The money invariants are the
+part that outlives any payment provider, so they get built and exercised first.
+
+**Campus membership is gated on `crimson.ua.edu`**, the UA *student* domain, matched
+against `institution.email_domain`. One domain per institution: supporting several
+means that column stops being a single text field, which is not worth doing before a
+campus needs it.
 
 ---
 
@@ -165,12 +216,14 @@ leakage concentrates entirely at the renewal boundary. Exam-anchored 4-session
 packages therefore create 3–4 leakage moments per semester where "through the final"
 creates one. Conversion and retention pull in opposite directions here. Not resolved.
 
-**Attendance confirmation is adversarial.** With mutual confirm *and* prepaid
-packages, the tutor wants the session marked attended (they get paid) and the student
-is better off denying it (the session returns to their package). This is the weak
-point of the no-video decision. Likely shape: T-12h confirm with auto-release, default
-to *attended* after a window, explicit dispute path, disputes flagged for human review
-at launch volume.
+**A late cancel costs the student nothing and pays the tutor nothing.** It writes the
+timestamped fact and moves no money. Charging for it was rejected because a fee is an
+unrecoverable consequence and reliability consequences must always be recoverable —
+but that leaves a tutor who blocked 9pm on a Tuesday and was cancelled at 8pm earning
+zero. With 15 tutors in week one, tutor churn is the failure mode that kills a campus;
+student leakage is not. The alternative is to consume the session and pay the tutor,
+which trades an unrecoverable money consequence for supply protection. Revisit with
+real cancellation data, deliberately — this is currently a default, not a decision.
 
 **Disintermediation generally** — now the top business risk, and not solvable by
 engineering. Two adults on one campus with no safeguarding reason to stay on-platform.
@@ -223,6 +276,15 @@ supply and social distribution all reset at campus #2; only the product and the
 playbook transfer (~50–70% of the effort, estimated). Consequences: UA must be
 profitable standalone, the scaling constraint is launch labor rather than software,
 and the real asset to build at Alabama is a repeatable launch process.
+
+**Two places assume a single timezone, and they are the ones to fix first.** The
+campus IANA zone lives on `institution.timezone` and is read nowhere: slot generation
+in `engagements/purchase.ts` builds times in the server's local zone, and the UI
+formatters take `America/Chicago` from a `CAMPUS_TIME_ZONE` constant. Both are
+correct for one campus in Central time and both are marked. Every formatter already
+accepts a `timeZone` override, so the fix is to carry the zone on the actor rather
+than to rewrite the call sites — cheap now, and a silent wrong-time bug if it is
+found later by a student in Arizona.
 
 The instructive analogy is not Facebook — it's **Yik Yak**, which died of campus
 bubbles emptying at summer and graduation. That is precisely this product's

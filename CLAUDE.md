@@ -42,7 +42,14 @@ npm run typecheck    # tsc --noEmit
 npm run db:generate  # drizzle-kit: generate migration from schema
 npm run db:migrate   # drizzle-kit: apply migrations
 npm run db:studio    # drizzle-kit: browse data
+npm run db:seed      # idempotent local campus: courses, professors, exams, tutors
+npm run db:demo      # re-runnable: drives the real functions to a populated session board
 ```
+
+`db:seed` and `db:demo` run under `--import tsx`, not plain `node`: Node's type
+stripping uses ESM resolution and `schema.ts` imports `./auth-schema` without an
+extension. The project is not ESM either, so top-level `await` does not transform —
+both scripts wrap their body in `main()` for that reason.
 
 ## Structure
 
@@ -76,7 +83,14 @@ code string — or a renumbering forks a tutor's record.
 invalidates the entire value proposition, so the system has to know about it.
 
 **`(tutor, course)` is the core relationship, not `tutor`.** Someone can be excellent
-at Calc I and mediocre at Organic. Quality scores are per-course.
+at Calc I and mediocre at Organic. Quality scores are per-course. They are hidden, and
+hidden means **stripped server-side before anything crosses into a client component** —
+a server component serialises its props into the RSC payload, so a score that is merely
+never rendered is still one "view source" away from being a public rating. Map the
+scored row down to the narrow shape the card displays. The test for any field added to
+that shape: *could a student reconstruct an ordering from it?* A professor name, a term
+and a grade are facts about the pair and are the student's to see; a decayed recency
+weight or a sample count is the arithmetic performed on them, and is not.
 
 **A user can be both tutor and student.** On a peer campus this is routine, not an
 edge case. Keep the user/profile split and keep the score histories separate.
@@ -99,5 +113,9 @@ earned.
 - Server-side logic lives in `src/server/`, not in route handlers
 - Validate external input with Zod at the boundary
 - Prefer server components; reach for `"use client"` only where interaction requires it
+- A rule shared by a server module and a client form (eligible grades, availability
+  window validation) lives in its own module that imports nothing. The bundler follows
+  the import graph, not the symbol, so re-exporting it from a file that imports `db`
+  leaves the trap armed and the build fails on `fs`/`net`/`tls`
 - DRY - Don't repeat yourself
 - KISS - Keep it simple stupid
