@@ -183,9 +183,18 @@ export function viewerAction(params: {
 }
 
 /**
- * When the T-12h nudge is due. Prevention is the first line and the ordering
- * (confirm, then auto-release, then anything punitive) is a product principle.
+ * Not `LATE_CANCEL_HOURS`: a reminder at that boundary lands as free
+ * cancellation ends, which is a receipt rather than prevention.
  */
+export const REMINDER_HOURS = 24;
+
+/** Sessions booked closer than this carry their deadline in the booking mail. */
 export function reminderDueAt(scheduledAt: Date): Date {
-  return new Date(scheduledAt.getTime() - LATE_CANCEL_HOURS * 60 * 60 * 1000);
+  return new Date(scheduledAt.getTime() - REMINDER_HOURS * 60 * 60 * 1000);
+}
+
+/** A session booked inside its own reminder window needs no reminder: the
+ *  student picked that time a minute ago. */
+export function remindedAtForNewBooking(scheduledAt: Date, now = new Date()): Date | null {
+  return reminderDueAt(scheduledAt) <= now ? now : null;
 }

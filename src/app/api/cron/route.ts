@@ -26,8 +26,8 @@ import { timingSafeEqual } from "node:crypto";
 import { db } from "@/server/db";
 import { institution } from "@/server/db/schema";
 import { releaseLapsedConfirmations } from "@/server/modules/engagements/confirmation";
-import { remindersDue } from "@/server/modules/engagements/reads";
 import { runTermEndRefunds } from "@/server/modules/engagements/termEnd";
+import { runNotifications } from "@/server/modules/notifications/dispatch";
 import { expireStaleRequests } from "@/server/modules/matching/requests";
 
 /** Sweeps are small, but a term-end pass touches every closed package. */
@@ -71,18 +71,13 @@ export async function GET(request: Request) {
 
   let refunded = 0;
   let refundedMinor = 0;
-  let remindersPending = 0;
+  let notified = 0;
 
   for (const campus of campuses) {
     const refunds = await runTermEndRefunds(campus.id);
     refunded += refunds.length;
     refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
-    // TODO(notifications): there is no delivery channel yet, so this counts
-    // what a reminder job would send and sends nothing. Wiring a sender also
-    // needs a `reminded_at` column on `session_booking` — without one, a sweep
-    // every fifteen minutes would send the same reminder ninety-six times a
-    // day. Both halves land together or neither does.
-    remindersPending += (await remindersDue(campus.id)).length;
+    notified += await runNotifications(campus.id);
   }
 
   return Response.json({
@@ -90,7 +85,7 @@ export async function GET(request: Request) {
     released,
     refunded,
     refundedMinor,
-    remindersPending,
+    notified,
     campuses: campuses.length,
     tookMs: Date.now() - startedAt,
   });

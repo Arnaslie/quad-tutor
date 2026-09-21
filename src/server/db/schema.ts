@@ -365,6 +365,9 @@ export const matchRequest = pgTable(
     status: matchRequestStatus("status").notNull().default("pending"),
     /** 12h, not 24 — a student with an exam on Thursday cannot wait a day. */
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** One column per message; one cannot record two. */
+    tutorNotifiedAt: timestamp("tutor_notified_at", { withTimezone: true }),
+    studentNotifiedAt: timestamp("student_notified_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -483,6 +486,11 @@ export const sessionBooking = pgTable(
      * `*DeniedAt` timestamps above are facts and carry no such restriction.
      */
     denialNote: text("denial_note"),
+    /** "Settled", not "sent": a session booked inside its own reminder window
+     *  is born with `reminded_at` set. Stamped after a successful send, so a
+     *  failure retries on the next sweep. */
+    bookedNotifiedAt: timestamp("booked_notified_at", { withTimezone: true }),
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
     confirmationWindowEndsAt: timestamp("confirmation_window_ends_at", {
       withTimezone: true,
     }),

@@ -33,7 +33,7 @@ import type { Actor } from "@/server/modules/identity/actor";
 
 import { availableSlots, confirmationDeadline } from "./purchase";
 import { SessionError, lockSession, loadParticipation, type Executor } from "./access";
-import { SESSION_MINUTES, isLateCancel } from "./attendance";
+import { SESSION_MINUTES, isLateCancel, remindedAtForNewBooking } from "./attendance";
 
 /**
  * Sessions left to book. A cancelled booking does not count against the
@@ -199,6 +199,7 @@ export async function bookSession(params: {
         durationMinutes: SESSION_MINUTES,
         locationNote: params.locationNote ?? null,
         confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
+        remindedAt: remindedAtForNewBooking(params.slotStartsAt),
       })
       .returning({ id: sessionBooking.id });
 

@@ -35,7 +35,7 @@ import {
   type PackageKind,
 } from "@/server/modules/billing/pricing";
 
-import { SESSION_MINUTES } from "./attendance";
+import { SESSION_MINUTES, remindedAtForNewBooking } from "./attendance";
 
 export class PurchaseError extends Error {}
 
@@ -250,6 +250,7 @@ export async function purchasePackage(params: {
       scheduledAt: params.slotStartsAt,
       durationMinutes: SESSION_MINUTES,
       confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
+      remindedAt: remindedAtForNewBooking(params.slotStartsAt),
     });
 
     // Cash in, nothing earned. Recognition happens session by session.
@@ -397,6 +398,7 @@ export async function purchaseTopUp(params: {
       scheduledAt: params.slotStartsAt,
       durationMinutes: SESSION_MINUTES,
       confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
+      remindedAt: remindedAtForNewBooking(params.slotStartsAt),
     });
 
     await record(tx, [

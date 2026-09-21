@@ -1,24 +1,10 @@
 /**
- * Outbound email. One function, one provider, no abstraction over it.
+ * Outbound email via Resend, over `fetch` — the request is one POST, so an SDK
+ * would only add a version to keep current.
  *
- * Resend, called over plain `fetch` rather than through their SDK. The request
- * is a single POST with four fields, so a dependency would buy nothing but a
- * version to keep current. Swapping provider later means editing this file,
- * which is the same work an interface would have cost, minus the interface.
- *
- * Three behaviours, and the difference matters:
- *
- *   - Key configured: send it.
- *   - No key, development: log to the console. Local sign-in has always worked
- *     this way and still does, so nobody needs a Resend account to run this.
- *   - No key, production: throw. Silently dropping a magic link is worse than
- *     failing, because the person is left staring at "check your email" forever
- *     with nothing in any log to explain it.
- *
- * Delivery to `.edu` addresses is the whole job here, and university filters
- * are strict. That is a DNS problem, not a code one: SPF, DKIM and DMARC on the
- * sending domain. Without them a magic link lands in spam and sign-in appears
- * broken for reasons no amount of reading this file will reveal.
+ * With a key, send. Without one in development, log. Without one in
+ * production, throw: dropping a magic link silently leaves someone staring at
+ * "check your email" with nothing in any log.
  */
 
 export class EmailError extends Error {}
@@ -26,11 +12,10 @@ export class EmailError extends Error {}
 export type Email = {
   to: string;
   subject: string;
-  /** Plain text is the body. Mail that renders as text survives every client. */
   text: string;
 };
 
-/** Resend rejects a `from` that is not on a verified domain. */
+/** Must be on a domain verified with Resend, or every send is rejected. */
 function sender(): string {
   return process.env.EMAIL_FROM ?? "Quad Tutor <onboarding@resend.dev>";
 }
@@ -64,8 +49,7 @@ export async function sendEmail(message: Email): Promise<void> {
   });
 
   if (!response.ok) {
-    // Their body says which field was wrong, and losing it turns a typo in
-    // `EMAIL_FROM` into an unexplained failure.
+    // Their body names the bad field; losing it hides a typo in EMAIL_FROM.
     const detail = await response.text();
     throw new EmailError(`Resend refused the message (${response.status}): ${detail}`);
   }
