@@ -11,14 +11,6 @@ import { claimCourseAction, type ClaimState } from "./actions";
 
 const INITIAL: ClaimState = { status: "idle" };
 
-/**
- * The options come from `ELIGIBLE_GRADES`, the same list `isEligibleGrade`
- * checks against, so the picker and the server cannot disagree the day the bar
- * moves. The rule is stated in the hint rather than hidden behind a rejection:
- * a tutor who picks "B+" and waits three days to be told no has been wasted,
- * and so has the reviewer's time.
- */
-
 export function ClaimForm({
   courseId,
   courseCode,
@@ -56,8 +48,6 @@ export function ClaimForm({
         </Select>
       </Field>
 
-      {/* The professor is not a profile detail. An instructor change
-          invalidates the whole value proposition, so the system asks. */}
       <Field
         id={professorId}
         label="Who taught it?"

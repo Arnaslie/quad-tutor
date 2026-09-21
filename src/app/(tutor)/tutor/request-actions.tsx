@@ -10,15 +10,6 @@ import { respondToRequest, type RespondState } from "./actions";
 
 const INITIAL: RespondState = { status: "idle" };
 
-/**
- * The two answers to a request, and they are equals.
- *
- * An explicit pass costs a tutor nothing, ever — letting the clock run out is
- * what carries the ranking penalty. So `Pass` is a full-width button beside
- * `Accept`, not a link underneath it, and no copy here asks anyone to feel bad
- * about it. Punishing declines makes tutors accept students they cannot serve,
- * which is worse for the student than a fast no.
- */
 export function RequestActions({
   requestId,
   studentName,
@@ -40,11 +31,6 @@ export function RequestActions({
   );
 }
 
-/**
- * `useFormStatus` rather than the `pending` from `useActionState`: with two
- * submit buttons in one form, only this tells us which one was pressed, and a
- * tutor answering between classes should see which answer is in flight.
- */
 function Choices() {
   const { pending, data } = useFormStatus();
   const intent = data?.get("intent");
@@ -68,11 +54,6 @@ function Choices() {
   );
 }
 
-/**
- * Losing the race is the common non-answer here and it is not an error: the
- * student got a tutor, which is the point. Muted text, no danger colour, no
- * apology.
- */
 function Outcome({ state, studentName }: { state: RespondState; studentName: string }) {
   if (state.status === "accepted") {
     return (

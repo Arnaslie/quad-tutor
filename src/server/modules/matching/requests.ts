@@ -1,19 +1,3 @@
-/**
- * The ask. This module is where the central interaction decision lives, so the
- * reasoning is worth keeping next to the code (docs/decisions.md has the long
- * form):
- *
- * A right-swipe works because it is a cheap, parallel, non-exclusive signal —
- * not a choice. A single exclusive request turns it into a proposal and leaves
- * a student waiting on one busy 20-year-old while their exam is Thursday. So a
- * student asks up to three tutors at once, the first to accept wins, and the
- * rest withdraw automatically.
- *
- * Both directions of that are enforced here, in transactions, because both are
- * races: two tutors can accept in the same second, and a student can fire two
- * request batches from two tabs.
- */
-
 import { and, eq, inArray, lt, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
@@ -38,14 +22,6 @@ import { REQUEST_EXPIRY_HOURS } from "./candidates";
 
 export class RequestError extends Error {}
 
-/**
- * Silent expiry, swept lazily on read. A cron would be tidier but would be the
- * only scheduled job in the system; every path that cares about pending
- * requests calls this first, which is enough at campus scale.
- *
- * Expiry is deliberately distinct from `declined`: an explicit pass costs a
- * tutor nothing, letting the clock run out costs ranking.
- */
 export async function expireStaleRequests(): Promise<void> {
   await db
     .update(matchRequest)
@@ -62,13 +38,6 @@ export async function standingFor(actor: Actor): Promise<Standing> {
   return standingFrom(facts);
 }
 
-/**
- * Fire the batch. Returns how many landed — a student who re-asks a tutor they
- * already have pending is not an error, they just get no new row.
- *
- * The cap is checked inside the transaction against rows this statement can
- * actually see, so two tabs cannot each pass a "you have 0 pending" check.
- */
 export async function requestTutors(params: {
   actor: Actor;
   courseOfferingId: string;
@@ -80,8 +49,6 @@ export async function requestTutors(params: {
   const expiresAt = new Date(Date.now() + REQUEST_EXPIRY_HOURS * 60 * 60 * 1000);
 
   return db.transaction(async (tx) => {
-    // Lock the student's pending rows for the duration, so a concurrent batch
-    // blocks here rather than racing past the cap.
     const pending = await tx
       .select({ id: matchRequest.id, tutorCourseId: matchRequest.tutorCourseId })
       .from(matchRequest)
@@ -102,8 +69,6 @@ export async function requestTutors(params: {
     const alreadyAsked = new Set(pending.map((row) => row.tutorCourseId));
     const room = standing.parallelAskLimit - pending.length;
 
-    // Only tutors genuinely teaching this offering's course, on this campus.
-    // The client sends ids; it does not get to decide what they point at.
     const eligible = await tx
       .select({ id: tutorCourse.id })
       .from(tutorCourse)
@@ -115,11 +80,7 @@ export async function requestTutors(params: {
           eq(tutorCourse.status, "active"),
           eq(courseOffering.id, params.courseOfferingId),
           eq(tutorProfile.institutionId, params.actor.institutionId),
-          // Not yourself. `buildDeck` already hides the viewer's own profile,
-          // and this is the server refusing it regardless of what the deck
-          // showed — a student who tutors the course they are struggling in is
-          // a routine shape here, not an edge case, and a package bought from
-          // yourself is money moving in a circle minus the platform's cut.
+
           ne(tutorProfile.userId, params.actor.userId),
         ),
       );
@@ -144,11 +105,6 @@ export async function requestTutors(params: {
   });
 }
 
-/**
- * First acceptance wins. The loser of the race gets a clear message rather than
- * a second engagement, and every other pending ask for the same offering is
- * withdrawn in the same transaction.
- */
 export async function acceptRequest(params: {
   tutor: TutorActor;
   requestId: string;
@@ -184,16 +140,11 @@ export async function acceptRequest(params: {
     if (request.expiresAt.getTime() <= Date.now()) {
       throw new RequestError("That request expired.");
     }
-    // Belt and braces on the self-match. `buildDeck` cannot show it and
-    // `requestTutors` cannot create it, but rows predating those guards exist,
-    // and an accepted one puts a Buy button in front of a student. An
-    // engagement with the same person on both sides can never settle
-    // attendance — see the assertion in `engagements/access.ts`.
+
     if (request.studentUserId === params.tutor.userId) {
       throw new RequestError("You cannot tutor yourself.");
     }
 
-    // Did someone else get there first for this student and course?
     const winner = await tx
       .select({ id: matchRequest.id })
       .from(matchRequest)
@@ -232,7 +183,6 @@ export async function acceptRequest(params: {
   });
 }
 
-/** Free, always. A fast no is better for the student than a reluctant yes. */
 export async function declineRequest(params: {
   tutor: TutorActor;
   requestId: string;
@@ -265,19 +215,9 @@ export type StudentRequest = {
   offeringId: string;
   section: string | null;
   professorName: string | null;
-  /**
-   * Minutes until this ask lapses, computed here because the alternative is a
-   * `Date.now()` in a component — impure during render, and the 12h rule then
-   * lives in as many places as there are screens showing it. Negative once the
-   * sweep is due; zero-clamped for display.
-   */
+
   expiresInMinutes: number;
-  /**
-   * The package this request already became, if it has. An accepted request
-   * with an engagement has been paid for; one without still needs buying, and
-   * without this the screen cannot tell those apart and goes on offering to
-   * charge someone who has already paid.
-   */
+
   engagementId: string | null;
 };
 
@@ -319,7 +259,6 @@ export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]
   return rows.map((row) => ({ ...row, expiresInMinutes: minutesUntil(row.expiresAt, now) }));
 }
 
-/** One clock reading per query, so every row on a screen agrees with the others. */
 function minutesUntil(moment: Date, now: number): number {
   return Math.max(0, Math.round((moment.getTime() - now) / 60_000));
 }
@@ -332,11 +271,10 @@ export type TutorInboxItem = {
   courseTitle: string;
   section: string | null;
   professorName: string | null;
-  /** The tutor's own history with this course — why they were asked. */
+
   takenTermName: string;
   gradeEarned: string;
-  /** Same reasoning as `StudentRequest.expiresInMinutes`: the clock is read
-   *  here, once, rather than during render. */
+
   expiresInMinutes: number;
 };
 

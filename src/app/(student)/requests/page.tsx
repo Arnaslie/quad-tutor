@@ -21,18 +21,6 @@ import { displayName } from "@/server/modules/identity/display-name";
 
 export const metadata: Metadata = { title: "Requests" };
 
-/**
- * What you asked for, and what came back.
- *
- * An ask is a cheap parallel signal, not a proposal, and the copy on this
- * screen has one job beyond listing rows: never let a decline read as a
- * judgement of the student. A tutor who passes is a tutor who is full, and
- * saying so is the difference between a student sending three more asks and a
- * student closing the tab.
- *
- * An accepted request is the moment of purchase — the only moment, because
- * charging before a tutor says yes generates a refund queue in week one.
- */
 const buyParam = z.uuid();
 
 export default async function RequestsPage(props: PageProps<"/requests">) {
@@ -135,11 +123,6 @@ function context(request: StudentRequest): string {
     .join(" · ");
 }
 
-/**
- * A tutor passing costs them nothing, by design — punishing declines makes
- * tutors accept students they cannot serve. The other side of that bargain is
- * that the student is told what a decline actually means.
- */
 function outcome(status: StudentRequest["status"]): string {
   switch (status) {
     case "declined":
@@ -181,10 +164,6 @@ function Accepted({ request }: { request: StudentRequest }) {
     </Card>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* the purchase step                                                          */
-/* -------------------------------------------------------------------------- */
 
 async function PurchaseStep({ actorRequest }: { actorRequest: StudentRequest }) {
   const actor = await requireActor();

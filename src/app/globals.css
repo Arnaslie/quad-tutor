@@ -1,17 +1,5 @@
 @import "tailwindcss";
 
-/**
- * Design tokens.
- *
- * Two definitions per token — light and dark — and everything downstream reads
- * the token, never a raw hex. `@theme inline` makes each one a Tailwind utility
- * (`bg-surface`, `text-muted`, `border-border`) that resolves the CSS variable at
- * use time, so the dark-mode swap below is the only place a colour changes.
- *
- * Crimson is the campus accent. It is used for one thing per screen — the action
- * you want taken — and never for decoration. A student is about to spend $140
- * here; loud is the wrong register.
- */
 :root {
   --background: #fafaf9;
   --surface: #ffffff;
@@ -68,7 +56,6 @@ body {
   font-family: var(--font-sans), system-ui, sans-serif;
 }
 
-/* The bottom tab bar sits on the home indicator without this. */
 @utility pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }

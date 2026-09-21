@@ -1,34 +1,15 @@
-/**
- * Pure ranking. No I/O, no ORM, no clock, no randomness.
- *
- * This file is the extraction seam: if matching ever moves to its own service,
- * this is what moves. Keeping it pure is what makes that cheap — and what makes
- * ranking testable without a database. Anything needing the current time or a
- * query belongs in `candidates.ts`.
- *
- * Launch reality: n=0 for every tutor, so this is a deterministic sort on
- * observable facts. The Bayesian posterior is only consulted once a tutor has
- * delivered sessions; the shrinkage + bandit ranker lands in V1. See
- * docs/decisions.md.
- */
-
 export type RankingWeights = {
   professorMatch: number;
   gradeA: number;
   gradeAMinus: number;
-  /** Penalty per term since the tutor took the course. */
+
   recencyDecayPerTerm: number;
-  /** How far the posterior can move a tutor once n > 0. */
+
   posteriorWeight: number;
-  /**
-   * Penalty per request the tutor let expire in silence. An explicit pass costs
-   * nothing, ever — punishing declines makes tutors accept students they cannot
-   * serve, which is worse for everyone than a fast no.
-   */
+
   silentExpiryPenalty: number;
 };
 
-/** Seed values. These belong in a database row so they can be tuned without a deploy. */
 export const DEFAULT_WEIGHTS: RankingWeights = {
   professorMatch: 40,
   gradeA: 20,
@@ -41,13 +22,13 @@ export const DEFAULT_WEIGHTS: RankingWeights = {
 export type Candidate = {
   tutorCourseId: string;
   gradeEarned: string;
-  /** Computed by the caller so this module stays clock-free. */
+
   termsSinceTaken: number;
   matchesProfessor: boolean;
   scoreSampleCount: number;
-  /** Basis points (0–10000), or null while n = 0. */
+
   scorePosteriorMeanBp: number | null;
-  /** Requests left to expire rather than declined. Counted by the caller. */
+
   recentSilentExpiries: number;
 };
 
@@ -71,7 +52,6 @@ export function scoreCandidate(
   score -= candidate.termsSinceTaken * weights.recencyDecayPerTerm;
   score -= candidate.recentSilentExpiries * weights.silentExpiryPenalty;
 
-  // Only consulted once the tutor has a delivered-session history.
   if (candidate.scoreSampleCount > 0 && candidate.scorePosteriorMeanBp !== null) {
     score += (candidate.scorePosteriorMeanBp / 10_000) * weights.posteriorWeight;
   }
@@ -79,11 +59,6 @@ export function scoreCandidate(
   return score;
 }
 
-/**
- * Deterministic: ties break on `tutorCourseId` so the same input always yields
- * the same deck. Exploration (giving new tutors a shot above their score) is a
- * V1 concern and belongs here, behind an explicit seed — never `Math.random()`.
- */
 export function rankCandidates(
   candidates: readonly Candidate[],
   weights: RankingWeights = DEFAULT_WEIGHTS,

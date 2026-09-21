@@ -1,15 +1,3 @@
-/**
- * Turning an accepted request into a paid package.
- *
- * Ordering matters and is not negotiable: **charge only after the tutor has
- * accepted and a slot is picked.** Charging at request time, under a double
- * opt-in with three parallel asks, generates a refund queue in week one.
- *
- * There is no Stripe call here yet — see the seam marked TODO(stripe). What is
- * here is the part that outlives any payment provider: the engagement row and
- * the ledger entries that make the money deferred rather than earned.
- */
-
 import { and, eq, gte, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
@@ -39,18 +27,9 @@ import { SESSION_MINUTES, remindedAtForNewBooking } from "./attendance";
 
 export class PurchaseError extends Error {}
 
-/** A slot must be far enough out to confirm against. */
 const MIN_LEAD_HOURS = 12;
 const SLOT_HORIZON_DAYS = 14;
 
-/**
- * Concrete bookable times, generated from the tutor's weekly windows.
- *
- * Single campus, single timezone: slots are built in the server's local time,
- * which is the institution's. A second campus in another zone needs a real
- * conversion here — that is the one place this function is wrong for expansion,
- * and it is why the institution's IANA zone is read rather than assumed.
- */
 export async function availableSlots(params: {
   tutorProfileId: string;
   institutionId: string;
@@ -115,15 +94,6 @@ export async function availableSlots(params: {
   return slots.sort((a, b) => a.getTime() - b.getTime());
 }
 
-/**
- * The times an accepted request can be turned into a package at.
- *
- * `StudentRequest` deliberately does not carry a `tutorProfileId` — a screen
- * that holds one is a screen that can post one, and profile ids are resolved
- * from the signed-in actor, never accepted from a form. So the tutor is
- * resolved here, from the request, after the request is proved to belong to
- * the caller.
- */
 export async function slotsForRequest(params: {
   actor: Actor;
   requestId: string;
@@ -160,12 +130,6 @@ export async function slotsForRequest(params: {
   });
 }
 
-/**
- * The purchase. One transaction: engagement, first booked session, ledger.
- *
- * The unique index on `matchRequestId` is what makes a double submit safe —
- * the second insert fails rather than charging twice.
- */
 export async function purchasePackage(params: {
   actor: Actor;
   requestId: string;
@@ -206,14 +170,7 @@ export async function purchasePackage(params: {
     if (request.status !== "accepted") {
       throw new PurchaseError("That request has not been accepted yet.");
     }
-    // The last gate before an engagement exists, and the one that matters
-    // most. A package with the same person on both sides can never settle
-    // attendance — `loadParticipation` resolves one role per person, so the
-    // session would sit unanswerable forever, money unrecognised, and the
-    // symptom would surface weeks later in a ledger reconciliation rather
-    // than as anything that looks like a bug. Self-requests predating the
-    // matching guards still exist, so this refuses them at the point money
-    // would otherwise move.
+
     if (request.tutorUserId === params.actor.userId) {
       throw new PurchaseError("You cannot buy a package from yourself.");
     }
@@ -228,8 +185,6 @@ export async function purchasePackage(params: {
     if (already) return { engagementId: already.id };
 
     // TODO(stripe): take payment here, before any row is written. A failed
-    // charge must leave no engagement behind and must write a
-    // `payment_failed` reliability event for the student.
 
     const [created] = await tx
       .insert(engagement)
@@ -253,7 +208,6 @@ export async function purchasePackage(params: {
       remindedAt: remindedAtForNewBooking(params.slotStartsAt),
     });
 
-    // Cash in, nothing earned. Recognition happens session by session.
     await record(tx, [
       {
         engagementId: created.id,
@@ -266,14 +220,6 @@ export async function purchasePackage(params: {
   });
 }
 
-/**
- * The finished package a top-up is bought against, proved to belong to the
- * caller and to be inside the end-of-term window.
- *
- * Shared by the slot read and the purchase so the two can never disagree about
- * eligibility — a screen that offers times for a package the write would refuse
- * is worse than one that offers nothing.
- */
 async function topUpSource(
   exec: Executor,
   params: { actor: Actor; engagementId: string },
@@ -330,7 +276,6 @@ async function topUpSource(
   return source;
 }
 
-/** The times a top-up can be booked at, from the tutor the package already has. */
 export async function slotsForTopUp(params: {
   actor: Actor;
   engagementId: string;
@@ -343,24 +288,6 @@ export async function slotsForTopUp(params: {
   });
 }
 
-/**
- * One more session with a tutor a student has already finished a package with.
- *
- * A separate engagement rather than sessions appended to the old one: the paid
- * package is a closed record, and stretching `sessionsPurchased` after the fact
- * would reprice delivered sessions — `perSessionMinor` divides price paid by
- * sessions purchased, so every past session on that package would silently
- * become worth less. A new engagement keeps both records true.
- *
- * `matchRequestId` stays null. The column is nullable for exactly this: a
- * renewal has no new request, because the tutor already said yes and making a
- * student ask again is friction with no signal in it.
- *
- * Top-ups chain, deliberately. A booked-but-unheld session leaves nothing left
- * to book, so a second one can be bought before the first happens — which is
- * what a student wanting two sessions in finals week actually needs. Each is
- * its own paid engagement, so nothing about the first is repriced.
- */
 export async function purchaseTopUp(params: {
   actor: Actor;
   engagementId: string;
@@ -376,7 +303,6 @@ export async function purchaseTopUp(params: {
     }
 
     // TODO(stripe): take payment here, before any row is written, same as
-    // `purchasePackage`.
 
     const [created] = await tx
       .insert(engagement)
@@ -385,8 +311,7 @@ export async function purchaseTopUp(params: {
         tutorCourseId: source.tutorCourseId,
         courseOfferingId: source.courseOfferingId,
         kind: "top_up",
-        // No anchor: a top-up is bought against the end of term, not against a
-        // specific exam, and inventing one would put a false date on a screen.
+
         anchorExamId: null,
         sessionsPurchased: option.sessions,
         pricePaidMinor: option.priceMinor,
@@ -413,18 +338,10 @@ export async function purchaseTopUp(params: {
   });
 }
 
-/** Confirmation closes a day after the session ends. */
 export function confirmationDeadline(scheduledAt: Date): Date {
   return new Date(scheduledAt.getTime() + (SESSION_MINUTES + 24 * 60) * 60 * 1000);
 }
 
-/**
- * The refund guarantee, self-serve, one per student per term.
- *
- * The platform eats the tutor's pay rather than clawing it back: protecting
- * scarce supply beats recovering thirty dollars. That is what
- * `guarantee_absorbed` records — a real cost, booked where it can be counted.
- */
 export async function claimGuarantee(params: {
   actor: Actor;
   engagementId: string;
@@ -468,7 +385,6 @@ export async function claimGuarantee(params: {
       );
     }
 
-    // One per student per term, checked across every package they hold.
     const termUsage = await tx
       .select({ n: sql<number>`count(*)::int` })
       .from(engagement)

@@ -13,19 +13,10 @@ import { purchase, type ActionResult } from "../actions";
 export type ExamChoice = {
   id: string;
   name: string;
-  /** A `date` column: a calendar day, not an instant. `formatDay` knows. */
+
   occursOn: string;
 };
 
-/**
- * The purchase. It exists at exactly one moment — after a tutor has accepted
- * and before a time is picked — because charging any earlier, under a double
- * opt-in with three parallel asks, generates a refund queue in week one.
- *
- * Packages are anchored to a real exam rather than to a billing date. That is
- * not decoration: people buy tutoring right after a bad exam grade, and the
- * thing they are buying is "be ready for the next one".
- */
 export function PurchasePanel({
   requestId,
   tutorName,
@@ -47,10 +38,6 @@ export function PurchasePanel({
   const [slot, setSlot] = useState<string>(slots.at(0) ?? "");
   const [showAllSlots, setShowAllSlots] = useState(false);
 
-  // The default anchors to the next exam; the upsell anchors to the last one
-  // on the calendar, which is what "through the final" means. A package bought
-  // after the last exam of the term has nothing to anchor to, and that is
-  // allowed — `anchorExamId` is nullable for exactly this case.
   const anchor =
     kind === "through_final" ? (exams.at(-1) ?? null) : (exams.at(0) ?? null);
 

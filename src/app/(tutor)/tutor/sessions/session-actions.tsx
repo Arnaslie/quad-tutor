@@ -13,14 +13,6 @@ import {
 
 const INITIAL: SessionActionState = { status: "idle" };
 
-/**
- * The one thing this tutor can do about this session, taken from
- * `viewerAction` on the server. The rules are not re-derived here — six
- * nullable timestamps interpreted twice is how the two surfaces drift apart.
- *
- * Only the two interactive outcomes reach the client; everything else is
- * static copy rendered by the page.
- */
 export function SessionActions({
   sessionId,
   studentName,
@@ -58,8 +50,6 @@ function Answer({ sessionId, studentName }: { sessionId: string; studentName: st
         <input type="hidden" name="sessionId" value={sessionId} />
         <input type="hidden" name="intent" value="deny" />
 
-        {/* The asymmetry, said out loud. A tutor's denial means one specific
-            thing, and a tutor who could not make it has a different button. */}
         <p className="text-sm text-muted">
           You are reporting that <span className="text-foreground">{studentName}</span>{" "}
           did not show up. If you were the one who could not make it, go back and
@@ -211,8 +201,7 @@ function copy(state: SessionActionState, studentName: string): string | null {
     case "answered":
       switch (state.outcome) {
         case "attended":
-          // Both said yes: this is the one case attendance is a fact with two
-          // names on it. It is also the moment the session becomes earned.
+
           return "Confirmed by both of you. This session is delivered and earned.";
         case "not_attended":
           return `You both said it did not happen. The session goes back to ${studentName}'s package.`;

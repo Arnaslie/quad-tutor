@@ -7,13 +7,6 @@ import { NavLink } from "./nav-link";
 import { SignOutButton } from "./sign-out-button";
 import { SurfaceSwitch } from "./surface-switch";
 
-/**
- * The frame both surfaces sit in: sticky header, one content column, and the
- * navigation — a bottom tab bar on a phone, inline in the header from `md` up.
- *
- * Both bars render the same `NAV` array, so a route cannot exist on one and be
- * missing from the other.
- */
 export function AppShell({
   surface,
   actor,
@@ -22,11 +15,7 @@ export function AppShell({
 }: {
   surface: Surface;
   actor: Actor;
-  /**
-   * `false` on a surface the user has not joined yet — every tab would bounce
-   * straight back through `requireTutor`, and offering a way out that is not
-   * one is worse than offering none.
-   */
+
   nav?: boolean;
   children: ReactNode;
 }) {
@@ -44,10 +33,6 @@ export function AppShell({
             Quad Tutor
           </Link>
 
-          {/*
-            A surface label, not a status badge — it says which side of the app
-            you are looking at. Nothing in this product ranks a person visibly.
-          */}
           {surface === "tutor" ? (
             <span className="rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent">
               Tutor
@@ -75,7 +60,6 @@ export function AppShell({
         </div>
       </header>
 
-      {/* pb-28 clears the fixed tab bar; from md up, and with no tabs, it is gone. */}
       <main
         className={`mx-auto w-full max-w-5xl flex-1 px-4 pt-6 sm:px-6 md:pb-12 md:pt-8 ${
           items.length > 0 ? "pb-28" : "pb-12"

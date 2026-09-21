@@ -1,22 +1,3 @@
-/**
- * Settling a session: the mutual confirm, the auto-release sweep, and the one
- * place deferred revenue becomes recognised revenue.
- *
- * The rules live in `attendance.ts`, which is pure. This file is the part that
- * has to touch a database and a clock: it loads the row, locks it, asks
- * `settle()` what the answers add up to, and writes the consequences — the
- * session's state, the ledger entries, and the reliability fact if there is
- * one — inside a single transaction. Nothing here decides anything; if you are
- * looking for why an outcome is what it is, it is in `attendance.ts`.
- *
- * Recognition is the invariant worth restating (ledger.ts has the long form):
- * a package purchased up front is deferred revenue. A session delivered is
- * what converts it. `session_earned` and `tutor_payout` are written together,
- * per session, in the same transaction as the state change, and
- * `platform_fee` is deliberately not written — it is exactly the difference
- * between the two and storing it invites the three to disagree.
- */
-
 import { and, eq, lte, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
@@ -36,17 +17,7 @@ import { sessionEndsAt, settle, type Settlement } from "./attendance";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/**
- * A delivered session, recognised. Two rows, always together:
- *
- *   `session_earned` — revenue, derived from what the student actually paid
- *                      for this package rather than today's list price.
- *   `tutor_payout`   — the tutor's share, accrued as a liability. It is owed
- *                      from this moment; moving the money is a separate act.
- *
- * TODO(stripe): the transfer against this accrual belongs in a payout run, not
- * here. The ledger is what says how much is owed; Stripe's balance is float.
- */
+/** TODO(stripe): the transfer against this accrual belongs in a payout run. */
 async function recognise(
   tx: Tx,
   session: Pick<
@@ -75,7 +46,6 @@ async function recognise(
   ]);
 }
 
-/** The package is done once every purchased session has been delivered. */
 async function closeIfDelivered(
   tx: Tx,
   engagementId: string,
@@ -100,11 +70,6 @@ async function closeIfDelivered(
     .where(and(eq(engagement.id, engagementId), eq(engagement.status, "active")));
 }
 
-/**
- * Write the consequences of a settlement. Every write is in the caller's
- * transaction, alongside the state change, so a session can never be marked
- * delivered without the ledger rows that make it revenue.
- */
 async function applySettlement(
   tx: Tx,
   session: SessionContextRow,
@@ -123,9 +88,6 @@ async function applySettlement(
     await closeIfDelivered(tx, session.engagementId, session.sessionsPurchased, now);
   }
 
-  // Facts only, and only about the student. A tutor's reliability lives in the
-  // hidden per-course quality score, never in this table — the two histories
-  // are kept separate because the same person is routinely both.
   if (outcome.studentFact) {
     await tx.insert(reliabilityEvent).values({
       userId: session.studentUserId,
@@ -136,11 +98,6 @@ async function applySettlement(
   }
 }
 
-/**
- * Re-read under the lock and settle if the answers now add up to something.
- * Returns where the session ended up, derived from the settlement rather than
- * read back — the row it would re-read is the one this transaction just wrote.
- */
 async function settleLocked(tx: Tx, sessionId: string, now: Date): Promise<SessionOutcome> {
   const rows = await sessionContext(tx).where(eq(sessionBooking.id, sessionId)).limit(1);
   const session = rows.at(0);
@@ -162,15 +119,6 @@ async function settleLocked(tx: Tx, sessionId: string, now: Date): Promise<Sessi
   };
 }
 
-/**
- * Not delivered means the booking is voided and the session returns to the
- * package, where it can be rebooked or refunded at term end.
- *
- * Note this leaves `cancelledAt` and `cancelledByUserId` null, deliberately:
- * nobody cancelled this session, it did not happen, and `resolution` is what
- * says so. Those two columns mean "a person called this off in advance" and
- * the stats job reads them as exactly that — see `cancelSession`.
- */
 function statusFor(outcome: Settlement): SessionOutcome["status"] {
   if (outcome.resolution === "disputed") return "disputed";
   return outcome.delivered ? "completed" : "cancelled";
@@ -191,13 +139,6 @@ export type SessionOutcome = {
   resolution: SessionContextRow["resolution"];
 };
 
-/**
- * "It happened." Either party; whoever the actor is on this session.
- *
- * Confirming twice is a no-op rather than an error — a double-tapped button
- * must not look like a failure — but changing your answer is refused, because
- * the other side may already have acted on it.
- */
 export async function confirmAttendance(params: {
   actor: Actor;
   sessionId: string;
@@ -235,17 +176,6 @@ export async function confirmAttendance(params: {
   });
 }
 
-/**
- * "It did not happen." The asymmetry is deliberate and is what lets a
- * `no_showed` fact exist without anyone giving a subjective read:
- *
- *   - a **tutor** denying means *the student did not show up* — a tutor who
- *     cannot make it cancels instead;
- *   - a **student** denying means the session did not happen, for any reason.
- *
- * Denying against a confirmation is a dispute, and a dispute never settles
- * itself. `note` is what the human reviewing it reads.
- */
 export async function denyAttendance(params: {
   actor: Actor;
   sessionId: string;
@@ -285,15 +215,6 @@ export async function denyAttendance(params: {
   });
 }
 
-/**
- * Auto-release. A lapsed confirmation window defaults to attended, because
- * leaving a tutor unpaid on a student's silence destroys the scarce side of
- * the marketplace — but it writes no reliability fact out of that silence.
- *
- * Swept lazily on read, matching `expireStaleRequests` in the matching module:
- * a cron would be tidier, and this is the seam where one would attach, but at
- * campus scale every path that cares calls this first and that is enough.
- */
 export async function releaseLapsedConfirmations(): Promise<number> {
   const now = new Date();
 
@@ -320,25 +241,14 @@ export async function releaseLapsedConfirmations(): Promise<number> {
   return released;
 }
 
-/**
- * Human resolution of a dispute. At launch volume this is a person reading the
- * two denial notes and making a call — docs/decisions.md says so explicitly,
- * and pretending otherwise would mean inventing an adjudication rule the
- * product cannot defend.
- *
- * TODO(admin): there is no admin role in the schema, so this takes the
- * resolver's user id on trust. It must not be reachable from a student or
- * tutor route until there is one.
- */
+/** TODO(admin): no admin role exists, so this trusts the caller's user id. */
 export async function resolveDispute(params: {
   sessionId: string;
   resolvedByUserId: string;
-  /** True when the session is treated as delivered: the tutor is paid. */
+
   attended: boolean;
-  /** Writes the one fact a reviewer is allowed to establish. */
+
   studentNoShowed?: boolean;
-  /* `resolvedByUserId` is not persisted: there is no audit table yet, and
-     inventing one is a schema change this draft does not need. */
 }): Promise<SessionOutcome> {
   const now = new Date();
 

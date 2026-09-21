@@ -1,10 +1,5 @@
 import type { ReactNode } from "react";
 
-/**
- * The top of every screen. `eyebrow` carries the course context ("MATH 125 ·
- * Prof. Reed") — on this product that line is the whole value proposition, so
- * it gets a permanent slot rather than being written freehand per screen.
- */
 export function PageHeader({
   eyebrow,
   title,

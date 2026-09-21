@@ -1,35 +1,3 @@
-/**
- * Unused sessions refund at term end.
- *
- * "Breakage income is a trap on a campus where everyone talks"
- * (docs/decisions.md) — the money left in an unfinished package is not
- * revenue, it was never recognised, and keeping it buys a few dollars against
- * the only distribution channel this product has.
- *
- * The refund is deliberately computed as *what is left*, not as
- * `unused x per-session`:
- *
- *     refund = pricePaid - delivered x perSessionMinor
- *
- * which is exactly the deferred balance, so it drives it to zero with no
- * rounding remainder stranded on the books. `perSessionMinor` floors, and a
- * floored rate multiplied by the unused count would quietly keep the
- * difference — which is breakage by another name.
- *
- * There is no job runner in this draft and adding one would be the only
- * scheduled process in the system. What is here is the query and the action;
- * `runTermEndRefunds` is the seam a cron, a Vercel scheduled function or an
- * admin button attaches to. It is safe to re-run: a second pass over an
- * already-closed package finds nothing to do.
- *
- * Known limitation, so the next person does not assume more coverage than
- * exists: this path has been exercised end to end against throwaway fixtures
- * (deferred driven to exactly zero, second sweep a no-op), not against the
- * seeded campus — proving it there would mean back-dating a term other people
- * are building against, which is how a shared seed stops being trustworthy.
- * Before this runs against anything real, exercise it on a term of its own.
- */
-
 import { and, eq, lt, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
@@ -54,17 +22,12 @@ export type TermEndRefund = {
   currency: string;
 };
 
-/** Delivered sessions, counted the same way everywhere: `completed` bookings. */
 const deliveredCount = sql<number>`(
   select count(*)::int from ${sessionBooking}
   where ${sessionBooking.engagementId} = ${engagement.id}
     and ${sessionBooking.status} = 'completed'
 )`;
 
-/**
- * Active packages whose term is over. Read-only — safe to show an operator
- * before anything moves.
- */
 export async function engagementsDueForTermEndRefund(
   institutionId: string,
 ): Promise<TermEndRefund[]> {
@@ -111,10 +74,6 @@ function refundShape(row: {
   };
 }
 
-/**
- * Refund one package and close it. Idempotent by the `active` check: a second
- * run finds nothing to do rather than refunding twice.
- */
 export async function refundUnusedSessions(
   engagementId: string,
 ): Promise<TermEndRefund | null> {
@@ -139,11 +98,6 @@ export async function refundUnusedSessions(
     if (!target) throw new SessionError("That package does not exist.");
     if (target.status !== "active") return null;
 
-    // Nothing is going to happen now that the term is over, so anything still
-    // on the calendar is unused rather than scheduled. `cancelledAt` and
-    // `cancelledByUserId` stay null: no person called these off, the term
-    // simply ended, and attributing them to someone would put a cancellation
-    // that nobody made in front of the stats job.
     await tx
       .update(sessionBooking)
       .set({ status: "cancelled" })
@@ -181,10 +135,6 @@ export async function refundUnusedSessions(
       ]);
     }
 
-    // A package that delivered nothing is `refunded`; one that ran and had
-    // sessions left over is `completed` with a refund against it. The ledger
-    // carries the money either way — the status is only how it reads to a
-    // human.
     await tx
       .update(engagement)
       .set({
@@ -197,13 +147,7 @@ export async function refundUnusedSessions(
   });
 }
 
-/**
- * The whole sweep for one campus.
- *
- * TODO(scheduling): nothing calls this yet. It is the seam — a cron, a
- * scheduled function, or an operator pressing a button after finals. Whatever
- * calls it must be idempotent-safe, which it is.
- */
+/** The whole sweep for one campus. Called by the cron route. */
 export async function runTermEndRefunds(
   institutionId: string,
 ): Promise<TermEndRefund[]> {

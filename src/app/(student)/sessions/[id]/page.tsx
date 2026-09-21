@@ -15,14 +15,6 @@ import { displayName } from "@/server/modules/identity/display-name";
 
 export const metadata: Metadata = { title: "Session" };
 
-/**
- * One session: when, where, with whom, and the single thing this student can
- * do about it.
- *
- * `sessionDetail` authorises against the actor and returns `action` — a
- * discriminator computed by the same pure function the tutor side uses. This
- * page renders from it rather than working out the rules a second time.
- */
 export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
   const { id } = await props.params;
   const actor = await requireActor();
@@ -31,14 +23,10 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
   try {
     session = await sessionDetail({ actor, sessionId: id });
   } catch (error) {
-    // A session belongs to exactly two people. Anyone else gets the same
-    // answer as a session that does not exist.
     if (error instanceof SessionError) notFound();
     throw error;
   }
 
-  // Someone who is both a tutor and a student is routine here. This is the
-  // student surface, so a session they are tutoring belongs on the other side.
   if (session.viewerRole !== "student") {
     return (
       <div className="flex flex-col gap-6">
@@ -121,11 +109,6 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-/**
- * Say what actually happened, including when nobody said anything. A session
- * that settled on silence paid the tutor and recorded no fact about either
- * person, and the student should be able to read that off the screen.
- */
 function statusLine(session: SessionDetail): string {
   switch (session.status) {
     case "scheduled":

@@ -22,15 +22,10 @@ export default async function TutorStartPage() {
 
   async function start() {
     "use server";
-    // Re-resolve from the session rather than closing over the actor above: a
-    // Server Action is a reachable POST endpoint, not just a button.
+
     const current = await requireActor();
     await becomeTutor(current);
 
-    // Layouts are cached client-side and do not re-render on navigation, so
-    // without this the tutor shell arrives with no tabs and the student shell
-    // keeps offering "Become a tutor" to someone who just became one. Both
-    // headers read the tutor profile, so both have to be invalidated.
     revalidatePath("/", "layout");
     redirect("/tutor");
   }

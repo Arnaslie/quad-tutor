@@ -4,14 +4,6 @@ import { Icon } from "@/components/icons";
 import type { SessionListItem } from "@/server/modules/engagements/reads";
 import { displayName } from "@/server/modules/identity/display-name";
 
-/**
- * One row on the session board. A server component — the whole row is a link,
- * and the actions live on the session itself where there is room to disclose
- * what they do.
- *
- * The course context leads, because on this product "MATH 125 with Prof.
- * Doyle" is the thing a student recognises, not a date.
- */
 export function SessionRow({ session }: { session: SessionListItem }) {
   const course = [session.courseCode ?? session.courseTitle, session.professorName]
     .filter(Boolean)

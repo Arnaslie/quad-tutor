@@ -8,13 +8,6 @@ import { formatDay, formatTime } from "@/components/format";
 
 import { book, type ActionResult } from "../actions";
 
-/**
- * Sessions two through four of a package already paid for.
- *
- * The student books, because they are the one with the exam on Thursday. No
- * money moves here — it was all taken at purchase and is recognised per
- * delivered session — so this is a calendar, not a checkout.
- */
 export function BookNext({
   engagementId,
   tutorName,

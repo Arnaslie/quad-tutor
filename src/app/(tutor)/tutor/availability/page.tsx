@@ -7,8 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { SESSION_MINUTES } from "@/server/modules/engagements/attendance";
 import { requireTutor } from "@/server/modules/identity/actor";
 import { availabilityForTutor } from "@/server/modules/tutoring/availability";
-// The pure half lives apart from the database half on purpose — see the note
-// in `windows.ts` and the bundling convention in CLAUDE.md.
+
 import {
   slotsPerWeek,
   type AvailabilityWindow,
@@ -20,11 +19,6 @@ import { WEEKDAYS, formatMinuteOfDay } from "./time";
 
 export const metadata: Metadata = { title: "Hours" };
 
-/**
- * Weekly windows, campus time. These are the only source of bookable times —
- * a tutor with no hours cannot be booked at all, however many students want
- * them — which is why this screen says so plainly rather than sitting empty.
- */
 export default async function TutorAvailabilityPage() {
   const tutor = await requireTutor();
   const windows = await availabilityForTutor(tutor);
@@ -88,8 +82,7 @@ function WindowRow({ window }: { window: AvailabilityWindow }) {
       <span className="text-sm text-muted">
         {formatMinuteOfDay(window.startMinute)} – {formatMinuteOfDay(window.endMinute)}
       </span>
-      {/* No confirmation step: the hours are back in two taps, and nothing
-          already booked moves. */}
+
       <form action={removeAvailabilityAction}>
         <input type="hidden" name="windowId" value={window.id} />
         <Button type="submit" variant="ghost">

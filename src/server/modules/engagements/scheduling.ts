@@ -1,23 +1,3 @@
-/**
- * Booking the rest of the package, and cancelling.
- *
- * `purchase.ts` books the first session inside the purchase transaction,
- * because a package with no date on the calendar is a package nobody uses.
- * Sessions two through four are booked here, out of the same availability
- * windows, so there is exactly one definition of what a bookable slot is.
- *
- * Cancellation is a timestamp comparison and nothing else. Inside
- * `LATE_CANCEL_HOURS` it is a late cancel, which writes a
- * `late_cancelled` fact; outside it, it is free and writes nothing. No
- * judgement about the reason is made, recorded, or asked for — that is what
- * keeps reliability a record of facts rather than an opinion about a student.
- *
- * Neither kind of cancellation moves money. The session returns to the package
- * to be rebooked, and anything still unused refunds at term end. Charging for
- * a late cancel would make the consequence unrecoverable, which the product
- * principle in CLAUDE.md rules out.
- */
-
 import { and, eq, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
@@ -35,11 +15,6 @@ import { availableSlots, confirmationDeadline } from "./purchase";
 import { SessionError, lockSession, loadParticipation, type Executor } from "./access";
 import { SESSION_MINUTES, isLateCancel, remindedAtForNewBooking } from "./attendance";
 
-/**
- * Sessions left to book. A cancelled booking does not count against the
- * package — that is what "the session comes back" means, and it is why this is
- * derived from the bookings rather than stored as a counter that can drift.
- */
 export async function sessionsRemaining(params: {
   exec?: Executor;
   engagementId: string;
@@ -60,14 +35,6 @@ export async function sessionsRemaining(params: {
   return Math.max(0, params.sessionsPurchased - (rows.at(0)?.n ?? 0));
 }
 
-/**
- * The package, the tutor behind it, and the authorisation to book against it.
- *
- * Shared by `bookSession` and `slotsForEngagement` so the times a student is
- * shown and the times they are allowed to book are decided by one piece of
- * code. Splitting them is how a UI ends up offering a slot the write path then
- * refuses.
- */
 async function loadBookablePackage(
   actor: Actor,
   engagementId: string,
@@ -107,14 +74,6 @@ async function loadBookablePackage(
   };
 }
 
-/**
- * The times this package's next session can be booked into.
- *
- * Purely a read: `bookSession` re-checks the slot it is given against this
- * same generator inside its transaction, so nothing here is load-bearing for
- * correctness — it exists so the student is shown real choices rather than
- * being told "no longer available" after picking.
- */
 export async function slotsForEngagement(params: {
   actor: Actor;
   engagementId: string;
@@ -135,12 +94,6 @@ export async function slotsForEngagement(params: {
   });
 }
 
-/**
- * Book the next session of a package.
- *
- * The student books: they are the one with the exam on Thursday. A tutor
- * proposing times is a messaging feature, and messaging is not in this draft.
- */
 export async function bookSession(params: {
   actor: Actor;
   engagementId: string;
@@ -149,8 +102,6 @@ export async function bookSession(params: {
 }): Promise<{ sessionId: string; remaining: number }> {
   const target = await loadBookablePackage(params.actor, params.engagementId);
 
-  // The same slot generator the purchase flow uses: the tutor's weekly
-  // windows, minus what is already booked, minus anything inside the lead time.
   const slots = await availableSlots({
     tutorProfileId: target.tutorProfileId,
     institutionId: params.actor.institutionId,
@@ -172,9 +123,6 @@ export async function bookSession(params: {
       throw new SessionError("You have used every session in this package.");
     }
 
-    // `availableSlots` ran outside the transaction, so re-check the collision
-    // here. Two students booking the same tutor in the same second is rare and
-    // entirely possible.
     const clash = await tx
       .select({ id: sessionBooking.id })
       .from(sessionBooking)
@@ -207,10 +155,6 @@ export async function bookSession(params: {
   });
 }
 
-/**
- * Cancel a session. Either party, up to the moment it starts; after that the
- * mutual confirm in `confirmation.ts` decides what happened.
- */
 export async function cancelSession(params: {
   actor: Actor;
   sessionId: string;
@@ -240,17 +184,9 @@ export async function cancelSession(params: {
       .update(sessionBooking)
       .set({
         status: "cancelled",
-        // Recorded for both roles. `cancelledAt` against `scheduledAt` is the
-        // same timestamp comparison `isLateCancel` just made, so the stats job
-        // can re-derive late-ness without trusting anything written here, and
-        // `cancelledByUserId` is what attributes a tutor's late cancel to a
-        // person. The role is not stored: it is derivable through the
-        // engagement, and storing an interpretation we can recompute is how
-        // the two diverge.
+
         cancelledAt: now,
         cancelledByUserId: params.actor.userId,
-        // `resolution` stays null on purpose: it answers "did the session
-        // happen", and a cancelled session never got as far as the question.
       })
       .where(
         and(
@@ -259,15 +195,8 @@ export async function cancelSession(params: {
         ),
       );
 
-    // Facts about students only. A tutor's late cancel is real and does matter
-    // just as much, but it belongs to the hidden per-course quality score, not
-    // to this table — the same person is routinely both, and the histories
-    // must not mix.
-    //
     // TODO(v1): the tutor side of this is `cancelled_at` + `cancelled_by_user_id`
-    // above, which is where the stats job reads it from. Nothing else records
-    // it, so a cancellation that does not write those columns is a fact lost
-    // for good.
+
     if (late && session.role === "student") {
       await tx.insert(reliabilityEvent).values({
         userId: session.studentUserId,

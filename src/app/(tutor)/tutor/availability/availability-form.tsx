@@ -10,7 +10,6 @@ import { TIME_OPTIONS, WEEKDAYS, formatMinuteOfDay } from "./time";
 
 const INITIAL: AvailabilityState = { status: "idle" };
 
-/** A sensible first window rather than an empty form: weekday evening. */
 const DEFAULT_START = 18 * 60;
 const DEFAULT_END = 21 * 60;
 

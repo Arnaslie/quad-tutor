@@ -8,18 +8,6 @@ import { Icon } from "@/components/icons";
 
 import { askTutors, type ActionResult } from "../../actions";
 
-/**
- * What a tutor card is allowed to know about a tutor.
- *
- * Deliberately narrower than `DeckCard`: the ranking score, the sample count
- * and the posterior mean are stripped on the server before anything crosses
- * into this file. They are not rendered either way, but a hidden score sitting
- * in the RSC payload is one "view source" away from being a public rating, and
- * the rule is that quality is expressed *only* as rank order.
- *
- * `matchesProfessor` is not a score — it is the wedge stated as a fact about
- * the pair, and it is the single most useful thing on the card.
- */
 export type TutorCard = {
   tutorCourseId: string;
   tutorName: string;
@@ -30,10 +18,6 @@ export type TutorCard = {
   takenTermName: string;
   matchesProfessor: boolean;
 };
-
-/* -------------------------------------------------------------------------- */
-/* the card body, shared by both treatments                                   */
-/* -------------------------------------------------------------------------- */
 
 function TutorProfile({ tutor }: { tutor: TutorCard }) {
   return (
@@ -80,15 +64,6 @@ function TutorProfile({ tutor }: { tutor: TutorCard }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* selection, shared                                                          */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Asking is a cheap, parallel, non-exclusive signal — not a choice between
- * people. So selection is a set, the submit is one batch, and nothing in the
- * copy frames an ask as a commitment to anybody.
- */
 function useSelection(room: number) {
   const [selected, setSelected] = useState<string[]>([]);
 
@@ -144,15 +119,6 @@ function Submit({
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* 1–2 tutors — a reveal, explicitly not a deck                               */
-/* -------------------------------------------------------------------------- */
-
-/**
- * A two-card stack advertises your own thinness. So one or two tutors are
- * shown whole, in full, with no counter and no paging — this reads as "here is
- * who covers this", which is the truth.
- */
 export function SingleReveal({
   offeringId,
   tutors,
@@ -198,19 +164,6 @@ export function SingleReveal({
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* 3+ tutors — the deck                                                       */
-/* -------------------------------------------------------------------------- */
-
-/**
- * One card at a time with the count stated out loud. "1 of 6" is the whole
- * point: it turns a short list into a complete one. "That is all of them"
- * reads honest where "that is all we found" reads broken, and the counter is
- * what makes the first reading available.
- *
- * Ranking is the only place quality is expressed. Card one is the best match
- * and nothing on screen says so in words.
- */
 export function TutorDeck({
   offeringId,
   tutors,

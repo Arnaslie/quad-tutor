@@ -1,5 +1,3 @@
-/** Message bodies. Pure. Each one states the deadline it exists to prevent. */
-
 import { formatDayTime } from "@/components/format";
 
 import type { Email } from "./email";
@@ -11,7 +9,6 @@ function url(path: string): string {
   return `${base}${path}`;
 }
 
-/** Tutor: a request is waiting. */
 export function requestWaiting(params: {
   to: string;
   tutorName: string;
@@ -39,7 +36,6 @@ export function requestWaiting(params: {
   };
 }
 
-/** Student: accepted, now pick a time. */
 export function requestAccepted(params: {
   to: string;
   studentName: string;
@@ -62,7 +58,6 @@ export function requestAccepted(params: {
   };
 }
 
-/** Booked. Carries the free-cancel deadline for sessions booked inside 24h. */
 export function sessionBooked(params: {
   to: string;
   name: string;
@@ -91,7 +86,6 @@ export function sessionBooked(params: {
   };
 }
 
-/** T-24h nudge. */
 export function sessionTomorrow(params: {
   to: string;
   name: string;

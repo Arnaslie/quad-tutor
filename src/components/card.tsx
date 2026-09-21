@@ -3,7 +3,6 @@ import type { ComponentProps, ReactNode } from "react";
 
 const SHELL = "rounded-2xl border border-border bg-surface";
 
-/** A plain container. `padded={false}` when the card holds its own list rows. */
 export function Card({
   padded = true,
   className = "",
@@ -20,11 +19,6 @@ export function Card({
   );
 }
 
-/**
- * The tappable version — a tutor in the deck, a course in the picker. The whole
- * card is the hit target, which on a phone is the difference between one thumb
- * tap and three.
- */
 export function CardLink({
   padded = true,
   className = "",

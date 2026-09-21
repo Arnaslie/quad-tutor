@@ -2,12 +2,6 @@ import type { ReactNode } from "react";
 
 import { Icon, type IconName } from "./icons";
 
-/**
- * Empty is a normal state here, not a failure. Zero tutors in a course is a
- * demand-capture moment, and an empty list that says "that is all of them"
- * reads honest where "nothing found" reads broken — so `description` should
- * always say which of the two this is.
- */
 export function EmptyState({
   icon,
   title,

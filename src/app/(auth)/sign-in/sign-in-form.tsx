@@ -11,13 +11,6 @@ type State =
   | { status: "sent"; email: string }
   | { status: "error"; message: string };
 
-/**
- * Remembering the name locally is what keeps this to one screen. Better Auth
- * uses `name` only when it creates the user, so a returning student's answer is
- * discarded server-side — but they would still have to type it. Prefilling from
- * the last successful send means they do not, and the intake stays under its
- * budget on the second visit as well as the first.
- */
 const NAME_KEY = "quad-tutor:name";
 
 export function SignInForm() {
@@ -27,17 +20,12 @@ export function SignInForm() {
   const [email, setEmail] = useState("");
   const [state, setState] = useState<State>({ status: "idle" });
 
-  // The name field is uncontrolled so this can write straight to the DOM.
-  // Reading storage during render would hydrate a mismatch against the empty
-  // field the server sent, and restoring it through state would make an effect
-  // trigger a second render for something React never needs to track.
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(NAME_KEY);
       const field = nameRef.current;
       if (saved && field && !field.value) field.value = saved;
     } catch {
-      // Private browsing throws on access. A blank field is a fine outcome.
     }
   }, []);
 
@@ -56,8 +44,6 @@ export function SignInForm() {
         const trimmedEmail = email.trim();
 
         const { error } = await authClient.signIn.magicLink({
-          // Better Auth applies this only when it creates the user, so sending
-          // it on every request cannot overwrite an existing student's name.
           name: trimmedName,
           email: trimmedEmail,
           callbackURL: "/courses",
@@ -65,9 +51,6 @@ export function SignInForm() {
         });
 
         if (error) {
-          // The server refuses addresses outside a known campus, at send time
-          // rather than at click time. Show what it said — "check your email"
-          // over a rejected address is a dead end the student cannot debug.
           setState({
             status: "error",
             message: error.message ?? "Could not send the sign-in link. Try again.",
@@ -78,7 +61,6 @@ export function SignInForm() {
         try {
           window.localStorage.setItem(NAME_KEY, trimmedName);
         } catch {
-          // Not worth failing a successful sign-in over.
         }
 
         setState({ status: "sent", email: trimmedEmail });

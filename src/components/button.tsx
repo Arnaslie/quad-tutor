@@ -18,7 +18,6 @@ const VARIANTS: Record<ButtonVariant, string> = {
   danger: "bg-danger text-white hover:opacity-90",
 };
 
-/** Both sizes clear the 44px touch target. This is a phone-first product. */
 const SIZES: Record<ButtonSize, string> = {
   md: "h-11 px-4 text-sm",
   lg: "h-12 px-5 text-base",
@@ -44,7 +43,6 @@ export function Button({
   return <button className={buttonClass(variant, size, className)} {...props} />;
 }
 
-/** A link that reads as a button. Navigation stays an anchor — never an onClick. */
 export function ButtonLink({
   variant = "primary",
   size = "md",

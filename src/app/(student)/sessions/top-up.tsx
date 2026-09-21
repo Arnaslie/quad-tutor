@@ -8,14 +8,6 @@ import { Money } from "@/components/money";
 
 import { topUp, type ActionResult } from "../actions";
 
-/**
- * One more session, bought at the end of the term.
- *
- * Unlike `BookNext` this is a checkout: the package it belongs to is finished,
- * so money moves here. The price is stated on the button rather than in small
- * print above it, because the difference between this screen and the booking
- * screen is exactly that one charges.
- */
 export function TopUp({
   engagementId,
   tutorName,

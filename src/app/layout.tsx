@@ -21,10 +21,6 @@ export const metadata: Metadata = {
     "Find a tutor who already took your course, under your professor, at the University of Alabama.",
 };
 
-/**
- * `viewportFit: "cover"` is what makes `pb-safe` in globals.css mean anything —
- * without it iOS letterboxes the page and the home indicator never overlaps.
- */
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,

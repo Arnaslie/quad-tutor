@@ -45,15 +45,6 @@ export async function addAvailabilityAction(
   return { status: "added" };
 }
 
-/**
- * Removing hours. A window that is already gone is not an error — the tutor
- * asked for it not to be there and it is not there — so the only outcome
- * worth rendering is the new list.
- *
- * Sessions already booked out of this window stay booked: a booking is an
- * agreement between two people, and availability only decides what can be
- * offered next.
- */
 export async function removeAvailabilityAction(formData: FormData): Promise<void> {
   const tutor = await requireTutor();
 

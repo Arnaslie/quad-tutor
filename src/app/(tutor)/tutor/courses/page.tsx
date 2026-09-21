@@ -20,16 +20,6 @@ import { ClaimForm } from "./claim-form";
 
 export const metadata: Metadata = { title: "Your courses" };
 
-/**
- * `(tutor, course)` is the core relationship — not `tutor`. Someone can be
- * excellent at Calc I and mediocre at Organic, so a claim is made one course
- * at a time, with the professor it was taken under.
- *
- * Two steps on one route: pick the course, then say how you took it. The
- * professor list depends on the course, and `?course=` keeps that dependency
- * on the server instead of shipping the whole catalog's instructors to a
- * phone.
- */
 export default async function TutorCoursesPage({
   searchParams,
 }: {
@@ -41,13 +31,12 @@ export default async function TutorCoursesPage({
 
   const [claims, catalog] = await Promise.all([
     coursesForTutor(tutor),
-    // The seeded weed-out courses, which is the whole claimable catalog.
+
     searchSeededCourses({ institutionId: tutor.institutionId, query: "" }),
   ]);
 
   const claimed = new Set(claims.map((claim) => claim.courseId));
-  // A param is a string from a URL bar, not a course. It only counts if it is
-  // in the catalog this campus can claim from.
+
   const claiming = wanted ? catalog.find((entry) => entry.courseId === wanted) : undefined;
 
   if (claiming) {
@@ -105,7 +94,7 @@ export default async function TutorCoursesPage({
 
       {unclaimed.length === 0 ? null : (
         <Card>
-          {/* A plain GET: picking a course is navigation, not a mutation. */}
+
           <form className="flex flex-col gap-4" action="/tutor/courses" method="get">
             <Field
               id="claim-course"
@@ -159,11 +148,6 @@ function ClaimCard({ claim }: { claim: TutorCourseClaim }) {
   );
 }
 
-/**
- * The state of the claim, in words. Not a badge and not a score — this says
- * what the platform will do with the course, which is a mechanic, and every
- * one of these states is recoverable.
- */
 function statusCopy(status: TutorCourseClaim["status"]): string {
   switch (status) {
     case "pending_verification":

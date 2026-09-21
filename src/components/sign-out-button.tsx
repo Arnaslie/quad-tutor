@@ -6,11 +6,6 @@ import { useTransition } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "./button";
 
-/**
- * `refresh()` after the redirect matters: every server component in the shell
- * read the session, and without it the client cache would keep rendering the
- * signed-in header behind the sign-in screen.
- */
 export function SignOutButton() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();

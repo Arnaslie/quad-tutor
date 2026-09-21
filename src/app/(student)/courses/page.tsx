@@ -17,18 +17,6 @@ import { CourseSearch } from "./course-search";
 
 export const metadata: Metadata = { title: "Courses" };
 
-/**
- * Intake, in two steps, on one route.
- *
- * Step one is the course; step two is the section and professor, and it is
- * required rather than optional — an instructor change invalidates the entire
- * value proposition, so the system has to know which one the student has. Both
- * steps live in the query string so the back button walks them in order and a
- * link to a half-finished intake still works.
- *
- * Course codes are display only. Every link below keys on an id.
- */
-
 const courseParam = z.uuid();
 
 export default async function CoursesPage(props: PageProps<"/courses">) {
@@ -47,10 +35,6 @@ export default async function CoursesPage(props: PageProps<"/courses">) {
 
   return <CourseStep query={query} institutionId={actor.institutionId} />;
 }
-
-/* -------------------------------------------------------------------------- */
-/* step one — the course                                                      */
-/* -------------------------------------------------------------------------- */
 
 async function CourseStep({
   query,
@@ -100,10 +84,6 @@ async function CourseStep({
     </div>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* step two — the section and the professor                                   */
-/* -------------------------------------------------------------------------- */
 
 async function OfferingStep({
   courseId,

@@ -1,12 +1,3 @@
-/**
- * Outbound email via Resend, over `fetch` — the request is one POST, so an SDK
- * would only add a version to keep current.
- *
- * With a key, send. Without one in development, log. Without one in
- * production, throw: dropping a magic link silently leaves someone staring at
- * "check your email" with nothing in any log.
- */
-
 export class EmailError extends Error {}
 
 export type Email = {
@@ -15,7 +6,6 @@ export type Email = {
   text: string;
 };
 
-/** Must be on a domain verified with Resend, or every send is rejected. */
 function sender(): string {
   return process.env.EMAIL_FROM ?? "Quad Tutor <onboarding@resend.dev>";
 }
@@ -49,7 +39,6 @@ export async function sendEmail(message: Email): Promise<void> {
   });
 
   if (!response.ok) {
-    // Their body names the bad field; losing it hides a typo in EMAIL_FROM.
     const detail = await response.text();
     throw new EmailError(`Resend refused the message (${response.status}): ${detail}`);
   }

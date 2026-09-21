@@ -1,12 +1,3 @@
-/**
- * Who gets told what, driven by the cron sweep.
- *
- * Each pass selects rows whose message is unsettled, sends, then stamps.
- * Stamping after the send means a crash sends twice and a failure retries;
- * stamping first means a crash loses the message. A duplicate is cheap, a
- * missing reminder costs a session.
- */
-
 import { and, eq, gte, isNull, lte } from "drizzle-orm";
 
 import { db } from "@/server/db";
@@ -34,12 +25,10 @@ import {
   sessionTomorrow,
 } from "./messages";
 
-/** Free cancellation ends this long before the session starts. */
 function freeUntil(scheduledAt: Date): Date {
   return new Date(scheduledAt.getTime() - LATE_CANCEL_HOURS * 60 * 60 * 1000);
 }
 
-/** The pair a session email goes to, with the course they share. */
 const sessionParties = {
   sessionId: sessionBooking.id,
   scheduledAt: sessionBooking.scheduledAt,
@@ -70,7 +59,6 @@ function sessionQuery() {
     );
 }
 
-/** Tutors with a request waiting that they have not been told about. */
 export async function notifyPendingRequests(institutionId: string): Promise<number> {
   const rows = await db
     .select({
@@ -122,7 +110,6 @@ export async function notifyPendingRequests(institutionId: string): Promise<numb
   return sent;
 }
 
-/** Students whose request was accepted and who have not been told. */
 export async function notifyAcceptedRequests(institutionId: string): Promise<number> {
   const rows = await db
     .select({
@@ -172,7 +159,6 @@ export async function notifyAcceptedRequests(institutionId: string): Promise<num
   return sent;
 }
 
-/** Both parties on a newly booked session. Carries the free-cancel deadline. */
 export async function notifyBookedSessions(institutionId: string): Promise<number> {
   const rows = await sessionQuery().where(
     and(
@@ -210,7 +196,6 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
   return sent;
 }
 
-/** The T-24h nudge, while free cancellation is still twelve hours away. */
 export async function notifyUpcomingSessions(institutionId: string): Promise<number> {
   const now = new Date();
 
@@ -251,14 +236,11 @@ export async function notifyUpcomingSessions(institutionId: string): Promise<num
   return sent;
 }
 
-/** A session is due a reminder once `now` passes `reminderDueAt`. */
 function reminderHorizon(now: Date): Date {
-  // Inverting reminderDueAt: due when scheduledAt <= now + REMINDER_HOURS.
   const span = now.getTime() - reminderDueAt(now).getTime();
   return new Date(now.getTime() + span);
 }
 
-/** Every pass, for one campus. */
 export async function runNotifications(institutionId: string): Promise<number> {
   return (
     (await notifyPendingRequests(institutionId)) +

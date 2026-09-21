@@ -1,36 +1,3 @@
-/**
- * Local development seed.
- *
- * Makes the app demonstrable on one machine: one campus, five terms, the seeded
- * weed-out courses, and a supply distribution deliberately uneven enough that
- * all three deck presentations are reachable locally — 0 tutors (demand
- * capture), 1–2 (single reveal), 3+ (deck). See docs/decisions.md.
- *
- * Idempotent by construction. Every write is keyed on a natural key and skipped
- * when the row already exists, so running this twice changes nothing and errors
- * nothing. Nothing is truncated: this has to be safe to run against a database
- * somebody has been clicking around in.
- *
- * The seed creates the world, never the money. Campus, terms, courses,
- * professors, offerings, exams, tutors, availability and enrollments are static
- * facts about a university — they are true whether or not anyone ever
- * transacts. Engagements, sessions, ledger entries and reliability events are
- * not: an engagement is the consequence of a purchase, so a `package_purchase`
- * row written by fixture is fabricated deferred revenue. Once it exists
- * `balanceFor()` is lying and nobody can tell fixture money from real money at
- * a glance.
- *
- * So if a screen needs session history to demo, it does not belong here. The
- * shape to build is a separate dev script that drives the real module functions
- * in sequence — request, accept, purchase, confirm — so every row arrives
- * through the code path that will run in production and the ledger is
- * consistent because the real code wrote it. Ask `lead` before building one.
- * An empty screen with a good empty state is honest, and it is what every real
- * user sees on day one anyway.
- *
- * Run with `npm run db:seed`.
- */
-
 import { and, count, eq, getTableName } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 
@@ -51,15 +18,6 @@ import {
   user,
 } from "./schema";
 
-/* -------------------------------------------------------------------------- */
-/* fixtures                                                                   */
-/* -------------------------------------------------------------------------- */
-
-/**
- * `emailDomain` is what `src/server/auth.ts` gates signup on, with an exact
- * match on one string — so every seeded address has to live under this domain
- * or it cannot request a magic link. UA students are @crimson.ua.edu.
- */
 const INSTITUTION = {
   name: "The University of Alabama",
   slug: "ua",
@@ -67,13 +25,6 @@ const INSTITUTION = {
   timezone: "America/Chicago",
 };
 
-/**
- * Exactly one term may contain today: `catalog/courses.ts` resolves the current
- * term with `current_date between starts_on and ends_on` and takes the first
- * row. The four past terms are what gives recency decay something to bite on —
- * a tutor who took the course four terms ago ranks below one who took it last
- * spring.
- */
 const TERMS = [
   { name: "Fall 2024", startsOn: "2024-08-21", endsOn: "2024-12-13" },
   { name: "Spring 2025", startsOn: "2025-01-08", endsOn: "2025-05-02" },
@@ -85,7 +36,7 @@ const TERMS = [
 type TermName = (typeof TERMS)[number]["name"];
 
 const CURRENT_TERM: TermName = "Fall 2026";
-/** The first term any seeded code is valid from. */
+
 const EARLIEST_TERM: TermName = "Fall 2024";
 
 const PROFESSORS = [
@@ -109,22 +60,15 @@ type ProfessorName = (typeof PROFESSORS)[number]["name"];
 type CourseFixture = {
   title: string;
   department: string;
-  /** The code the course goes by now — the alias with no end term. */
+
   code: string;
   codeSince: TermName;
-  /** Renumberings. The course row is durable; only the code moves. */
+
   formerCodes: readonly { code: string; from: TermName; to: TermName }[];
   offerings: readonly { section: string; professor: ProfessorName }[];
   exams: readonly { name: string; occursOn: string }[];
 };
 
-/**
- * Twelve weed-out courses, not the full catalog — concentration buys patience.
- *
- * Two of them carry a renumbering (`formerCodes`), which is the invariant made
- * visible: a tutor who took CS 285 in Fall 2025 and a student enrolled in
- * CS 201 today are on the same `course` row, and nothing forks.
- */
 const COURSES = {
   math125: {
     title: "Calculus I",
@@ -312,7 +256,6 @@ const COURSES = {
 
 type CourseKey = keyof typeof COURSES;
 
-/** Weekly availability window, written as wall-clock time in the campus timezone. */
 function window_(weekday: number, start: string, end: string) {
   return { weekday, startMinute: minuteOfDay(start), endMinute: minuteOfDay(end) };
 }
@@ -333,26 +276,13 @@ type TutorFixture = {
     course: CourseKey;
     grade: string;
     takenTerm: TermName;
-    /** Null models a tutor who did not record the instructor. */
+
     takenUnder: ProfessorName | null;
     status?: "active" | "pending_verification";
   }[];
   availability: readonly { weekday: number; startMinute: number; endMinute: number }[];
 };
 
-/**
- * Supply is uneven on purpose, and the unevenness is load-bearing: the deck
- * presentation rule is a function of the count, so all three treatments have to
- * be reachable on a local machine.
- *
- *   3+ tutors (deck):          MATH 125 (6), CH 101 (4), BSC 114 (3),
- *                              EC 110 (3), CS 201 (3)
- *   1–2 tutors (single reveal): MATH 126 (2), CH 102 (2), ST 260 (2), CS 100 (1)
- *   0 tutors (demand capture):  PH 105, AC 210, BSC 116
- *
- * PH 105 additionally has one `pending_verification` tutor who must NOT appear —
- * the demand-capture screen has to survive an unverified claim sitting behind it.
- */
 const TUTORS: readonly TutorFixture[] = [
   {
     key: "maya-chen",
@@ -425,7 +355,7 @@ const TUTORS: readonly TutorFixture[] = [
     graduatesOn: "2028-05-06",
     courses: [
       { course: "math125", grade: "A", takenTerm: "Spring 2026", takenUnder: null },
-      // Claimed but unverified: must not show up in the PH 105 deck.
+
       {
         course: "ph105",
         grade: "A-",
@@ -549,49 +479,27 @@ const TUTORS: readonly TutorFixture[] = [
   },
 ];
 
-/**
- * Students who are only students. Maya Chen is deliberately absent — she is in
- * `TUTORS`, and she is also enrolled below. A user being both is routine here,
- * not an edge case, and the seed has to prove the split works.
- */
 const STUDENT_ONLY = [
   { key: "owen-drake", name: "Owen Drake", email: "owen.drake@crimson.ua.edu" },
   { key: "talia-reyes", name: "Talia Reyes", email: "talia.reyes@crimson.ua.edu" },
 ] as const;
 
-/**
- * Each student is enrolled in one course from each supply bucket, so whoever is
- * demoing can sign in as any of them and hit all three presentations.
- */
 const ENROLLMENTS: readonly { person: string; course: CourseKey; section: string }[] = [
-  { person: "maya-chen", course: "math125", section: "002" }, // deck (6)
-  { person: "maya-chen", course: "cs100", section: "001" }, // single reveal (1)
-  { person: "maya-chen", course: "ph105", section: "001" }, // demand capture (0)
-  { person: "owen-drake", course: "ch101", section: "001" }, // deck (4)
-  { person: "owen-drake", course: "st260", section: "001" }, // single reveal (2)
-  { person: "owen-drake", course: "ac210", section: "001" }, // demand capture (0)
-  { person: "talia-reyes", course: "bsc114", section: "002" }, // deck (3)
-  { person: "talia-reyes", course: "ch102", section: "001" }, // single reveal (2)
-  { person: "talia-reyes", course: "bsc116", section: "001" }, // demand capture (0)
+  { person: "maya-chen", course: "math125", section: "002" },
+  { person: "maya-chen", course: "cs100", section: "001" },
+  { person: "maya-chen", course: "ph105", section: "001" },
+  { person: "owen-drake", course: "ch101", section: "001" },
+  { person: "owen-drake", course: "st260", section: "001" },
+  { person: "owen-drake", course: "ac210", section: "001" },
+  { person: "talia-reyes", course: "bsc114", section: "002" },
+  { person: "talia-reyes", course: "ch102", section: "001" },
+  { person: "talia-reyes", course: "bsc116", section: "001" },
 ];
 
-/** Fixed so a re-run never rewrites a verification timestamp. */
 const VERIFIED_AT = new Date("2026-08-01T12:00:00.000Z");
-
-/* -------------------------------------------------------------------------- */
-/* idempotency                                                                */
-/* -------------------------------------------------------------------------- */
 
 type IdRow = { id: string };
 
-/**
- * Every row this run asserted, by table name.
- *
- * The summary's job is to answer "did the seed do what it says", and a count of
- * whole tables cannot: a hand-made account or a leftover test row silently
- * inflates it and the number stops meaning anything. So the seed counts what it
- * owns and reports the table total beside it when the two differ.
- */
 const owned = new Map<string, Set<string>>();
 
 function record(table: PgTable, id: string): string {
@@ -602,15 +510,6 @@ function record(table: PgTable, id: string): string {
   return id;
 }
 
-/**
- * Find by natural key, insert only if absent. Half these tables have no unique
- * constraint to conflict on — two professors on one campus really can share a
- * name — so `onConflictDoNothing` is not available everywhere and this is the
- * one pattern that works for all of them.
- *
- * `table` is what the row is recorded against, so the label can never drift
- * from the query that produced it.
- */
 async function ensureId(
   table: PgTable,
   find: PromiseLike<IdRow[]>,
@@ -624,17 +523,6 @@ async function ensureId(
   return record(table, created.id);
 }
 
-/* -------------------------------------------------------------------------- */
-/* seeding                                                                    */
-/* -------------------------------------------------------------------------- */
-
-/**
- * The institution row is configuration, not accumulated data, so the seed owns
- * its values and corrects a stale one rather than deferring to it. That is not
- * fussiness: `emailDomain` is what `auth.ts` gates sign-in on, and a row left
- * pointing at the wrong domain means no seeded address can request a magic
- * link — the seed looks like it worked and nobody can log in.
- */
 async function seedInstitution(): Promise<string> {
   const [row] = await db
     .insert(institution)
@@ -696,12 +584,6 @@ async function seedProfessors(institutionId: string): Promise<Map<ProfessorName,
   return ids;
 }
 
-/**
- * Courses, their codes and their offerings.
- *
- * The course row is keyed on (institution, department, title) — never on the
- * code, which is exactly the string that moves when a course is renumbered.
- */
 async function seedCourses(
   institutionId: string,
   terms: Map<TermName, string>,
@@ -736,8 +618,6 @@ async function seedCourses(
     );
     courses.set(key, courseId);
 
-    // The current code is the alias with no end term — `catalog/courses.ts`
-    // resolves it that way, so exactly one per course may have a null end.
     await seedAlias(courseId, fixture.code, terms.get(fixture.codeSince)!, null);
     for (const former of fixture.formerCodes) {
       await seedAlias(courseId, former.code, terms.get(former.from)!, terms.get(former.to)!);
@@ -817,14 +697,6 @@ function offeringKey(course: CourseKey, section: string): string {
 
 type Person = { userId: string; studentProfileId: string; tutorProfileId: string | null };
 
-/**
- * A real Better Auth `user` row plus the student profile that
- * `src/server/auth.ts` provisions on create, so a seeded address can request a
- * magic link locally and land in an account that already has data behind it.
- *
- * Ids are deterministic slugs rather than generated ones: re-running has to
- * find the same row, and a readable id is worth a lot in psql.
- */
 async function seedPerson(
   institutionId: string,
   person: { key: string; name: string; email: string },
@@ -839,7 +711,7 @@ async function seedPerson(
           id: `seed_${person.key}`,
           name: person.name,
           email: person.email,
-          // Under magic link, Better Auth's `emailVerified` IS the .edu check.
+
           emailVerified: true,
         })
         .returning({ id: user.id }),
@@ -881,8 +753,6 @@ async function seedTutors(
             headline: fixture.headline,
             bio: fixture.bio,
             expectedGraduationOn: fixture.graduatesOn,
-            // KYC stays not_started: it is deferred to the first accepted
-            // request so the friction does not land on the bottleneck.
           })
           .returning({ id: tutorProfile.id }),
     );
@@ -973,11 +843,6 @@ async function seedEnrollments(
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* reporting                                                                  */
-/* -------------------------------------------------------------------------- */
-
-/** Labels come from the tables themselves, so no key here can be a typo. */
 const COUNTED_TABLES: PgTable[] = [
   institution,
   term,
@@ -994,12 +859,6 @@ const COUNTED_TABLES: PgTable[] = [
   enrollment,
 ];
 
-/**
- * Seeded counts, with the table total beside them wherever the table also holds
- * rows this script did not create — a hand-made account, a teammate's test user.
- * Both numbers matter and the difference is exactly what someone would
- * otherwise lose ten minutes to mid-demo.
- */
 async function report(institutionId: string, courses: Map<CourseKey, string>): Promise<void> {
   for (const table of COUNTED_TABLES) {
     const label = getTableName(table);
@@ -1027,14 +886,11 @@ async function report(institutionId: string, courses: Map<CourseKey, string>): P
   }
 }
 
-/** Mirrors the rule in docs/decisions.md. Reporting only — the app has its own. */
 function presentationFor(tutors: number): string {
   if (tutors === 0) return "demand_capture";
   if (tutors <= 2) return "single_reveal";
   return "deck";
 }
-
-/* -------------------------------------------------------------------------- */
 
 async function main(): Promise<void> {
   const institutionId = await seedInstitution();

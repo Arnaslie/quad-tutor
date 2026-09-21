@@ -6,15 +6,6 @@ import { usePathname } from "next/navigation";
 import { Icon } from "./icons";
 import type { NavItem } from "./nav-items";
 
-/**
- * Client-side only because active state needs the pathname, and layouts do not
- * re-render on navigation — a server-rendered active tab would go stale the
- * moment someone moved between screens.
- *
- * `style` is what the two bars look like, not two different components: the
- * shell composes the same `NAV` array twice so a route can never appear in one
- * bar and be missing from the other.
- */
 export function NavLink({
   item,
   style,

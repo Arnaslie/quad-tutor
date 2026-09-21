@@ -18,17 +18,6 @@ import { SessionActions } from "./session-actions";
 
 export const metadata: Metadata = { title: "Sessions" };
 
-/**
- * The other side of the board. Same three buckets as the student's, from the
- * same query with a different viewer, so the two cannot disagree about what a
- * session is.
- *
- * The one money line is the ledger's own total and nothing else. Tutor pay is
- * recognised when a session is delivered, so a booked-but-undelivered session
- * contributes nothing — showing what is booked would be a forecast wearing the
- * same font as a fact. Zero is a true answer to "when do I get paid", as long
- * as it says what it is counting.
- */
 export default async function TutorSessionsPage() {
   const tutor = await requireTutor();
   const [board, earnings] = await Promise.all([
@@ -76,8 +65,7 @@ export default async function TutorSessionsPage() {
         />
       ) : (
         <>
-          {/* Finished and unanswered comes first: a lapsed confirmation window
-              is prevented by putting the prompt where it cannot be missed. */}
+
           <Section title="Waiting on your answer" items={board.awaitingAnswer} />
           <Section title="Coming up" items={board.upcoming} />
           <Section title="Past" items={board.past} />
@@ -145,40 +133,15 @@ function SessionCard({ item }: { item: SessionListItem }) {
   );
 }
 
-/**
- * Everything that is not a button. `auto_released` is named honestly rather
- * than dressed up as a confirmation: nobody answered, and the money defaulted
- * because a wrong default is refundable where a wrong fact is not.
- */
 function settledCopy(item: SessionListItem): string {
   const student = displayName(item.otherPartyName, "student");
 
-  // What *you* said, not just that you said something. A tutor who cannot see
-  // which button they pressed has no way to catch their own mistake, and the
-  // two answers mean very different things to the person on the other side.
   const youSaid =
     item.yourAnswer === "denied"
       ? `You said ${student} did not show up.`
       : "You confirmed this happened.";
 
   if (item.action === "awaiting_review") {
-    // DEPENDENCY, not a second implementation of the rule: this relies on
-    // `settle()` producing `disputed` from exactly one confirm and one deny,
-    // which is its invariant and nothing this file gets to decide. Given that,
-    // their answer is the opposite of yours and needs no extra field.
-    //
-    // If a third path to `disputed` is ever added — a resolved case reopened,
-    // say — this silently starts telling a tutor the wrong thing about what
-    // they were accused of, and nothing fails loudly. The fix then is to ask
-    // `backend-dev` for `theirAnswer` on `SessionListItem` (it exists on
-    // `sessionDetail` already) and delete the inference rather than patch it.
-    //
-    // Naming both answers is the point: "they answered differently" leaves a
-    // tutor guessing what they are accused of.
-    //
-    // The denial note stays out of this deliberately, on both surfaces. It is
-    // one side's written account for whoever settles the dispute, and putting
-    // it in front of the other party turns a disagreement into a fight.
     const theySaid =
       item.yourAnswer === "denied"
         ? `${student} said it happened.`
@@ -203,7 +166,6 @@ function settledCopy(item: SessionListItem): string {
     }
   }
 
-  // Cancelled: either called off in advance, or agreed it never happened.
   return item.resolution === "resolved_not_attended"
     ? `It did not happen. The session went back to ${student}'s package.`
     : `Cancelled. ${student} can book another time.`;

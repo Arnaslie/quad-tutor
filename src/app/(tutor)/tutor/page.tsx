@@ -16,19 +16,8 @@ import { RequestActions } from "./request-actions";
 
 export const metadata: Metadata = { title: "Inbox" };
 
-/**
- * Under this, the countdown stops being background information.
- *
- * Thresholded on `expiresInMinutes`, which `inboxForTutor` computes from one
- * clock reading per query: every row on the screen then agrees, and nothing
- * here reads the clock during render.
- */
 const URGENT_MINUTES = 120;
 
-/**
- * The inbox. The layout gates on a signed-in actor only — `/tutor/start` lives
- * inside it — so the tutor check belongs here.
- */
 export default async function TutorInboxPage() {
   const tutor = await requireTutor();
   const requests = await inboxForTutor(tutor);
@@ -55,14 +44,6 @@ export default async function TutorInboxPage() {
   );
 }
 
-/**
- * An empty inbox is the normal first screen, and it means one of four quite
- * different things. Saying which is the difference between a tutor who
- * finishes setting up and one who assumes the product is broken.
- *
- * Both reads happen only on the empty path — a tutor with requests waiting
- * does not need to be told how to get requests.
- */
 async function NothingWaiting({ tutor }: { tutor: TutorActor }) {
   const [claims, windows] = await Promise.all([
     coursesForTutor(tutor),
@@ -121,8 +102,6 @@ async function NothingWaiting({ tutor }: { tutor: TutorActor }) {
 }
 
 function RequestCard({ request }: { request: TutorInboxItem }) {
-  // The course, the section and the instructor — the whole value proposition is
-  // that the tutor took *this* course under *that* professor.
   const context = [
     request.courseCode,
     request.section ? `Section ${request.section}` : null,
@@ -143,8 +122,6 @@ function RequestCard({ request }: { request: TutorInboxItem }) {
         <p className="text-sm text-muted">{request.courseTitle}</p>
       </div>
 
-      {/* Both forms of the deadline: the countdown is what makes answering fast
-          rational, and the timestamp stays true if this page sits open. */}
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <span
           className={`inline-flex items-center gap-1.5 font-medium ${

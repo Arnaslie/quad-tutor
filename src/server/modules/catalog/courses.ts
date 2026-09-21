@@ -1,14 +1,3 @@
-/**
- * Course catalog reads.
- *
- * Course selection is the primary input of a sub-45-second intake, so these
- * queries exist to make a type-ahead cheap: seeded courses only, current term
- * only, code resolved through the alias table rather than stored on the course.
- *
- * Never key on the code string. `courseCodeAlias` carries the term validity
- * window; the durable entity is `course`.
- */
-
 import { and, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
@@ -36,7 +25,6 @@ export type OfferingSummary = {
   termName: string;
 };
 
-/** The alias with no end term is the code the course goes by right now. */
 const currentCode = and(
   eq(courseCodeAlias.courseId, course.id),
   isNull(courseCodeAlias.validToTermId),
@@ -57,11 +45,6 @@ export async function currentTerm(institutionId: string) {
   return rows.at(0) ?? null;
 }
 
-/**
- * Type-ahead over the seeded weed-out courses. Matching on either the code or
- * the title is what lets a student type "calc" or "MATH 125" and land in the
- * same place.
- */
 export async function searchSeededCourses(params: {
   institutionId: string;
   query: string;
@@ -90,11 +73,6 @@ export async function searchSeededCourses(params: {
     .limit(20);
 }
 
-/**
- * Section and professor are a required second step of intake — an instructor
- * change invalidates the entire value proposition, so the system has to know
- * which one the student has.
- */
 export async function offeringsForCourse(params: {
   courseId: string;
   institutionId: string;
@@ -172,14 +150,6 @@ export async function offeringById(params: {
   return rows.at(0) ?? null;
 }
 
-/**
- * Every professor who has *ever* taught this course, not just this term's.
- *
- * `offeringsForCourse` is deliberately current-term only — a student picks the
- * section they are sitting in now. A tutor is answering a different question:
- * who taught it when *they* took it, which is usually a past term and is the
- * whole basis of the wedge. Same table, opposite time window.
- */
 export async function professorsForCourse(params: {
   courseId: string;
   institutionId: string;
@@ -199,10 +169,6 @@ export async function professorsForCourse(params: {
     .orderBy(professor.name);
 }
 
-/**
- * Terms already under way or finished, newest first — "when did you take it".
- * Future terms are excluded because nobody has taken a course in one yet.
- */
 export async function termsForInstitution(
   institutionId: string,
 ): Promise<{ id: string; name: string; startsOn: string }[]> {
@@ -215,7 +181,6 @@ export async function termsForInstitution(
     .orderBy(sql`${term.startsOn} desc`);
 }
 
-/** Packages anchor to these. The next one that has not happened yet is the default. */
 export async function upcomingExams(offeringId: string) {
   return db
     .select({ id: exam.id, name: exam.name, occursOn: exam.occursOn })
@@ -224,7 +189,6 @@ export async function upcomingExams(offeringId: string) {
     .orderBy(exam.occursOn);
 }
 
-/** Idempotent: re-running intake for the same offering must not duplicate. */
 export async function enroll(params: {
   studentProfileId: string;
   courseOfferingId: string;

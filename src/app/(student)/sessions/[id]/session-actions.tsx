@@ -9,15 +9,6 @@ import type { ViewerAction } from "@/server/modules/engagements/attendance";
 
 import { cancel, confirm, deny, type ActionResult } from "../../actions";
 
-/**
- * The one thing this student can do about this session, rendered from
- * `viewerAction`.
- *
- * The discriminator is computed by a pure function on the server so the
- * student view and the tutor view cannot drift apart. Re-deriving it here from
- * six nullable timestamps is exactly the drift that function exists to
- * prevent, so this file switches on it and adds nothing.
- */
 export function SessionActions({
   sessionId,
   action,
@@ -50,18 +41,7 @@ export function SessionActions({
     case "awaiting_review":
       return (
         <Note>
-          {/*
-            Say which way each person answered. "You answered differently"
-            leaves the student guessing what the disagreement even is, and the
-            two answers are timestamped facts — the same facts the reviewer
-            works from.
 
-            `denialNote` is deliberately not rendered here. It is one party's
-            written account, kept for whoever settles this, and putting the
-            other side's version of events in front of someone turns a
-            disagreement into a fight. The student can say their piece to the
-            reviewer; they do not need to read the accusation first.
-          */}
           {yourAnswer && theirAnswer ? (
             <p>
               You said it {yourAnswer === "denied" ? "did not happen" : "happened"}.{" "}
@@ -101,17 +81,6 @@ function Result({ state }: { state: ActionResult | null }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* cancelling                                                                 */
-/* -------------------------------------------------------------------------- */
-
-/**
- * A late cancel writes a timestamped fact, so it is disclosed before the
- * button that writes it — never after, and never in small print. The second
- * half of the disclosure matters as much as the first: it costs nothing, the
- * session comes back, and attending the next ones clears it. A consequence
- * that looks permanent is a punishment, and this system does not have those.
- */
 function Cancel({ sessionId, late }: { sessionId: string; late: boolean }) {
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
     cancel,
@@ -174,15 +143,6 @@ function Cancel({ sessionId, late }: { sessionId: string; late: boolean }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* confirming                                                                 */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Both parties answer, and the question is deliberately about the session
- * rather than about the tutor: "did this happen", not "how was it". There is
- * no rating here and there is not going to be one.
- */
 function Answer({
   sessionId,
   otherPartyName,
@@ -213,11 +173,7 @@ function Answer({
       {disputing ? (
         <form action={denyAction} className="flex flex-col gap-3">
           <input type="hidden" name="sessionId" value={sessionId} />
-          {/*
-            `maxLength` mirrors what `denyAttendanceInput` accepts, so the limit
-            turns up at the keyboard rather than as a rejection after someone
-            has written their account of a session that did not happen.
-          */}
+
           <Field
             id={noteId}
             label="What happened? (optional)"

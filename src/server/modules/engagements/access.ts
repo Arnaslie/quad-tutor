@@ -1,18 +1,3 @@
-/**
- * Who may act on a session, and what the rest of the module needs to know
- * about it.
- *
- * Every mutation and every read in this module starts here. Two rules it
- * exists to make unavoidable:
- *
- *   - The caller is authorised against the session, not against an id they
- *     supplied. A session belongs to exactly two people; anyone else gets the
- *     same answer as a session that does not exist.
- *   - `institutionId` comes from the signed-in actor and is compared against
- *     the row, never accepted as an argument. A query that takes the tenant
- *     key from the client is a cross-campus leak waiting to happen.
- */
-
 import { and, eq, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -35,17 +20,13 @@ import type { Actor } from "@/server/modules/identity/actor";
 export class SessionError extends Error {}
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-/** Anything you can run a query on: the pool or an open transaction. */
+
 export type Executor = typeof db | Tx;
 
-/** Both humans on a session are rows in `user`, so one of them needs an alias. */
 export const tutorUser = alias(user, "tutor_user");
 
-/** The session plus everything needed to settle it, with the caller's side. */
 export type Participation = SessionContextRow & { role: "student" | "tutor" };
 
-/** Everything `sessionContext` selects. No caller attached — the sweep and the
- *  dispute resolver act on sessions nobody is signed in for. */
 export type SessionContextRow = {
   sessionId: string;
   engagementId: string;
@@ -64,13 +45,7 @@ export type SessionContextRow = {
   tutorConfirmedAt: Date | null;
   studentDeniedAt: Date | null;
   tutorDeniedAt: Date | null;
-  /**
-   * Dispute evidence for a human, and nothing else. It must never be read by
-   * `reliability/standing.ts`, reach `matching/score.ts`, or gate or rank
-   * anything on either side — reliability is timestamped facts only, and a
-   * free-text column is the usual way that invariant quietly dies. The
-   * `*DeniedAt` timestamps beside it are facts; settle and rank off those.
-   */
+
   denialNote: string | null;
   confirmationWindowEndsAt: Date | null;
   studentProfileId: string;
@@ -84,7 +59,6 @@ export type SessionContextRow = {
   pricePaidMinor: number;
   currency: string;
 
-  /** The wedge, carried on every session row: which course, under whom. */
   courseId: string;
   courseCode: string | null;
   courseTitle: string;
@@ -93,11 +67,6 @@ export type SessionContextRow = {
   termName: string;
 };
 
-/**
- * The join every session query in this module needs: booking to package to
- * both humans. Written once, because getting it wrong is how the wrong person
- * sees someone else's tutoring.
- */
 export function sessionContext(exec: Executor = db) {
   return exec
     .select({
@@ -141,10 +110,7 @@ export function sessionContext(exec: Executor = db) {
     .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
     .innerJoin(course, eq(course.id, courseOffering.courseId))
     .innerJoin(term, eq(term.id, courseOffering.termId))
-    // Left, both of them, and the current-code predicate lives in the join
-    // rather than the WHERE: a course between renumberings, or an offering
-    // with no professor recorded yet, must not make a booked session vanish
-    // from the student's list.
+
     .leftJoin(
       courseCodeAlias,
       and(
@@ -155,7 +121,6 @@ export function sessionContext(exec: Executor = db) {
     .leftJoin(professor, eq(professor.id, courseOffering.professorId));
 }
 
-/** Both sides of a package are campus-scoped; both are checked. */
 export function onCampus(institutionId: string) {
   return and(
     eq(studentProfile.institutionId, institutionId),
@@ -163,11 +128,6 @@ export function onCampus(institutionId: string) {
   );
 }
 
-/**
- * Load a session the actor is actually part of, or throw. `role` is derived
- * from which side of the row the actor sits on — a user who is both a tutor
- * and a student (routine on a peer campus) gets the right one per session.
- */
 export async function loadParticipation(params: {
   exec?: Executor;
   sessionId: string;
@@ -185,12 +145,6 @@ export async function loadParticipation(params: {
   const row = rows.at(0);
   if (!row) throw new SessionError("That session does not exist.");
 
-  // Unreachable by construction — `purchasePackage` refuses a self-package and
-  // the matching module cannot produce one. Asserted anyway because the
-  // failure mode is silent: `participantRole` resolves one role per person, so
-  // a session with the same human on both sides would be answerable from
-  // neither side, attendance would never settle, and the money would never
-  // recognise. A thrown error is found in a day; that is found in a quarter.
   if (row.studentUserId === row.tutorUserId) {
     throw new SessionError(
       "That session has the same person on both sides and cannot be settled.",
@@ -214,12 +168,6 @@ function participantRole(
   return null;
 }
 
-/**
- * Locks the booking row for the rest of the transaction. Confirmations,
- * cancellations and the auto-release sweep all race each other — the sweep can
- * fire in the same millisecond as a confirmation — so every state change takes
- * this first and re-reads what it locked.
- */
 export async function lockSession(tx: Tx, sessionId: string): Promise<void> {
   await tx
     .select({ id: sessionBooking.id })

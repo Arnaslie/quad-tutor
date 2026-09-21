@@ -1,11 +1,3 @@
-/**
- * The icon set. No icon package — these are the seven glyphs the shell needs,
- * drawn on a 24×24 grid with a single stroke weight so they sit together.
- *
- * Add a path here rather than inlining an `<svg>` in a screen; that is how the
- * set stays consistent as wave 2 fills the surfaces in.
- */
-
 export type IconName =
   | "book"
   | "send"

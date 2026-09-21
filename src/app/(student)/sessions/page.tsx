@@ -30,18 +30,6 @@ export const metadata: Metadata = { title: "Sessions" };
 const bookParam = z.uuid();
 const topUpParam = z.uuid();
 
-/**
- * The session board. One query, three buckets, in the order they matter.
- *
- * `awaitingAnswer` leads and is not filed under "past" — a finished session
- * nobody has answered for is the most actionable thing on this screen, and
- * burying it is how a confirmation window lapses. Prevention comes before
- * penalty, and a visible prompt is the cheapest prevention there is.
- *
- * Packages sit above the sessions because a package with sessions left and
- * nothing on the calendar is the one state a student can get stuck in — it is
- * where a cancellation leaves them.
- */
 export default async function SessionsPage(props: PageProps<"/sessions">) {
   const actor = await requireActor();
   const searchParams = await props.searchParams;
@@ -138,13 +126,6 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
   );
 }
 
-/**
- * The end-of-term top-up. Offered only when a package with this tutor is used
- * up and the term is too close to its end for another package to make sense.
- *
- * Copy says the price before the tap, because every other button on this screen
- * belongs to something already paid for and this one does not.
- */
 function TopUpCard({ candidate }: { candidate: TopUpCandidate }) {
   const tutor = displayName(candidate.tutorName, "tutor");
   const course = candidate.courseCode ?? candidate.courseTitle;
@@ -262,11 +243,6 @@ function Section({
   );
 }
 
-/**
- * Sessions left, and the way to put one on the calendar. Unused sessions
- * refund at the end of term, so this never nags — it just makes the next step
- * one tap away.
- */
 function PackageCard({ pkg }: { pkg: StudentPackage }) {
   const tutor = displayName(pkg.tutorName, "tutor");
   const course = [pkg.courseCode ?? pkg.courseTitle, pkg.professorName]
@@ -300,10 +276,6 @@ function PackageCard({ pkg }: { pkg: StudentPackage }) {
     </Card>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* booking session 2..N                                                       */
-/* -------------------------------------------------------------------------- */
 
 async function BookingStep({ engagementId }: { engagementId: string }) {
   const actor = await requireActor();

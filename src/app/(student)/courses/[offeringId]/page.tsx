@@ -17,18 +17,6 @@ import { displayName } from "@/server/modules/identity/display-name";
 
 export const metadata: Metadata = { title: "Tutors" };
 
-/**
- * The wedge, made visible.
- *
- * Presentation is a function of supply count and the rule is hard: 0 is demand
- * capture, 1–2 is a single reveal, 3+ is a deck with the count stated out
- * loud. `presentationFor` in `matching/candidates.ts` decides; this file only
- * renders what it decided.
- *
- * There are no scores, stars or badges anywhere below, and the ranking score
- * is dropped before anything reaches a client component. Quality is rank order
- * and nothing else.
- */
 export default async function TutorDeckPage(props: PageProps<"/courses/[offeringId]">) {
   const { offeringId } = await props.params;
   const actor = await requireActor();
@@ -40,9 +28,6 @@ export default async function TutorDeckPage(props: PageProps<"/courses/[offering
   if (!offering) notFound();
 
   const [deck, standing, requests, exams] = await Promise.all([
-    // `viewerUserId` hides the student's own tutor profile. A course whose
-    // only tutor is the viewer is therefore a zero-tutor deck for them, and
-    // falls through to demand capture — which is the honest answer.
     buildDeck({
       courseOfferingId: offeringId,
       institutionId: actor.institutionId,
@@ -53,13 +38,9 @@ export default async function TutorDeckPage(props: PageProps<"/courses/[offering
     upcomingExams(offeringId),
   ]);
 
-  // The cap counts every ask a student has out, not the ones for this course,
-  // because that is what `requestTutors` enforces inside its transaction.
   const pending = requests.filter((request) => request.status === "pending");
   const room = Math.max(0, standing.parallelAskLimit - pending.length);
 
-  // Everything the score is made of stays on the server. See the note on
-  // `TutorCard`.
   const tutors: TutorCard[] = deck.candidates.map((candidate) => ({
     tutorCourseId: candidate.tutorCourseId,
     tutorName: displayName(candidate.tutorName, "tutor"),
@@ -143,12 +124,6 @@ export default async function TutorDeckPage(props: PageProps<"/courses/[offering
   );
 }
 
-/**
- * Standing is expressed as a mechanic and never as a score, a badge or a
- * number attached to the student. The copy has to say what clears it, in the
- * same breath, because every consequence in this system is recoverable by
- * design and one that does not look recoverable is just a punishment.
- */
 function StandingNote({
   limit,
   cleanSessionsToRecover,

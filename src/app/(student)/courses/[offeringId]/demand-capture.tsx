@@ -8,15 +8,6 @@ import { Icon } from "@/components/icons";
 
 import { notifyWhenCovered, type ActionResult } from "../../actions";
 
-/**
- * Zero tutors is a demand-capture moment, not an error page.
- *
- * Two things this screen must not do: apologise, and imply the student did
- * something wrong by picking an uncovered course. What it does instead is say
- * plainly what is true — nobody has claimed this course yet, not just this
- * section — and take the one useful action available, which is to record who
- * is waiting.
- */
 export function DemandCapture({
   offeringId,
   courseCode,

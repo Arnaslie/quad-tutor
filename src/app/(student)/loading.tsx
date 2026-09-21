@@ -1,7 +1,3 @@
-/**
- * Dynamic routes are not prefetched without a loading file, so this is what
- * makes tapping a tab feel immediate rather than dead.
- */
 export default function Loading() {
   return (
     <div className="flex flex-col gap-4" aria-busy="true">
