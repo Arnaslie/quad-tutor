@@ -892,22 +892,52 @@ function presentationFor(tutors: number): string {
   return "deck";
 }
 
-async function main(): Promise<void> {
+/**
+ * The campus: institution, terms, professors, courses, aliases, offerings,
+ * exams. Facts about a university, safe anywhere — this is the part a catalog
+ * API eventually replaces.
+ */
+async function seedCatalog() {
   const institutionId = await seedInstitution();
   const terms = await seedTerms(institutionId);
   const professors = await seedProfessors(institutionId);
   const { courses, offerings } = await seedCourses(institutionId, terms, professors);
+  return { institutionId, terms, professors, courses, offerings };
+}
 
-  const people = await seedTutors(institutionId, courses, terms, professors);
+/**
+ * Fixture people. Local and pre-release only: these are invented tutors with
+ * addresses on a real university domain, so they must never exist on a campus
+ * with actual students on it.
+ */
+async function seedPeople(
+  catalog: Awaited<ReturnType<typeof seedCatalog>>,
+): Promise<void> {
+  const people = await seedTutors(
+    catalog.institutionId,
+    catalog.courses,
+    catalog.terms,
+    catalog.professors,
+  );
   for (const student of STUDENT_ONLY) {
-    people.set(student.key, await seedPerson(institutionId, student));
+    people.set(student.key, await seedPerson(catalog.institutionId, student));
   }
+  await seedEnrollments(people, catalog.offerings);
+}
 
-  await seedEnrollments(people, offerings);
+async function main(): Promise<void> {
+  const catalogOnly = process.argv.includes("--catalog");
 
-  console.log(`\nseeded ${INSTITUTION.name} (${INSTITUTION.emailDomain})\n`);
-  await report(institutionId, courses);
-  console.log("\nsign in locally with any seeded address — the magic link prints to the dev server log.");
+  const catalog = await seedCatalog();
+  if (!catalogOnly) await seedPeople(catalog);
+
+  console.log(`\nseeded ${INSTITUTION.name} (${INSTITUTION.emailDomain})${catalogOnly ? " — catalog only" : ""}\n`);
+  await report(catalog.institutionId, catalog.courses);
+  console.log(
+    catalogOnly
+      ? "\nno accounts created. Anyone with a campus address can sign up."
+      : "\nsign in locally with any seeded address — the magic link prints to the dev server log.",
+  );
 }
 
 main()
