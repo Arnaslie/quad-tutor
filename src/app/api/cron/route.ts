@@ -27,31 +27,43 @@ export async function GET(request: Request) {
 
   const startedAt = Date.now();
 
-  await expireStaleRequests();
-  const released = await releaseLapsedConfirmations();
+  try {
 
-  const campuses = await db
-    .select({ id: institution.id, slug: institution.slug })
-    .from(institution);
+    await expireStaleRequests();
+    const released = await releaseLapsedConfirmations();
 
-  let refunded = 0;
-  let refundedMinor = 0;
-  let notified = 0;
+    const campuses = await db
+      .select({ id: institution.id, slug: institution.slug })
+      .from(institution);
 
-  for (const campus of campuses) {
-    const refunds = await runTermEndRefunds(campus.id);
-    refunded += refunds.length;
-    refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
-    notified += await runNotifications(campus.id);
+    let refunded = 0;
+    let refundedMinor = 0;
+    let notified = 0;
+
+    for (const campus of campuses) {
+      const refunds = await runTermEndRefunds(campus.id);
+      refunded += refunds.length;
+      refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
+      notified += await runNotifications(campus.id);
+    }
+
+    return Response.json({
+      ok: true,
+      released,
+      refunded,
+      refundedMinor,
+      notified,
+      campuses: campuses.length,
+      tookMs: Date.now() - startedAt,
+    });
+  } catch (error) {
+    // The caller proved it holds CRON_SECRET, so the reason is safe to return
+    // here and saves a trip to the platform logs.
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[cron]", error);
+    return Response.json(
+      { ok: false, error: message, tookMs: Date.now() - startedAt },
+      { status: 500 },
+    );
   }
-
-  return Response.json({
-    ok: true,
-    released,
-    refunded,
-    refundedMinor,
-    notified,
-    campuses: campuses.length,
-    tookMs: Date.now() - startedAt,
-  });
 }
