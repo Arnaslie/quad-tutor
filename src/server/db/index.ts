@@ -17,11 +17,7 @@ let instance: Database | null = null;
 function connect(): Database {
   if (instance) return instance;
 
-  // `QT_DATABASE_URL` is what Vercel's Neon integration injects under this
-  // project's prefix. Reading it directly means a rotated password reaches the
-  // app on the next deploy; a hand-copied `DATABASE_URL` silently keeps the
-  // dead one, which is how production lost its connection once already.
-  const connectionString = process.env.DATABASE_URL ?? process.env.QT_DATABASE_URL;
+  const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("DATABASE_URL is not set — copy .env.example to .env.local");
   }
