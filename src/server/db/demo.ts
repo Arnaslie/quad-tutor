@@ -42,19 +42,19 @@ import { acceptRequest, requestTutors } from "@/server/modules/matching/requests
 const MARKER = "db:demo";
 const LOCATION_NOTE = `Gorgas Library, 2nd floor [${MARKER}]`;
 
-const STUDENT = "owen.drake@crimson.ua.edu";
-const ACCEPTING_TUTOR = "jordan.ellis@crimson.ua.edu";
+const STUDENT = "seed_owen-drake";
+const ACCEPTING_TUTOR = "seed_jordan-ellis";
 
-const ALSO_ASKED = ["sofia.marek@crimson.ua.edu", "caleb.nguyen@crimson.ua.edu"];
+const ALSO_ASKED = ["seed_sofia-marek", "seed_caleb-nguyen"];
 
 const COURSE_CODE = "CH 101";
 const SECTION = "001";
 
 const SECOND_COURSE_CODE = "ST 260";
 const SECOND_SECTION = "001";
-const SECOND_TUTOR = "priyanka.shah@crimson.ua.edu";
+const SECOND_TUTOR = "seed_priyanka-shah";
 
-async function actorFor(email: string): Promise<Actor> {
+async function actorFor(userId: string): Promise<Actor> {
   const rows = await db
     .select({
       userId: user.id,
@@ -67,17 +67,17 @@ async function actorFor(email: string): Promise<Actor> {
     .from(user)
     .innerJoin(studentProfile, eq(studentProfile.userId, user.id))
     .leftJoin(tutorProfile, eq(tutorProfile.userId, user.id))
-    .where(eq(user.email, email))
+    .where(eq(user.id, userId))
     .limit(1);
 
   const actor = rows.at(0);
-  if (!actor) throw new Error(`no seeded user ${email} — run npm run db:seed first`);
+  if (!actor) throw new Error(`no seeded user ${userId} — run npm run db:seed first`);
   return actor;
 }
 
-async function tutorActorFor(email: string): Promise<TutorActor> {
-  const actor = await actorFor(email);
-  if (!actor.tutorProfileId) throw new Error(`${email} has no tutor profile`);
+async function tutorActorFor(userId: string): Promise<TutorActor> {
+  const actor = await actorFor(userId);
+  if (!actor.tutorProfileId) throw new Error(`${userId} has no tutor profile`);
   return actor as TutorActor;
 }
 
@@ -117,30 +117,29 @@ async function resolveTarget(cast: {
   const offering = offerings.at(0);
   if (!offering) throw new Error(`no ${cast.code}-${cast.section} offering — seed first`);
 
-  const emails = cast.tutors;
+  const userIds = cast.tutors;
   const rows = await db
-    .select({ id: tutorCourse.id, email: user.email })
+    .select({ id: tutorCourse.id, userId: tutorProfile.userId })
     .from(tutorCourse)
     .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
-    .innerJoin(user, eq(user.id, tutorProfile.userId))
     .where(
       and(
         eq(tutorCourse.courseId, offering.courseId),
         eq(tutorCourse.status, "active"),
-        inArray(user.email, emails),
+        inArray(tutorProfile.userId, userIds),
       ),
     );
 
-  const byEmail = new Map(rows.map((row) => [row.email, row.id]));
-  const missing = emails.filter((email) => !byEmail.has(email));
+  const byUser = new Map(rows.map((row) => [row.userId, row.id]));
+  const missing = userIds.filter((id) => !byUser.has(id));
   if (missing.length > 0) {
     throw new Error(`not tutoring ${cast.code}: ${missing.join(", ")} — seed first`);
   }
 
   return {
     courseOfferingId: offering.id,
-    tutorCourseIds: emails.map((email) => byEmail.get(email)!),
-    accepterTutorCourseId: byEmail.get(emails[0])!,
+    tutorCourseIds: userIds.map((id) => byUser.get(id)!),
+    accepterTutorCourseId: byUser.get(userIds[0])!,
   };
 }
 

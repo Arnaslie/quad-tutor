@@ -9,6 +9,7 @@ import {
   enrollment,
   exam,
   institution,
+  institutionEmail,
   professor,
   studentProfile,
   term,
@@ -268,7 +269,6 @@ function minuteOfDay(hhmm: string): number {
 type TutorFixture = {
   key: string;
   name: string;
-  email: string;
   headline: string;
   bio: string;
   graduatesOn: string;
@@ -287,7 +287,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "maya-chen",
     name: "Maya Chen",
-    email: "maya.chen@crimson.ua.edu",
     headline: "Econ major, TA for intro micro",
     bio: "I took EC 110 with Nunez and still have every problem set I wrote.",
     graduatesOn: "2028-05-06",
@@ -297,7 +296,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "devin-parker",
     name: "Devin Parker",
-    email: "devin.parker@crimson.ua.edu",
     headline: "Math and econ, calc tutor since sophomore year",
     bio: "Whitaker's exams reuse the same four proof shapes. I can show you which.",
     graduatesOn: "2027-05-08",
@@ -310,7 +308,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "aisha-bello",
     name: "Aisha Bello",
-    email: "aisha.bello@crimson.ua.edu",
     headline: "Mechanical engineering, calc sequence start to finish",
     bio: "Took 125 and 126 back to back under Doyle. The curve is not what people think.",
     graduatesOn: "2027-12-11",
@@ -323,7 +320,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "luis-moreno",
     name: "Luis Moreno",
-    email: "luis.moreno@crimson.ua.edu",
     headline: "Physics major who lives in the math building",
     bio: "Series and sequences are where 126 loses people. That is most of what I do.",
     graduatesOn: "2027-05-08",
@@ -336,7 +332,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "hannah-kim",
     name: "Hannah Kim",
-    email: "hannah.kim@crimson.ua.edu",
     headline: "CS, and I still remember Raman's quiz format",
     bio: "I tutor 125 and 201. Both are pacing problems more than concept problems.",
     graduatesOn: "2027-05-08",
@@ -349,7 +344,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "tyler-boone",
     name: "Tyler Boone",
-    email: "tyler.boone@crimson.ua.edu",
     headline: "Junior, engineering",
     bio: "Second-attempt student turned tutor. I know exactly where it goes wrong.",
     graduatesOn: "2028-05-06",
@@ -369,7 +363,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "priyanka-shah",
     name: "Priyanka Shah",
-    email: "priyanka.shah@crimson.ua.edu",
     headline: "Stats major, R and calc",
     bio: "Haddad's data analysis projects are graded on writeups, not code. Nobody tells you that.",
     graduatesOn: "2027-12-11",
@@ -382,7 +375,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "jordan-ellis",
     name: "Jordan Ellis",
-    email: "jordan.ellis@crimson.ua.edu",
     headline: "Pre-med, general chemistry",
     bio: "Brackett writes the same stoichiometry trap every term. Once you see it you stop falling for it.",
     graduatesOn: "2027-05-08",
@@ -392,7 +384,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "sofia-marek",
     name: "Sofia Marek",
-    email: "sofia.marek@crimson.ua.edu",
     headline: "Chemistry major, both semesters of gen chem",
     bio: "Ferraro's lab writeups are half the grade and almost nobody optimises for them.",
     graduatesOn: "2027-12-11",
@@ -405,7 +396,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "caleb-nguyen",
     name: "Caleb Nguyen",
-    email: "caleb.nguyen@crimson.ua.edu",
     headline: "CS and chem double major",
     bio: "I took gen chem a while ago, so I am cheap and patient.",
     graduatesOn: "2027-05-08",
@@ -418,7 +408,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "rachel-owusu",
     name: "Rachel Owusu",
-    email: "rachel.owusu@crimson.ua.edu",
     headline: "Biochem, gen chem I and II",
     bio: "Titration curves, equilibrium, and the two weeks of kinetics that sink people.",
     graduatesOn: "2028-05-06",
@@ -431,7 +420,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "ben-castillo",
     name: "Ben Castillo",
-    email: "ben.castillo@crimson.ua.edu",
     headline: "Biology, and the intro CS course",
     bio: "Holloway tests vocabulary harder than mechanism. Study accordingly.",
     graduatesOn: "2027-12-11",
@@ -444,7 +432,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "nora-fitzgerald",
     name: "Nora Fitzgerald",
-    email: "nora.fitzgerald@crimson.ua.edu",
     headline: "Neuroscience, intro bio",
     bio: "Ortiz's section moves fast through genetics. I have the timeline written down.",
     graduatesOn: "2028-05-06",
@@ -454,7 +441,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "isaac-levin",
     name: "Isaac Levin",
-    email: "isaac.levin@crimson.ua.edu",
     headline: "CS with a bio minor",
     bio: "Recursion and pointers, or cell respiration. Odd pairing, same explanation style.",
     graduatesOn: "2027-05-08",
@@ -467,7 +453,6 @@ const TUTORS: readonly TutorFixture[] = [
   {
     key: "grace-whitfield",
     name: "Grace Whitfield",
-    email: "grace.whitfield@crimson.ua.edu",
     headline: "Finance, micro and stats",
     bio: "Graphs first, algebra second. Micro gets much easier in that order.",
     graduatesOn: "2027-05-08",
@@ -480,8 +465,8 @@ const TUTORS: readonly TutorFixture[] = [
 ];
 
 const STUDENT_ONLY = [
-  { key: "owen-drake", name: "Owen Drake", email: "owen.drake@crimson.ua.edu" },
-  { key: "talia-reyes", name: "Talia Reyes", email: "talia.reyes@crimson.ua.edu" },
+  { key: "owen-drake", name: "Owen Drake" },
+  { key: "talia-reyes", name: "Talia Reyes" },
 ] as const;
 
 const ENROLLMENTS: readonly { person: string; course: CourseKey; section: string }[] = [
@@ -695,27 +680,37 @@ function offeringKey(course: CourseKey, section: string): string {
   return `${course}/${section}`;
 }
 
+/**
+ * Fixture people are plus-aliases of one real inbox, never addresses on the
+ * campus domain: a deployed campus sends real mail, and an invented
+ * crimson.ua.edu address may well belong to an actual student.
+ */
+function fixtureEmail(key: string): string {
+  const [local, domain] = (process.env.SEED_INBOX ?? "").trim().toLowerCase().split("@");
+  if (!local || !domain) {
+    throw new Error("Set SEED_INBOX to an inbox you own — fixture people are aliases of it.");
+  }
+  return `${local}+${key}@${domain}`;
+}
+
 type Person = { userId: string; studentProfileId: string; tutorProfileId: string | null };
 
 async function seedPerson(
   institutionId: string,
-  person: { key: string; name: string; email: string },
+  person: { key: string; name: string },
 ): Promise<Person> {
-  const userId = await ensureId(
-    user,
-    db.select({ id: user.id }).from(user).where(eq(user.email, person.email)),
-    () =>
-      db
-        .insert(user)
-        .values({
-          id: `seed_${person.key}`,
-          name: person.name,
-          email: person.email,
+  const email = fixtureEmail(person.key);
+  const [row] = await db
+    .insert(user)
+    .values({ id: `seed_${person.key}`, name: person.name, email, emailVerified: true })
+    .onConflictDoUpdate({ target: user.id, set: { name: person.name, email } })
+    .returning({ id: user.id });
+  const userId = record(user, row.id);
 
-          emailVerified: true,
-        })
-        .returning({ id: user.id }),
-  );
+  await db
+    .insert(institutionEmail)
+    .values({ email, institutionId })
+    .onConflictDoUpdate({ target: institutionEmail.email, set: { institutionId } });
 
   const studentProfileId = await ensureId(
     studentProfile,
@@ -906,9 +901,8 @@ async function seedCatalog() {
 }
 
 /**
- * Fixture people. Local and pre-release only: these are invented tutors with
- * addresses on a real university domain, so they must never exist on a campus
- * with actual students on it.
+ * Fixture people. Local and pre-release only: a real student would book these
+ * invented tutors as if they were people.
  */
 async function seedPeople(
   catalog: Awaited<ReturnType<typeof seedCatalog>>,
