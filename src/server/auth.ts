@@ -7,14 +7,22 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import { sendEmail } from "./modules/notifications/email";
 import * as schema from "./db/schema";
-import { institution, studentProfile } from "./db/schema";
+import { institution, institutionEmail, studentProfile } from "./db/schema";
 
 export const NAME_REQUIRED_MESSAGE =
   "Add your name — tutors see it when you ask them for help.";
 
 async function institutionForEmail(email: string) {
-  const domain = email.split("@").at(1)?.toLowerCase();
+  const normalized = email.trim().toLowerCase();
+  const domain = normalized.split("@").at(1);
   if (!domain) return null;
+
+  const allowed = await db
+    .select({ id: institutionEmail.institutionId })
+    .from(institutionEmail)
+    .where(eq(institutionEmail.email, normalized))
+    .limit(1);
+  if (allowed.length) return allowed[0];
 
   const rows = await db
     .select({ id: institution.id })

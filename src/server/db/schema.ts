@@ -89,6 +89,14 @@ export const institution = pgTable("institution", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const institutionEmail = pgTable("institution_email", {
+  email: text("email").primaryKey(),
+  institutionId: uuid("institution_id")
+    .notNull()
+    .references(() => institution.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export { user, session, account, verification };
 
 export const studentProfile = pgTable(
