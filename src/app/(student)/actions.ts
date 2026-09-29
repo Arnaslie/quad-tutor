@@ -104,10 +104,9 @@ export async function notifyWhenCovered(
     : null;
   if (!offering) return { ok: false, error: "That section no longer exists." };
 
-  await awaitCoverage({
-    studentProfileId: actor.studentProfileId,
-    courseOfferingId: offering.offeringId,
-  });
+  const seat = { studentProfileId: actor.studentProfileId, courseOfferingId: offering.offeringId };
+  await enroll(seat);
+  await awaitCoverage(seat);
 
   revalidatePath(`/courses/${offering.offeringId}`);
   return { ok: true, message: "You are on the list for this section." };

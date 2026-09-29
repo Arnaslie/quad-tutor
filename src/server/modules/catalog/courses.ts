@@ -5,6 +5,7 @@ import {
   course,
   courseCodeAlias,
   courseOffering,
+  demandSignal,
   enrollment,
   exam,
   professor,
@@ -201,10 +202,10 @@ export async function awaitCoverage(params: {
   courseOfferingId: string;
 }): Promise<void> {
   await db
-    .insert(enrollment)
-    .values({ ...params, coverageRequestedAt: new Date() })
+    .insert(demandSignal)
+    .values(params)
     .onConflictDoUpdate({
-      target: [enrollment.studentProfileId, enrollment.courseOfferingId],
-      set: { coverageRequestedAt: sql`coalesce(${enrollment.coverageRequestedAt}, now())` },
+      target: [demandSignal.studentProfileId, demandSignal.courseOfferingId],
+      set: { createdAt: sql`now()`, notifiedAt: null },
     });
 }

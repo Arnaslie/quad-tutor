@@ -1,5 +1,5 @@
 {
-  "id": "61566ade-b52c-41b3-85a4-c74b436d0d8c",
+  "id": "04df9b9d-5903-4f7a-be12-cc210a66b0b1",
   "prevId": "cff2f513-fc8f-4e9d-9f42-24ace7b2a513",
   "version": "7",
   "dialect": "postgresql",
@@ -457,6 +457,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "notified_at": {
+          "name": "notified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -768,18 +774,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "coverage_requested_at": {
-          "name": "coverage_requested_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "coverage_notified_at": {
-          "name": "coverage_notified_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {

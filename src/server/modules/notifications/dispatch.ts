@@ -1,15 +1,16 @@
-import { and, eq, exists, gte, isNotNull, isNull, lte, ne } from "drizzle-orm";
+import { and, eq, exists, gte, isNull, lte, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
   course,
   courseCodeAlias,
   courseOffering,
+  demandSignal,
   engagement,
-  enrollment,
   matchRequest,
   sessionBooking,
   studentProfile,
+  term,
   tutorCourse,
   tutorProfile,
   user,
@@ -254,17 +255,19 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
 
   const rows = await db
     .select({
-      id: enrollment.id,
+      id: demandSignal.id,
+      requestedAt: demandSignal.createdAt,
       offeringId: courseOffering.id,
       studentEmail: user.email,
       studentName: user.name,
       code: courseCodeAlias.code,
       title: course.title,
     })
-    .from(enrollment)
-    .innerJoin(studentProfile, eq(studentProfile.id, enrollment.studentProfileId))
+    .from(demandSignal)
+    .innerJoin(studentProfile, eq(studentProfile.id, demandSignal.studentProfileId))
     .innerJoin(user, eq(user.id, studentProfile.userId))
-    .innerJoin(courseOffering, eq(courseOffering.id, enrollment.courseOfferingId))
+    .innerJoin(courseOffering, eq(courseOffering.id, demandSignal.courseOfferingId))
+    .innerJoin(term, eq(term.id, courseOffering.termId))
     .innerJoin(course, eq(course.id, courseOffering.courseId))
     .leftJoin(
       courseCodeAlias,
@@ -272,8 +275,8 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
     )
     .where(
       and(
-        isNotNull(enrollment.coverageRequestedAt),
-        isNull(enrollment.coverageNotifiedAt),
+        isNull(demandSignal.notifiedAt),
+        gte(term.endsOn, sql`current_date`),
         eq(studentProfile.institutionId, institutionId),
         eq(course.institutionId, institutionId),
         exists(covered),
@@ -282,30 +285,32 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
 
   let sent = 0;
   for (const row of rows) {
+    const claimedAt = new Date();
     const claimed = await db
-      .update(enrollment)
-      .set({ coverageNotifiedAt: new Date() })
-      .where(and(eq(enrollment.id, row.id), isNull(enrollment.coverageNotifiedAt)))
-      .returning({ id: enrollment.id });
+      .update(demandSignal)
+      .set({ notifiedAt: claimedAt })
+      .where(and(eq(demandSignal.id, row.id), isNull(demandSignal.notifiedAt)))
+      .returning({ id: demandSignal.id });
     if (claimed.length === 0) continue;
 
     try {
-      await sendEmail(
-        sectionCovered({
+      await sendEmail({
+        ...sectionCovered({
           to: row.studentEmail,
           studentName: displayName(row.studentName, "student"),
           courseLabel: row.code ?? row.title,
           offeringId: row.offeringId,
         }),
-      );
+        idempotencyKey: `section-covered/${row.id}/${row.requestedAt.getTime()}`,
+      });
+      sent += 1;
     } catch (error) {
       await db
-        .update(enrollment)
-        .set({ coverageNotifiedAt: null })
-        .where(eq(enrollment.id, row.id));
-      throw error;
+        .update(demandSignal)
+        .set({ notifiedAt: null })
+        .where(and(eq(demandSignal.id, row.id), eq(demandSignal.notifiedAt, claimedAt)));
+      console.error(`[notifications] section-covered ${row.id} not sent`, error);
     }
-    sent += 1;
   }
 
   return sent;

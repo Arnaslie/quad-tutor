@@ -1,0 +1,1 @@
+ALTER TABLE "demand_signal" ADD COLUMN "notified_at" timestamp with time zone;
