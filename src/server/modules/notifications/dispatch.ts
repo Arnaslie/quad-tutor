@@ -256,7 +256,7 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
   const rows = await db
     .select({
       id: demandSignal.id,
-      requestedAt: demandSignal.createdAt,
+      requestedAt: demandSignal.requestedAt,
       offeringId: courseOffering.id,
       studentEmail: user.email,
       studentName: user.name,

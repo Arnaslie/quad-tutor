@@ -11,6 +11,8 @@ import {
   professor,
   term,
 } from "@/server/db/schema";
+import type { Actor } from "@/server/modules/identity/actor";
+import { buildDeck } from "@/server/modules/matching/candidates";
 
 export type CourseSummary = {
   courseId: string;
@@ -198,14 +200,27 @@ export async function enroll(params: {
 }
 
 export async function awaitCoverage(params: {
-  studentProfileId: string;
+  actor: Pick<Actor, "userId" | "institutionId" | "studentProfileId">;
   courseOfferingId: string;
-}): Promise<void> {
+}): Promise<boolean> {
+  const deck = await buildDeck({
+    courseOfferingId: params.courseOfferingId,
+    institutionId: params.actor.institutionId,
+    viewerUserId: params.actor.userId,
+  });
+  if (deck.candidates.length > 0) return false;
+
+  const seat = {
+    studentProfileId: params.actor.studentProfileId,
+    courseOfferingId: params.courseOfferingId,
+  };
+  await enroll(seat);
   await db
     .insert(demandSignal)
-    .values(params)
+    .values(seat)
     .onConflictDoUpdate({
       target: [demandSignal.studentProfileId, demandSignal.courseOfferingId],
-      set: { createdAt: sql`now()`, notifiedAt: null },
+      set: { requestedAt: sql`now()`, notifiedAt: null },
     });
+  return true;
 }

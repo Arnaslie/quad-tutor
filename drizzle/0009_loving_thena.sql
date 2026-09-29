@@ -1,0 +1,2 @@
+ALTER TABLE "demand_signal" ADD COLUMN "requested_at" timestamp with time zone DEFAULT now() NOT NULL;--> statement-breakpoint
+ALTER TABLE "demand_signal" ADD COLUMN "notified_at" timestamp with time zone;
