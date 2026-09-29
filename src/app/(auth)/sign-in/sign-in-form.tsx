@@ -47,6 +47,7 @@ export function SignInForm() {
           name: trimmedName,
           email: trimmedEmail,
           callbackURL: "/courses",
+          newUserCallbackURL: "/welcome",
           errorCallbackURL: "/sign-in",
         });
 
@@ -122,8 +123,8 @@ function LinkSent({ email, onRestart }: { email: string; onRestart: () => void }
         <h2 className="text-base font-medium">Check your email</h2>
         <p className="text-sm text-muted">
           A sign-in link is on its way to{" "}
-          <span className="font-medium text-foreground">{email}</span>. It opens
-          this app straight on your courses.
+          <span className="font-medium text-foreground">{email}</span>. Open it and
+          you are signed in.
         </p>
       </div>
 
