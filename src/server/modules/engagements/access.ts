@@ -7,6 +7,7 @@ import {
   courseCodeAlias,
   courseOffering,
   engagement,
+  messageThread,
   professor,
   sessionBooking,
   studentProfile,
@@ -66,6 +67,7 @@ export type SessionContextRow = {
   section: string | null;
   professorName: string | null;
   termName: string;
+  threadId: string | null;
 };
 
 export function sessionContext(exec: Executor = db) {
@@ -101,6 +103,7 @@ export function sessionContext(exec: Executor = db) {
       section: courseOffering.section,
       professorName: professor.name,
       termName: term.name,
+      threadId: messageThread.id,
     })
     .from(sessionBooking)
     .innerJoin(engagement, eq(engagement.id, sessionBooking.engagementId))
@@ -120,7 +123,14 @@ export function sessionContext(exec: Executor = db) {
         isNull(courseCodeAlias.validToTermId),
       ),
     )
-    .leftJoin(professor, eq(professor.id, courseOffering.professorId));
+    .leftJoin(professor, eq(professor.id, courseOffering.professorId))
+    .leftJoin(
+      messageThread,
+      and(
+        eq(messageThread.studentProfileId, engagement.studentProfileId),
+        eq(messageThread.tutorCourseId, engagement.tutorCourseId),
+      ),
+    );
 }
 
 export function onCampus(institutionId: string) {

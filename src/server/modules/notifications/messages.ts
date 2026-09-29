@@ -206,6 +206,32 @@ export function claimVerified(params: {
   };
 }
 
+export function messageWaiting(params: {
+  to: string;
+  recipientName: string;
+  senderName: string;
+  courseLabel: string;
+  preview: string;
+  threadId: string;
+}): Email {
+  return {
+    to: params.to,
+    subject: `${params.senderName} sent you a message about ${params.courseLabel}`,
+    text: [
+      `${params.recipientName},`,
+      "",
+      `${params.senderName} wrote:`,
+      `"${params.preview}"`,
+      "",
+      "Read and reply here. We will not email about this conversation again until",
+      "you have read it.",
+      "",
+      url(`/messages/${params.threadId}`),
+      ...SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
 export function claimNeedsNewProof(params: {
   to: string;
   tutorName: string;
