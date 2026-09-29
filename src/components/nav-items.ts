@@ -8,7 +8,7 @@ export type NavItem = {
   exact?: boolean;
 };
 
-export type Surface = "student" | "tutor";
+export type Surface = "student" | "tutor" | "ops";
 
 export const NAV: Record<Surface, NavItem[]> = {
   student: [
@@ -22,4 +22,5 @@ export const NAV: Record<Surface, NavItem[]> = {
     { href: "/tutor/availability", label: "Hours", icon: "clock" },
     { href: "/tutor/sessions", label: "Sessions", icon: "calendar" },
   ],
+  ops: [{ href: "/ops/verifications", label: "Verifications", icon: "check" }],
 };

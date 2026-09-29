@@ -9,6 +9,7 @@ import {
   date,
   index,
   uniqueIndex,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 
 import { user, session, account, verification } from "./auth-schema";
@@ -25,6 +26,17 @@ export const tutorCourseStatus = pgEnum("tutor_course_status", [
   "active",
   "winding_down",
   "retired",
+  "rejected",
+]);
+
+export const proofKind = pgEnum("proof_kind", ["official_transcript", "screenshot"]);
+
+export const rejectionReason = pgEnum("rejection_reason", [
+  "grade_not_visible",
+  "name_mismatch",
+  "wrong_course_or_term",
+  "grade_below_a_minus",
+  "unreadable",
 ]);
 
 export const matchRequestStatus = pgEnum("match_request_status", [
@@ -282,6 +294,12 @@ export const tutorCourse = pgTable(
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     status: tutorCourseStatus("status").notNull().default("pending_verification"),
 
+    proofKind: proofKind("proof_kind"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => user.id),
+    rejectionReason: rejectionReason("rejection_reason"),
+    decisionNotifiedAt: timestamp("decision_notified_at", { withTimezone: true }),
+
     scoreSampleCount: integer("score_sample_count").notNull().default(0),
     scorePosteriorMean: integer("score_posterior_mean"),
 
@@ -291,6 +309,39 @@ export const tutorCourse = pgTable(
     uniqueIndex("tutor_course_unique_idx").on(t.tutorProfileId, t.courseId),
     index("tutor_course_course_idx").on(t.courseId),
   ],
+);
+
+export const verificationFile = pgTable(
+  "verification_file",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tutorCourseId: uuid("tutor_course_id")
+      .notNull()
+      .references(() => tutorCourse.id),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    pathname: text("pathname").notNull().unique(),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+  },
+  (t) => [index("verification_file_claim_idx").on(t.tutorCourseId)],
+);
+
+export const operator = pgTable(
+  "operator",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.institutionId] })],
 );
 
 export const matchRequest = pgTable(

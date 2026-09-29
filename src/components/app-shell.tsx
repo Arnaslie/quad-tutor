@@ -7,6 +7,14 @@ import { NavLink } from "./nav-link";
 import { SignOutButton } from "./sign-out-button";
 import { SurfaceSwitch } from "./surface-switch";
 
+const HOME: Record<Surface, string> = {
+  student: "/courses",
+  tutor: "/tutor",
+  ops: "/ops/verifications",
+};
+
+const BADGE: Partial<Record<Surface, string>> = { tutor: "Tutor", ops: "Ops" };
+
 export function AppShell({
   surface,
   actor,
@@ -20,7 +28,7 @@ export function AppShell({
   children: ReactNode;
 }) {
   const items = nav ? NAV[surface] : [];
-  const home = surface === "tutor" ? "/tutor" : "/courses";
+  const home = HOME[surface];
 
   return (
     <div className="flex flex-1 flex-col">
@@ -33,9 +41,9 @@ export function AppShell({
             Quad Tutor
           </Link>
 
-          {surface === "tutor" ? (
+          {BADGE[surface] ? (
             <span className="rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent">
-              Tutor
+              {BADGE[surface]}
             </span>
           ) : null}
 

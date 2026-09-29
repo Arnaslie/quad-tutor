@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { Button } from "@/components/button";
+import { Button, ButtonLink } from "@/components/button";
 import { Card } from "@/components/card";
 import { EmptyState } from "@/components/empty-state";
 import { Field, Select } from "@/components/field";
@@ -15,18 +15,23 @@ import {
   coursesForTutor,
   type TutorCourseClaim,
 } from "@/server/modules/tutoring/courses";
+import {
+  PROOF_KIND_LABEL,
+  REJECTION_REASON_COPY,
+} from "@/server/modules/tutoring/proof-rules";
 
 import { ClaimForm } from "./claim-form";
+import { ProofForm } from "./proof-form";
 
 export const metadata: Metadata = { title: "Your courses" };
 
 export default async function TutorCoursesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ course?: string | string[] }>;
+  searchParams: Promise<{ course?: string | string[]; proof?: string | string[] }>;
 }) {
   const tutor = await requireTutor();
-  const { course } = await searchParams;
+  const { course, proof } = await searchParams;
   const wanted = typeof course === "string" ? course : undefined;
 
   const [claims, catalog] = await Promise.all([
@@ -36,6 +41,26 @@ export default async function TutorCoursesPage({
   ]);
 
   const claimed = new Set(claims.map((claim) => claim.courseId));
+
+  const proving = claims.find((claim) => claim.id === proof && needsProof(claim));
+  if (proving) {
+    const label = proving.courseCode ?? proving.courseTitle;
+    return (
+      <div className="flex max-w-xl flex-col gap-6">
+        <PageHeader
+          eyebrow={label}
+          title="Show us the grade"
+          description={`A person checks your ${label} grade against your UA transcript before students can see you for it.`}
+        />
+        {proving.status === "rejected" && proving.rejectionReason ? (
+          <RejectionNote reason={proving.rejectionReason} />
+        ) : null}
+        <Card>
+          <ProofForm tutorCourseId={proving.id} courseCode={label} />
+        </Card>
+      </div>
+    );
+  }
 
   const claiming = wanted ? catalog.find((entry) => entry.courseId === wanted) : undefined;
 
@@ -143,15 +168,45 @@ function ClaimCard({ claim }: { claim: TutorCourseClaim }) {
         <p className="text-sm text-muted">{claim.courseTitle}</p>
       ) : null}
       <p className="text-sm text-muted">{history}</p>
-      <p className="text-sm text-foreground">{statusCopy(claim.status)}</p>
+      {claim.proofKind ? (
+        <p className="text-sm text-muted">Proof: {PROOF_KIND_LABEL[claim.proofKind]}</p>
+      ) : null}
+      <p className="text-sm text-foreground">{statusCopy(claim)}</p>
+      {claim.status === "rejected" && claim.rejectionReason ? (
+        <RejectionNote reason={claim.rejectionReason} />
+      ) : null}
+      {needsProof(claim) ? (
+        <ButtonLink href={`/tutor/courses?proof=${claim.id}`} className="sm:self-start">
+          {claim.status === "rejected" ? "Upload a new copy" : "Upload your transcript"}
+        </ButtonLink>
+      ) : null}
     </Card>
   );
 }
 
-function statusCopy(status: TutorCourseClaim["status"]): string {
-  switch (status) {
+function RejectionNote({ reason }: { reason: keyof typeof REJECTION_REASON_COPY }) {
+  return (
+    <p className="rounded-xl bg-surface-sunken p-3 text-sm text-foreground">
+      {REJECTION_REASON_COPY[reason]} This is about the paperwork, nothing else: send a new
+      copy and it goes straight back in the queue.
+    </p>
+  );
+}
+
+function needsProof(claim: TutorCourseClaim): boolean {
+  return (
+    claim.status === "rejected" || (claim.status === "pending_verification" && !claim.hasProof)
+  );
+}
+
+function statusCopy(claim: TutorCourseClaim): string {
+  switch (claim.status) {
     case "pending_verification":
-      return "Waiting on verification. Students cannot see it or ask you for it yet.";
+      return claim.hasProof
+        ? "Proof sent. A person is checking it; students cannot see this course yet."
+        : "Needs your transcript before a person can check it. Students cannot see it yet.";
+    case "rejected":
+      return "We couldn't confirm the grade from the file you sent. Students cannot see it yet.";
     case "active":
       return "Live. Students in this course can ask you.";
     case "winding_down":

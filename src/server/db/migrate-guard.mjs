@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+import { isLocalHost } from "./local-host.mjs";
 
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -20,7 +20,7 @@ try {
 } catch {
   refuse("DATABASE_URL is not a parseable URL.");
 }
-if (LOCAL_HOSTS.has(host)) process.exit(0);
+if (isLocalHost(host)) process.exit(0);
 
 console.log(`Migrating ${host} — checking this checkout matches origin/main…`);
 

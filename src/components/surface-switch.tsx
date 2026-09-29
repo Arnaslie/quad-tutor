@@ -13,7 +13,7 @@ export function SurfaceSwitch({
   surface: Surface;
   isTutor: boolean;
 }) {
-  if (surface === "tutor") {
+  if (surface !== "student") {
     return (
       <Link href="/courses" className={LINK}>
         <Icon name="book" className="size-[18px]" />

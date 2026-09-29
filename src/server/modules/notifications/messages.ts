@@ -183,3 +183,50 @@ export function sessionTomorrow(params: {
     ].join("\n"),
   };
 }
+
+export function claimVerified(params: {
+  to: string;
+  tutorName: string;
+  courseLabel: string;
+}): Email {
+  return {
+    to: params.to,
+    subject: `${params.courseLabel} is live`,
+    text: [
+      `${params.tutorName},`,
+      "",
+      `Your transcript checked out, so ${params.courseLabel} is live. Students in the`,
+      "course can see you and ask you for help from now on.",
+      "",
+      "We deleted the file you sent once it was checked.",
+      "",
+      url("/tutor/courses"),
+      ...SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+export function claimNeedsNewProof(params: {
+  to: string;
+  tutorName: string;
+  courseLabel: string;
+  reason: string;
+}): Email {
+  return {
+    to: params.to,
+    subject: `${params.courseLabel}: we need another copy of your transcript`,
+    text: [
+      `${params.tutorName},`,
+      "",
+      `We couldn't confirm ${params.courseLabel} from the file you sent.`,
+      "",
+      params.reason,
+      "",
+      "This is about the paperwork, nothing else. Upload a new copy and it goes",
+      "straight back in the queue. We deleted the file you sent.",
+      "",
+      url("/tutor/courses"),
+      ...SIGN_OFF,
+    ].join("\n"),
+  };
+}

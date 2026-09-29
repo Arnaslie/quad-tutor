@@ -1,11 +1,11 @@
 import { cache } from "react";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 
 import { auth } from "@/server/auth";
 import { db } from "@/server/db";
-import { studentProfile, tutorProfile, user } from "@/server/db/schema";
+import { operator, studentProfile, tutorProfile, user } from "@/server/db/schema";
 
 export type Actor = {
   userId: string;
@@ -18,6 +18,8 @@ export type Actor = {
 };
 
 export type TutorActor = Actor & { tutorProfileId: string };
+
+export type OperatorActor = Actor & { operatorInstitutionIds: string[] };
 
 export const currentActor = cache(async (): Promise<Actor | null> => {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -51,6 +53,25 @@ export async function requireTutor(): Promise<TutorActor> {
   const actor = await requireActor();
   if (!actor.tutorProfileId) redirect("/tutor/start");
   return actor as TutorActor;
+}
+
+export const currentOperator = cache(async (): Promise<OperatorActor | null> => {
+  const actor = await currentActor();
+  if (!actor) return null;
+
+  const rows = await db
+    .select({ institutionId: operator.institutionId })
+    .from(operator)
+    .where(eq(operator.userId, actor.userId));
+  if (rows.length === 0) return null;
+
+  return { ...actor, operatorInstitutionIds: rows.map((row) => row.institutionId) };
+});
+
+export async function requireOperator(): Promise<OperatorActor> {
+  const found = await currentOperator();
+  if (!found) notFound();
+  return found;
 }
 
 export async function becomeTutor(actor: Actor): Promise<string> {

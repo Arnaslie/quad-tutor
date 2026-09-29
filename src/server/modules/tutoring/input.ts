@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { PROOF_KINDS } from "./proof-rules";
+
 export const claimCourseInput = z.object({
   courseId: z.uuid(),
   takenTermId: z.uuid(),
@@ -7,6 +9,11 @@ export const claimCourseInput = z.object({
   takenUnderProfessorId: z.uuid().nullish(),
 
   gradeEarned: z.string().trim().min(1).max(4),
+});
+
+export const submitProofInput = z.object({
+  tutorCourseId: z.uuid(),
+  kind: z.enum(PROOF_KINDS),
 });
 
 const weekday = z.number().int().min(0).max(6);

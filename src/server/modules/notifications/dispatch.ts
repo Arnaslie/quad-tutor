@@ -1,4 +1,4 @@
-import { and, eq, exists, gt, gte, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, exists, gt, gte, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -18,9 +18,12 @@ import {
 import { tutorUser } from "@/server/modules/engagements/access";
 import { LATE_CANCEL_HOURS, reminderDueAt } from "@/server/modules/engagements/attendance";
 import { displayName } from "@/server/modules/identity/display-name";
+import { REJECTION_REASON_COPY } from "@/server/modules/tutoring/proof-rules";
 
 import { sendEmail } from "./email";
 import {
+  claimNeedsNewProof,
+  claimVerified,
   requestAccepted,
   requestWaiting,
   sectionCovered,
@@ -349,6 +352,81 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
   return sent;
 }
 
+export async function notifyVerificationDecisions(institutionId: string): Promise<number> {
+  const rows = await db
+    .select({
+      id: tutorCourse.id,
+      status: tutorCourse.status,
+      reviewedAt: tutorCourse.reviewedAt,
+      rejectionReason: tutorCourse.rejectionReason,
+      tutorEmail: tutorUser.email,
+      tutorName: tutorUser.name,
+      code: courseCodeAlias.code,
+      title: course.title,
+    })
+    .from(tutorCourse)
+    .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .innerJoin(tutorUser, eq(tutorUser.id, tutorProfile.userId))
+    .innerJoin(course, eq(course.id, tutorCourse.courseId))
+    .leftJoin(
+      courseCodeAlias,
+      and(eq(courseCodeAlias.courseId, course.id), isNull(courseCodeAlias.validToTermId)),
+    )
+    .where(
+      and(
+        inArray(tutorCourse.status, ["active", "rejected"]),
+        isNotNull(tutorCourse.reviewedAt),
+        isNull(tutorCourse.decisionNotifiedAt),
+        eq(tutorProfile.institutionId, institutionId),
+        eq(course.institutionId, institutionId),
+      ),
+    );
+
+  let sent = 0;
+  for (const row of rows) {
+    if (!row.reviewedAt) continue;
+
+    const claimedAt = new Date();
+    const claimed = await db
+      .update(tutorCourse)
+      .set({ decisionNotifiedAt: claimedAt })
+      .where(
+        and(
+          eq(tutorCourse.id, row.id),
+          eq(tutorCourse.status, row.status),
+          eq(tutorCourse.reviewedAt, row.reviewedAt),
+          isNull(tutorCourse.decisionNotifiedAt),
+        ),
+      )
+      .returning({ id: tutorCourse.id });
+    if (claimed.length === 0) continue;
+
+    const shared = {
+      to: row.tutorEmail,
+      tutorName: displayName(row.tutorName, "tutor"),
+      courseLabel: row.code ?? row.title,
+    };
+
+    try {
+      await sendEmail({
+        ...(row.status === "rejected" && row.rejectionReason
+          ? claimNeedsNewProof({ ...shared, reason: REJECTION_REASON_COPY[row.rejectionReason] })
+          : claimVerified(shared)),
+        idempotencyKey: `verification-decision/${row.id}/${row.reviewedAt.getTime()}`,
+      });
+      sent += 1;
+    } catch (error) {
+      await db
+        .update(tutorCourse)
+        .set({ decisionNotifiedAt: null })
+        .where(and(eq(tutorCourse.id, row.id), eq(tutorCourse.decisionNotifiedAt, claimedAt)));
+      console.error(`[notifications] verification-decision ${row.id} not sent`, error);
+    }
+  }
+
+  return sent;
+}
+
 function reminderHorizon(now: Date): Date {
   const span = now.getTime() - reminderDueAt(now).getTime();
   return new Date(now.getTime() + span);
@@ -399,6 +477,7 @@ export async function runNotifications(institutionId: string): Promise<number> {
     (await notifyBookedSessions(institutionId)) +
     (await notifyMovedSessions(institutionId)) +
     (await notifyUpcomingSessions(institutionId)) +
-    (await notifyCoveredSections(institutionId))
+    (await notifyCoveredSections(institutionId)) +
+    (await notifyVerificationDecisions(institutionId))
   );
 }
