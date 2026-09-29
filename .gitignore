@@ -46,3 +46,6 @@ next-env.d.ts
 # local Claude Code config and project skills; the team's subagents are shared
 .claude/*
 !.claude/agents/
+
+# local stand-in for the private Blob store (dev only)
+/.proof-store/

@@ -6,6 +6,7 @@ import { releaseLapsedConfirmations } from "@/server/modules/engagements/confirm
 import { runTermEndRefunds } from "@/server/modules/engagements/termEnd";
 import { runNotifications } from "@/server/modules/notifications/dispatch";
 import { expireStaleRequests } from "@/server/modules/matching/requests";
+import { purgeProofFiles } from "@/server/modules/tutoring/verification";
 
 export const maxDuration = 60;
 
@@ -39,12 +40,14 @@ export async function GET(request: Request) {
     let refunded = 0;
     let refundedMinor = 0;
     let notified = 0;
+    let purgedProofs = 0;
 
     for (const campus of campuses) {
       const refunds = await runTermEndRefunds(campus.id);
       refunded += refunds.length;
       refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
       notified += await runNotifications(campus.id);
+      purgedProofs += await purgeProofFiles(campus.id);
     }
 
     return Response.json({
@@ -53,6 +56,7 @@ export async function GET(request: Request) {
       refunded,
       refundedMinor,
       notified,
+      purgedProofs,
       campuses: campuses.length,
       tookMs: Date.now() - startedAt,
     });

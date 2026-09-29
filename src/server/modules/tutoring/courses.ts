@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, exists, isNull } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -7,10 +7,12 @@ import {
   professor,
   term,
   tutorCourse,
+  verificationFile,
 } from "@/server/db/schema";
 import type { TutorActor } from "@/server/modules/identity/actor";
 
 import { isEligibleGrade, normaliseGrade } from "./grades";
+import type { ProofKind, RejectionReason } from "./proof-rules";
 
 export class TutoringError extends Error {}
 
@@ -24,8 +26,11 @@ export type TutorCourseClaim = {
   gradeEarned: string;
   takenTermName: string;
   professorName: string | null;
-  status: "pending_verification" | "active" | "winding_down" | "retired";
+  status: (typeof tutorCourse.$inferSelect)["status"];
   verifiedAt: Date | null;
+  proofKind: ProofKind | null;
+  rejectionReason: RejectionReason | null;
+  hasProof: boolean;
 };
 
 export async function coursesForTutor(tutor: TutorActor): Promise<TutorCourseClaim[]> {
@@ -41,6 +46,19 @@ export async function coursesForTutor(tutor: TutorActor): Promise<TutorCourseCla
       professorName: professor.name,
       status: tutorCourse.status,
       verifiedAt: tutorCourse.verifiedAt,
+      proofKind: tutorCourse.proofKind,
+      rejectionReason: tutorCourse.rejectionReason,
+      hasProof: exists(
+        db
+          .select({ id: verificationFile.id })
+          .from(verificationFile)
+          .where(
+            and(
+              eq(verificationFile.tutorCourseId, tutorCourse.id),
+              isNull(verificationFile.supersededAt),
+            ),
+          ),
+      ).mapWith(Boolean),
     })
     .from(tutorCourse)
     .innerJoin(course, eq(course.id, tutorCourse.courseId))
