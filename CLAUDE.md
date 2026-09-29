@@ -40,7 +40,7 @@ npm run build        # production build
 npm run lint         # eslint
 npm run typecheck    # tsc --noEmit
 npm run db:generate  # drizzle-kit: generate migration from schema
-npm run db:migrate   # drizzle-kit: apply migrations (remote DB: refuses unless HEAD == origin/main)
+npm run db:migrate   # drizzle-kit: apply migrations; a remote DB is refused unless HEAD == origin/main
 npm run db:studio    # drizzle-kit: browse data
 npm run db:seed      # idempotent local campus: courses, professors, exams, tutors
 npm run db:demo      # re-runnable: drives the real functions to a populated session board

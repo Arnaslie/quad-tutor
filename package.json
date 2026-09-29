@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "db:generate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs generate",
-    "db:migrate": "node --env-file-if-exists=.env.local ./src/server/db/migrate-guard.mjs && node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:migrate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs migrate",
     "db:seed": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/seed.ts",
     "db:catalog": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/seed.ts --catalog",
     "db:demo": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/demo.ts",

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -14,7 +14,12 @@ function refuse(reason) {
 const url = process.env.DATABASE_URL;
 if (!url) refuse("DATABASE_URL is not set.");
 
-const host = new URL(url).hostname;
+let host;
+try {
+  host = new URL(url).hostname;
+} catch {
+  refuse("DATABASE_URL is not a parseable URL.");
+}
 if (LOCAL_HOSTS.has(host)) process.exit(0);
 
 console.log(`Migrating ${host} — checking this checkout matches origin/main…`);
