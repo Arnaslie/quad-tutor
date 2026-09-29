@@ -38,7 +38,6 @@ const sessionParties = {
   scheduledAt: sessionBooking.scheduledAt,
   location: sessionBooking.location,
   studentNote: sessionBooking.studentNote,
-  locationVersion: sessionBooking.locationVersion,
   notifiedLocation: sessionBooking.notifiedLocation,
   studentEmail: user.email,
   studentName: user.name,
@@ -210,7 +209,6 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
       .update(sessionBooking)
       .set({
         bookedNotifiedAt: new Date(),
-        locationNotifiedVersion: row.locationVersion,
         notifiedLocation: row.location,
       })
       .where(eq(sessionBooking.id, row.sessionId));
@@ -362,7 +360,7 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
       eq(sessionBooking.status, "scheduled"),
       gt(sessionBooking.scheduledAt, new Date()),
       isNotNull(sessionBooking.bookedNotifiedAt),
-      gt(sessionBooking.locationVersion, sessionBooking.locationNotifiedVersion),
+      sql`${sessionBooking.location} is distinct from ${sessionBooking.notifiedLocation}`,
       eq(tutorProfile.institutionId, institutionId),
       eq(studentProfile.institutionId, institutionId),
     ),
@@ -386,7 +384,7 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
     );
     await db
       .update(sessionBooking)
-      .set({ locationNotifiedVersion: row.locationVersion, notifiedLocation: row.location })
+      .set({ notifiedLocation: row.location })
       .where(eq(sessionBooking.id, row.sessionId));
     sent += 1;
   }

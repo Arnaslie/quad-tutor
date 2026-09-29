@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { engagement, sessionBooking, tutorCourse, tutorProfile } from "@/server/db/schema";
@@ -33,10 +33,7 @@ export async function setDefaultLocation(params: {
 
     const filled = await tx
       .update(sessionBooking)
-      .set({
-        location: params.location,
-        locationVersion: sql`${sessionBooking.locationVersion} + 1`,
-      })
+      .set({ location: params.location })
       .where(
         and(
           inArray(sessionBooking.engagementId, theirs),
