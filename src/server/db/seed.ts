@@ -11,6 +11,7 @@ import {
   exam,
   institution,
   institutionEmail,
+  operator,
   professor,
   studentProfile,
   term,
@@ -501,6 +502,8 @@ const STUDENT_ONLY = [
   { key: "talia-reyes", name: "Talia Reyes" },
 ] as const;
 
+const OPERATOR = { key: "ops", name: "Campus Ops" } as const;
+
 const ENROLLMENTS: readonly { person: string; course: CourseKey; section: string }[] = [
   { person: "maya-chen", course: "math125", section: "002" },
   { person: "maya-chen", course: "cs100", section: "001" },
@@ -980,6 +983,12 @@ async function seedPeople(
     people.set(student.key, await seedPerson(catalog.institutionId, student));
   }
   await seedEnrollments(people, catalog.offerings);
+
+  const ops = await seedPerson(catalog.institutionId, OPERATOR);
+  await db
+    .insert(operator)
+    .values({ userId: ops.userId, institutionId: catalog.institutionId })
+    .onConflictDoNothing();
 }
 
 async function main(): Promise<void> {
