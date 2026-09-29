@@ -1,7 +1,8 @@
-import { and, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
+  college,
   course,
   courseCodeAlias,
   courseOffering,
@@ -19,6 +20,11 @@ export type CourseSummary = {
   code: string;
   title: string;
   department: string;
+};
+
+export type CollegeSummary = {
+  collegeId: string;
+  name: string;
 };
 
 export type OfferingSummary = {
@@ -48,9 +54,34 @@ export async function currentTerm(institutionId: string) {
   return rows.at(0) ?? null;
 }
 
+export async function collegesWithCourses(institutionId: string): Promise<CollegeSummary[]> {
+  return db
+    .select({ collegeId: college.id, name: college.name })
+    .from(college)
+    .where(
+      and(
+        eq(college.institutionId, institutionId),
+        exists(
+          db
+            .select({ id: course.id })
+            .from(course)
+            .where(
+              and(
+                eq(course.collegeId, college.id),
+                eq(course.institutionId, institutionId),
+                eq(course.isSeeded, true),
+              ),
+            ),
+        ),
+      ),
+    )
+    .orderBy(asc(college.sortOrder), asc(college.name));
+}
+
 export async function searchSeededCourses(params: {
   institutionId: string;
   query: string;
+  collegeId?: string;
 }): Promise<CourseSummary[]> {
   const needle = `%${params.query.trim()}%`;
 
@@ -67,6 +98,20 @@ export async function searchSeededCourses(params: {
       and(
         eq(course.institutionId, params.institutionId),
         eq(course.isSeeded, true),
+        params.collegeId === undefined
+          ? undefined
+          : inArray(
+              course.collegeId,
+              db
+                .select({ id: college.id })
+                .from(college)
+                .where(
+                  and(
+                    eq(college.id, params.collegeId),
+                    eq(college.institutionId, params.institutionId),
+                  ),
+                ),
+            ),
         params.query.trim().length === 0
           ? undefined
           : or(ilike(courseCodeAlias.code, needle), ilike(course.title, needle)),

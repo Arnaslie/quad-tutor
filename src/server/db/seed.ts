@@ -3,6 +3,7 @@ import type { PgTable } from "drizzle-orm/pg-core";
 
 import { db } from "./index";
 import {
+  college,
   course,
   courseCodeAlias,
   courseOffering,
@@ -58,9 +59,14 @@ const PROFESSORS = [
 
 type ProfessorName = (typeof PROFESSORS)[number]["name"];
 
+const COLLEGES = ["Arts & Sciences", "Business", "Engineering"] as const;
+
+type CollegeName = (typeof COLLEGES)[number];
+
 type CourseFixture = {
   title: string;
   department: string;
+  college: CollegeName;
 
   code: string;
   codeSince: TermName;
@@ -74,6 +80,7 @@ const COURSES = {
   math125: {
     title: "Calculus I",
     department: "Mathematics",
+    college: "Arts & Sciences",
     code: "MATH 125",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -92,6 +99,7 @@ const COURSES = {
   math126: {
     title: "Calculus II",
     department: "Mathematics",
+    college: "Arts & Sciences",
     code: "MATH 126",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -109,6 +117,7 @@ const COURSES = {
   ch101: {
     title: "General Chemistry I",
     department: "Chemistry",
+    college: "Arts & Sciences",
     code: "CH 101",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -126,6 +135,7 @@ const COURSES = {
   ch102: {
     title: "General Chemistry II",
     department: "Chemistry",
+    college: "Arts & Sciences",
     code: "CH 102",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -140,6 +150,7 @@ const COURSES = {
   bsc114: {
     title: "Principles of Biology I",
     department: "Biological Sciences",
+    college: "Arts & Sciences",
     code: "BSC 114",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -157,6 +168,7 @@ const COURSES = {
   bsc116: {
     title: "Principles of Biology II",
     department: "Biological Sciences",
+    college: "Arts & Sciences",
     code: "BSC 116",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -171,6 +183,7 @@ const COURSES = {
   ph105: {
     title: "General Physics I with Calculus",
     department: "Physics and Astronomy",
+    college: "Arts & Sciences",
     code: "PH 105",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -185,6 +198,7 @@ const COURSES = {
   ac210: {
     title: "Introduction to Accounting",
     department: "Accounting",
+    college: "Business",
     code: "AC 210",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -199,6 +213,7 @@ const COURSES = {
   ec110: {
     title: "Principles of Microeconomics",
     department: "Economics",
+    college: "Business",
     code: "EC 110",
     codeSince: CURRENT_TERM,
     formerCodes: [{ code: "ECON 110", from: EARLIEST_TERM, to: "Spring 2026" }],
@@ -216,6 +231,7 @@ const COURSES = {
   cs100: {
     title: "Computer Science Principles",
     department: "Computer Science",
+    college: "Engineering",
     code: "CS 100",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -229,6 +245,7 @@ const COURSES = {
   cs201: {
     title: "Data Structures and Algorithms",
     department: "Computer Science",
+    college: "Engineering",
     code: "CS 201",
     codeSince: CURRENT_TERM,
     formerCodes: [{ code: "CS 285", from: EARLIEST_TERM, to: "Spring 2026" }],
@@ -243,6 +260,7 @@ const COURSES = {
   st260: {
     title: "Statistical Data Analysis",
     department: "Statistics",
+    college: "Business",
     code: "ST 260",
     codeSince: EARLIEST_TERM,
     formerCodes: [],
@@ -583,15 +601,35 @@ async function seedProfessors(institutionId: string): Promise<Map<ProfessorName,
   return ids;
 }
 
+async function seedColleges(institutionId: string): Promise<Map<CollegeName, string>> {
+  const ids = new Map<CollegeName, string>();
+
+  for (const [sortOrder, name] of COLLEGES.entries()) {
+    const [row] = await db
+      .insert(college)
+      .values({ institutionId, name, sortOrder })
+      .onConflictDoUpdate({
+        target: [college.institutionId, college.name],
+        set: { sortOrder },
+      })
+      .returning({ id: college.id });
+    ids.set(name, record(college, row.id));
+  }
+
+  return ids;
+}
+
 async function seedCourses(
   institutionId: string,
   terms: Map<TermName, string>,
   professors: Map<ProfessorName, string>,
+  colleges: Map<CollegeName, string>,
 ): Promise<{ courses: Map<CourseKey, string>; offerings: Map<string, string> }> {
   const courses = new Map<CourseKey, string>();
   const offerings = new Map<string, string>();
 
   for (const [key, fixture] of Object.entries(COURSES) as [CourseKey, CourseFixture][]) {
+    const collegeId = colleges.get(fixture.college)!;
     const courseId = await ensureId(
       course,
       db
@@ -611,10 +649,12 @@ async function seedCourses(
             institutionId,
             title: fixture.title,
             department: fixture.department,
+            collegeId,
             isSeeded: true,
           })
           .returning({ id: course.id }),
     );
+    await db.update(course).set({ collegeId }).where(eq(course.id, courseId));
     courses.set(key, courseId);
 
     await seedAlias(courseId, fixture.code, terms.get(fixture.codeSince)!, null);
@@ -863,6 +903,7 @@ const COUNTED_TABLES: PgTable[] = [
   institution,
   term,
   professor,
+  college,
   course,
   courseCodeAlias,
   courseOffering,
@@ -917,7 +958,8 @@ async function seedCatalog() {
   const institutionId = await seedInstitution();
   const terms = await seedTerms(institutionId);
   const professors = await seedProfessors(institutionId);
-  const { courses, offerings } = await seedCourses(institutionId, terms, professors);
+  const colleges = await seedColleges(institutionId);
+  const { courses, offerings } = await seedCourses(institutionId, terms, professors, colleges);
   return { institutionId, terms, professors, courses, offerings };
 }
 
