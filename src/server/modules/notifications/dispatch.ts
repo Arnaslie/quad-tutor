@@ -39,6 +39,7 @@ const sessionParties = {
   location: sessionBooking.location,
   studentNote: sessionBooking.studentNote,
   locationVersion: sessionBooking.locationVersion,
+  notifiedLocation: sessionBooking.notifiedLocation,
   studentEmail: user.email,
   studentName: user.name,
   tutorEmail: tutorUser.email,
@@ -207,7 +208,11 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
     );
     await db
       .update(sessionBooking)
-      .set({ bookedNotifiedAt: new Date(), locationNotifiedVersion: row.locationVersion })
+      .set({
+        bookedNotifiedAt: new Date(),
+        locationNotifiedVersion: row.locationVersion,
+        notifiedLocation: row.location,
+      })
       .where(eq(sessionBooking.id, row.sessionId));
     sent += 2;
   }
@@ -375,11 +380,13 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
         courseLabel: row.code ?? row.title,
         scheduledAt: row.scheduledAt,
         location: row.location,
+        firstSpot: row.notifiedLocation === null,
+        sessionId: row.sessionId,
       }),
     );
     await db
       .update(sessionBooking)
-      .set({ locationNotifiedVersion: row.locationVersion })
+      .set({ locationNotifiedVersion: row.locationVersion, notifiedLocation: row.location })
       .where(eq(sessionBooking.id, row.sessionId));
     sent += 1;
   }

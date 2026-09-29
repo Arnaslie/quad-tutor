@@ -135,19 +135,21 @@ export function sessionMoved(params: {
   courseLabel: string;
   scheduledAt: Date;
   location: string;
+  firstSpot: boolean;
+  sessionId: string;
 }): Email {
   return {
     to: params.to,
-    subject: `New spot: ${params.courseLabel} with ${params.otherPartyName}`,
+    subject: `${params.firstSpot ? "Spot set" : "New spot"}: ${params.courseLabel} with ${params.otherPartyName}`,
     text: [
       `${params.name},`,
       "",
-      `${params.otherPartyName} changed where you meet for ${params.courseLabel}`,
+      `${params.otherPartyName} ${params.firstSpot ? "set" : "changed"} where you meet for ${params.courseLabel}`,
       `on ${formatDayTime(params.scheduledAt)}.`,
       "",
       `Where: ${params.location}`,
       "",
-      url("/sessions"),
+      url(`/sessions/${params.sessionId}`),
       ...SIGN_OFF,
     ].join("\n"),
   };

@@ -358,6 +358,7 @@ export const sessionBooking = pgTable(
     studentNote: text("student_note"),
     locationVersion: integer("location_version").notNull().default(0),
     locationNotifiedVersion: integer("location_notified_version").notNull().default(0),
+    notifiedLocation: text("notified_location"),
 
     status: sessionStatus("status").notNull().default("scheduled"),
 

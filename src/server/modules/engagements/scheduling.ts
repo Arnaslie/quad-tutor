@@ -249,6 +249,8 @@ export async function setSessionLocation(params: {
       );
     }
 
+    if (session.location === params.location) return;
+
     await tx
       .update(sessionBooking)
       .set({
