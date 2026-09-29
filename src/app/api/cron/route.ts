@@ -47,7 +47,10 @@ export async function GET(request: Request) {
       refunded += refunds.length;
       refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
       notified += await runNotifications(campus.id);
-      purgedProofs += await purgeProofFiles(campus.id);
+      purgedProofs += await purgeProofFiles(campus.id).catch((error) => {
+        console.error(`[cron] proof purge for ${campus.slug} failed`, error);
+        return 0;
+      });
     }
 
     return Response.json({

@@ -28,6 +28,7 @@ export async function GET(
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
+      "Content-Security-Policy": "sandbox",
     },
   });
 }

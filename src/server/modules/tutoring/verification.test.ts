@@ -5,6 +5,7 @@ import { after, before, test } from "node:test";
 import { eq, inArray } from "drizzle-orm";
 
 import { db } from "@/server/db";
+import { isLocalHost } from "@/server/db/local-host.mjs";
 import {
   course,
   courseCodeAlias,
@@ -35,6 +36,11 @@ import {
   verificationQueue,
   verifyClaim,
 } from "./verification";
+
+const databaseHost = new URL(process.env.DATABASE_URL ?? "postgres://unset").hostname;
+if (!isLocalHost(databaseHost)) {
+  throw new Error(`Refusing to run tests against ${databaseHost}: point DATABASE_URL at a local database.`);
+}
 
 delete process.env.RESEND_API_KEY;
 delete process.env.BLOB_READ_WRITE_TOKEN;

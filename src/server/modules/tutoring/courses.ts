@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -7,12 +7,12 @@ import {
   professor,
   term,
   tutorCourse,
-  verificationFile,
 } from "@/server/db/schema";
 import type { TutorActor } from "@/server/modules/identity/actor";
 
 import { isEligibleGrade, normaliseGrade } from "./grades";
 import type { ProofKind, RejectionReason } from "./proof-rules";
+import { hasCurrentProof } from "./verification";
 
 export class TutoringError extends Error {}
 
@@ -48,17 +48,7 @@ export async function coursesForTutor(tutor: TutorActor): Promise<TutorCourseCla
       verifiedAt: tutorCourse.verifiedAt,
       proofKind: tutorCourse.proofKind,
       rejectionReason: tutorCourse.rejectionReason,
-      hasProof: exists(
-        db
-          .select({ id: verificationFile.id })
-          .from(verificationFile)
-          .where(
-            and(
-              eq(verificationFile.tutorCourseId, tutorCourse.id),
-              isNull(verificationFile.supersededAt),
-            ),
-          ),
-      ).mapWith(Boolean),
+      hasProof: hasCurrentProof().mapWith(Boolean),
     })
     .from(tutorCourse)
     .innerJoin(course, eq(course.id, tutorCourse.courseId))

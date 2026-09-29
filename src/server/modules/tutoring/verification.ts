@@ -53,7 +53,7 @@ const currentFile = and(
   isNull(verificationFile.supersededAt),
 );
 
-function hasCurrentProof() {
+export function hasCurrentProof() {
   return exists(db.select({ id: verificationFile.id }).from(verificationFile).where(currentFile));
 }
 
@@ -141,7 +141,9 @@ export async function submitProof(params: {
     throw error;
   }
 
-  await purgeProofFiles(campus);
+  await purgeProofFiles(campus).catch((error) => {
+    console.error(`[verification] purge after upload on ${params.tutorCourseId} failed`, error);
+  });
 }
 
 function decidableBy(operator: OperatorActor, tutorCourseId: string) {
