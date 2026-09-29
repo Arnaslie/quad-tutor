@@ -64,6 +64,13 @@
       "when": 1790621480842,
       "tag": "0008_friendly_rick_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790711697833,
+      "tag": "0009_typical_jackpot",
+      "breakpoints": true
     }
   ]
 }

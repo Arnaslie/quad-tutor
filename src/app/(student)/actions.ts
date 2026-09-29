@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { enroll } from "@/server/modules/catalog/courses";
+import { awaitCoverage, enroll, offeringById } from "@/server/modules/catalog/courses";
 import {
   PurchaseError,
   purchasePackage,
@@ -90,7 +90,6 @@ export async function askTutors(
   redirect("/requests");
 }
 
-/** TODO(notifications): the enrollment records who is waiting; nothing sends yet. */
 const notifySchema = z.object({ offeringId: z.uuid() });
 
 export async function notifyWhenCovered(
@@ -100,14 +99,17 @@ export async function notifyWhenCovered(
   const actor = await requireActor();
 
   const parsed = notifySchema.safeParse({ offeringId: formData.get("offeringId") });
-  if (!parsed.success) return { ok: false, error: "That section no longer exists." };
+  const offering = parsed.success
+    ? await offeringById({ offeringId: parsed.data.offeringId, institutionId: actor.institutionId })
+    : null;
+  if (!offering) return { ok: false, error: "That section no longer exists." };
 
-  await enroll({
+  await awaitCoverage({
     studentProfileId: actor.studentProfileId,
-    courseOfferingId: parsed.data.offeringId,
+    courseOfferingId: offering.offeringId,
   });
 
-  revalidatePath(`/courses/${parsed.data.offeringId}`);
+  revalidatePath(`/courses/${offering.offeringId}`);
   return { ok: true, message: "You are on the list for this section." };
 }
 

@@ -58,6 +58,29 @@ export function requestAccepted(params: {
   };
 }
 
+export function sectionCovered(params: {
+  to: string;
+  studentName: string;
+  courseLabel: string;
+  offeringId: string;
+}): Email {
+  return {
+    to: params.to,
+    subject: `Someone tutors ${params.courseLabel} now`,
+    text: [
+      `${params.studentName},`,
+      "",
+      `You asked us to tell you when someone covers ${params.courseLabel}. Someone does now.`,
+      "",
+      "See who took it and ask them straight away — the sooner you ask, the more",
+      "sessions fit before your next exam.",
+      "",
+      url(`/courses/${params.offeringId}`),
+      ...SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
 export function sessionBooked(params: {
   to: string;
   name: string;

@@ -195,3 +195,16 @@ export async function enroll(params: {
 }): Promise<void> {
   await db.insert(enrollment).values(params).onConflictDoNothing();
 }
+
+export async function awaitCoverage(params: {
+  studentProfileId: string;
+  courseOfferingId: string;
+}): Promise<void> {
+  await db
+    .insert(enrollment)
+    .values({ ...params, coverageRequestedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [enrollment.studentProfileId, enrollment.courseOfferingId],
+      set: { coverageRequestedAt: sql`coalesce(${enrollment.coverageRequestedAt}, now())` },
+    });
+}

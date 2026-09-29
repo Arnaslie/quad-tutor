@@ -236,6 +236,8 @@ export const enrollment = pgTable(
       .notNull()
       .references(() => courseOffering.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    coverageRequestedAt: timestamp("coverage_requested_at", { withTimezone: true }),
+    coverageNotifiedAt: timestamp("coverage_notified_at", { withTimezone: true }),
   },
   (t) => [
     uniqueIndex("enrollment_unique_idx").on(t.studentProfileId, t.courseOfferingId),
