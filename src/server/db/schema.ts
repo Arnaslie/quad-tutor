@@ -441,6 +441,8 @@ export const demandSignal = pgTable(
       .notNull()
       .references(() => courseOffering.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
   },
   (t) => [
     uniqueIndex("demand_signal_unique_idx").on(t.studentProfileId, t.courseOfferingId),

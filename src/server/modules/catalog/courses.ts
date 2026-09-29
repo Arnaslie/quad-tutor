@@ -5,11 +5,14 @@ import {
   course,
   courseCodeAlias,
   courseOffering,
+  demandSignal,
   enrollment,
   exam,
   professor,
   term,
 } from "@/server/db/schema";
+import type { Actor } from "@/server/modules/identity/actor";
+import { buildDeck } from "@/server/modules/matching/candidates";
 
 export type CourseSummary = {
   courseId: string;
@@ -194,4 +197,30 @@ export async function enroll(params: {
   courseOfferingId: string;
 }): Promise<void> {
   await db.insert(enrollment).values(params).onConflictDoNothing();
+}
+
+export async function awaitCoverage(params: {
+  actor: Pick<Actor, "userId" | "institutionId" | "studentProfileId">;
+  courseOfferingId: string;
+}): Promise<boolean> {
+  const deck = await buildDeck({
+    courseOfferingId: params.courseOfferingId,
+    institutionId: params.actor.institutionId,
+    viewerUserId: params.actor.userId,
+  });
+  if (deck.candidates.length > 0) return false;
+
+  const seat = {
+    studentProfileId: params.actor.studentProfileId,
+    courseOfferingId: params.courseOfferingId,
+  };
+  await enroll(seat);
+  await db
+    .insert(demandSignal)
+    .values(seat)
+    .onConflictDoUpdate({
+      target: [demandSignal.studentProfileId, demandSignal.courseOfferingId],
+      set: { requestedAt: sql`now()`, notifiedAt: null },
+    });
+  return true;
 }

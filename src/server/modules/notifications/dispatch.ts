@@ -1,14 +1,16 @@
-import { and, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, eq, exists, gte, isNull, lte, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
   course,
   courseCodeAlias,
   courseOffering,
+  demandSignal,
   engagement,
   matchRequest,
   sessionBooking,
   studentProfile,
+  term,
   tutorCourse,
   tutorProfile,
   user,
@@ -21,6 +23,7 @@ import { sendEmail } from "./email";
 import {
   requestAccepted,
   requestWaiting,
+  sectionCovered,
   sessionBooked,
   sessionTomorrow,
 } from "./messages";
@@ -236,6 +239,83 @@ export async function notifyUpcomingSessions(institutionId: string): Promise<num
   return sent;
 }
 
+export async function notifyCoveredSections(institutionId: string): Promise<number> {
+  const covered = db
+    .select({ id: tutorCourse.id })
+    .from(tutorCourse)
+    .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .where(
+      and(
+        eq(tutorCourse.courseId, course.id),
+        eq(tutorCourse.status, "active"),
+        eq(tutorProfile.institutionId, institutionId),
+        ne(tutorProfile.userId, studentProfile.userId),
+      ),
+    );
+
+  const rows = await db
+    .select({
+      id: demandSignal.id,
+      requestedAt: demandSignal.requestedAt,
+      offeringId: courseOffering.id,
+      studentEmail: user.email,
+      studentName: user.name,
+      code: courseCodeAlias.code,
+      title: course.title,
+    })
+    .from(demandSignal)
+    .innerJoin(studentProfile, eq(studentProfile.id, demandSignal.studentProfileId))
+    .innerJoin(user, eq(user.id, studentProfile.userId))
+    .innerJoin(courseOffering, eq(courseOffering.id, demandSignal.courseOfferingId))
+    .innerJoin(term, eq(term.id, courseOffering.termId))
+    .innerJoin(course, eq(course.id, courseOffering.courseId))
+    .leftJoin(
+      courseCodeAlias,
+      and(eq(courseCodeAlias.courseId, course.id), isNull(courseCodeAlias.validToTermId)),
+    )
+    .where(
+      and(
+        isNull(demandSignal.notifiedAt),
+        gte(term.endsOn, sql`current_date`),
+        eq(studentProfile.institutionId, institutionId),
+        eq(course.institutionId, institutionId),
+        exists(covered),
+      ),
+    );
+
+  let sent = 0;
+  for (const row of rows) {
+    const claimedAt = new Date();
+    const claimed = await db
+      .update(demandSignal)
+      .set({ notifiedAt: claimedAt })
+      .where(and(eq(demandSignal.id, row.id), isNull(demandSignal.notifiedAt)))
+      .returning({ id: demandSignal.id });
+    if (claimed.length === 0) continue;
+
+    try {
+      await sendEmail({
+        ...sectionCovered({
+          to: row.studentEmail,
+          studentName: displayName(row.studentName, "student"),
+          courseLabel: row.code ?? row.title,
+          offeringId: row.offeringId,
+        }),
+        idempotencyKey: `section-covered/${row.id}/${row.requestedAt.getTime()}`,
+      });
+      sent += 1;
+    } catch (error) {
+      await db
+        .update(demandSignal)
+        .set({ notifiedAt: null })
+        .where(and(eq(demandSignal.id, row.id), eq(demandSignal.notifiedAt, claimedAt)));
+      console.error(`[notifications] section-covered ${row.id} not sent`, error);
+    }
+  }
+
+  return sent;
+}
+
 function reminderHorizon(now: Date): Date {
   const span = now.getTime() - reminderDueAt(now).getTime();
   return new Date(now.getTime() + span);
@@ -246,6 +326,7 @@ export async function runNotifications(institutionId: string): Promise<number> {
     (await notifyPendingRequests(institutionId)) +
     (await notifyAcceptedRequests(institutionId)) +
     (await notifyBookedSessions(institutionId)) +
-    (await notifyUpcomingSessions(institutionId))
+    (await notifyUpcomingSessions(institutionId)) +
+    (await notifyCoveredSections(institutionId))
   );
 }
