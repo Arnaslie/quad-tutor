@@ -75,6 +75,15 @@ async function actorFor(userId: string): Promise<Actor> {
   return actor;
 }
 
+async function studentUserId(): Promise<string> {
+  const email = process.argv.at(2)?.trim().toLowerCase();
+  if (!email) return STUDENT;
+
+  const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
+  if (!row) throw new Error(`no user ${email} — sign in on the app once first`);
+  return row.id;
+}
+
 async function tutorActorFor(userId: string): Promise<TutorActor> {
   const actor = await actorFor(userId);
   if (!actor.tutorProfileId) throw new Error(`${userId} has no tutor profile`);
@@ -265,7 +274,7 @@ function printBoard(label: string, board: SessionBoard): void {
 }
 
 async function main(): Promise<void> {
-  const student = await actorFor(STUDENT);
+  const student = await actorFor(await studentUserId());
   const tutor = await tutorActorFor(ACCEPTING_TUTOR);
   const target = await resolveTarget({
     code: COURSE_CODE,
