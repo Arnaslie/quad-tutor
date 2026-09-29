@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { z } from "zod";
 
+import { MessageLink } from "@/app/messages/message-link";
 import { ButtonLink } from "@/components/button";
 import { Card, CardLink } from "@/components/card";
 import { EmptyState } from "@/components/empty-state";
@@ -77,15 +78,18 @@ export default async function RequestsPage(props: PageProps<"/requests">) {
             Waiting to hear back
           </h2>
           {pending.map((request) => (
-            <Card key={request.id} className="flex items-center gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="font-medium">{displayName(request.tutorName, "tutor")}</p>
-                <p className="truncate text-sm text-muted">{context(request)}</p>
+            <Card key={request.id} className="flex flex-col items-start gap-3">
+              <div className="flex w-full items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{displayName(request.tutorName, "tutor")}</p>
+                  <p className="truncate text-sm text-muted">{context(request)}</p>
+                </div>
+                <span className="flex shrink-0 items-center gap-1.5 text-sm text-muted">
+                  <Icon name="clock" className="size-4" />
+                  {formatCountdown(request.expiresAt)}
+                </span>
               </div>
-              <span className="flex shrink-0 items-center gap-1.5 text-sm text-muted">
-                <Icon name="clock" className="size-4" />
-                {formatCountdown(request.expiresAt)}
-              </span>
+              <MessageLink threadId={request.threadId} />
             </Card>
           ))}
           <p className="text-sm text-muted">
@@ -158,9 +162,12 @@ function Accepted({ request }: { request: StudentRequest }) {
         <p className="font-medium">{displayName(request.tutorName, "tutor")} said yes</p>
         <p className="text-sm text-muted">{context(request)}</p>
       </div>
-      <ButtonLink href={`/requests?buy=${request.id}`}>
-        Pick a package and a time
-      </ButtonLink>
+      <div className="flex flex-wrap gap-2">
+        <ButtonLink href={`/requests?buy=${request.id}`}>
+          Pick a package and a time
+        </ButtonLink>
+        <MessageLink threadId={request.threadId} />
+      </div>
     </Card>
   );
 }

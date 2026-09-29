@@ -53,6 +53,7 @@ export type SessionListItem = {
   action: ViewerAction;
 
   yourAnswer: Answer;
+  threadId: string | null;
 };
 
 export type Answer = "confirmed" | "denied" | null;
@@ -100,6 +101,7 @@ function toListItem(
     otherPartyName: viewer === "student" ? row.tutorName : row.studentName,
     otherPartyRole: otherSide(viewer),
     yourAnswer: answerFor(row, viewer),
+    threadId: row.threadId,
     action: viewerAction({
       status: row.status,
       scheduledAt: row.scheduledAt,

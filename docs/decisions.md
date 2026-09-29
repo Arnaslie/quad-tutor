@@ -5,7 +5,7 @@ Full source analysis in `docs/research/`. Where a decision came from independent
 agreement between reviewers who could not see each other's work, that is noted — it
 is the strongest signal in here.
 
-Last updated: 2026-09-19.
+Last updated: 2026-09-29.
 
 ---
 
@@ -138,6 +138,48 @@ email has gone out, whether by hand or by the fill, emails the student the new s
 **Intake under 45 seconds.** Course selection is the primary input (schedule
 screenshot → OCR, with catalog type-ahead as fallback); section and professor are a
 required second step. Everything the course code already answers is cut.
+
+### Messaging
+
+**One thread per (student, tutor-course) pair, opened by the first request.** The
+thread is created inside the request transaction, so a thread exists only once a
+request does. There are no cold messages: nobody can write to a tutor they have not
+asked, and a tutor cannot write to a student who has not asked them. Keying on
+`tutor_course` rather than the tutor keeps the pair the same unit as everything else.
+
+**Writable while there is something between them.** A pending request, an accepted
+request not yet bought (inside its term), or an active package. Writability is
+computed from those rows, never stored. When the last package ends the thread closes:
+it still opens and shows its history, and the composer becomes a "Book another
+package" prompt into the existing top-up or request flow. Booking again reopens it. A
+tutor whose request auto-withdrew keeps a read-only thread.
+
+**Staff read reported threads only, and every read is logged.** An operator sees
+reports for their own campuses and can open the reported thread; each open writes an
+append-only `message_thread_access` row. The composer says plainly that a reported
+conversation can be read by staff. Nothing else gives staff message content.
+
+**The email alert carries a one-line preview**, about 80 characters with an ellipsis.
+A thread where either party has blocked the other gets no preview and no email.
+
+**One email per burst.** At most one per thread per recipient every 15 minutes, and a
+new one only after the recipient has read what the last one was about. The email goes
+out right after the message via `after()`, with the cron sweep as a backstop. Both
+paths claim with one conditional update on the thread (the pacing condition is in the
+`where`), send with a Resend idempotency key, and release on failure — so overlapping
+runs send once. No real-time transport: a server-rendered thread and a server action
+are enough at one campus, and a push channel would be a second system to keep
+authorised.
+
+**Blocks and reports are not reliability.** A block stops messages both ways and
+removes the tutor from that student's candidates and from demand-capture coverage — a
+filter, never a score. Neither ever writes `reliability_event` or reaches `score.ts`,
+and message content never feeds matching or any score.
+
+**A deleted account keeps its messages.** The sender shows as "Deleted user"
+(`message.sender_user_id` is set null on delete). There is no account deletion yet;
+when there is, it has to decide what happens to the profiles, which still reference
+the user without a cascade.
 
 ### Scoring
 

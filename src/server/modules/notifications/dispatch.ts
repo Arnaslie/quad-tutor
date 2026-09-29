@@ -1,4 +1,4 @@
-import { and, eq, exists, gt, gte, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, exists, gt, gte, inArray, isNotNull, isNull, lte, ne, not, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -18,6 +18,8 @@ import {
 import { tutorUser } from "@/server/modules/engagements/access";
 import { LATE_CANCEL_HOURS, reminderDueAt } from "@/server/modules/engagements/attendance";
 import { displayName } from "@/server/modules/identity/display-name";
+import { notifyUnreadMessages } from "@/server/modules/messaging/alerts";
+import { blockedBetween } from "@/server/modules/messaging/blocks";
 import { REJECTION_REASON_COPY } from "@/server/modules/tutoring/proof-rules";
 
 import { sendEmail } from "./email";
@@ -286,6 +288,7 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
         eq(tutorCourse.status, "active"),
         eq(tutorProfile.institutionId, institutionId),
         ne(tutorProfile.userId, studentProfile.userId),
+        not(blockedBetween(tutorProfile.userId, studentProfile.userId)),
       ),
     );
 
@@ -478,6 +481,7 @@ export async function runNotifications(institutionId: string): Promise<number> {
     (await notifyMovedSessions(institutionId)) +
     (await notifyUpcomingSessions(institutionId)) +
     (await notifyCoveredSections(institutionId)) +
-    (await notifyVerificationDecisions(institutionId))
+    (await notifyVerificationDecisions(institutionId)) +
+    (await notifyUnreadMessages(institutionId))
   );
 }

@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, ne, not, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -6,6 +6,7 @@ import {
   courseOffering,
   engagement,
   matchRequest,
+  messageThread,
   professor,
   reliabilityEvent,
   studentProfile,
@@ -16,6 +17,8 @@ import {
 } from "@/server/db/schema";
 import { courseCodeAlias } from "@/server/db/schema";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
+import { blockedBetween } from "@/server/modules/messaging/blocks";
+import { openThreads } from "@/server/modules/messaging/threads";
 import { standingFrom, type Standing } from "@/server/modules/reliability/standing";
 
 import { REQUEST_EXPIRY_HOURS } from "./candidates";
@@ -82,6 +85,7 @@ export async function requestTutors(params: {
           eq(tutorProfile.institutionId, params.actor.institutionId),
 
           ne(tutorProfile.userId, params.actor.userId),
+          not(blockedBetween(tutorProfile.userId, params.actor.userId)),
         ),
       );
 
@@ -98,6 +102,15 @@ export async function requestTutors(params: {
         tutorCourseId,
         courseOfferingId: params.courseOfferingId,
         expiresAt,
+      })),
+    );
+
+    await openThreads(
+      tx,
+      toCreate.map((tutorCourseId) => ({
+        studentProfileId: params.actor.studentProfileId,
+        tutorCourseId,
+        institutionId: params.actor.institutionId,
       })),
     );
 
@@ -220,6 +233,7 @@ export type StudentRequest = {
   expiresInMinutes: number;
 
   engagementId: string | null;
+  threadId: string | null;
 };
 
 export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]> {
@@ -239,12 +253,14 @@ export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]
       section: courseOffering.section,
       professorName: professor.name,
       engagementId: engagement.id,
+      threadId: messageThread.id,
     })
     .from(matchRequest)
     .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
     .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
     .innerJoin(user, eq(user.id, tutorProfile.userId))
     .leftJoin(engagement, eq(engagement.matchRequestId, matchRequest.id))
+    .leftJoin(messageThread, pairThread)
     .innerJoin(courseOffering, eq(courseOffering.id, matchRequest.courseOfferingId))
     .innerJoin(course, eq(course.id, courseOffering.courseId))
     .innerJoin(courseCodeAlias, eq(courseCodeAlias.courseId, course.id))
@@ -260,6 +276,11 @@ export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]
 
   return rows.map((row) => ({ ...row, expiresInMinutes: minutesUntil(row.expiresAt, now) }));
 }
+
+const pairThread = and(
+  eq(messageThread.studentProfileId, matchRequest.studentProfileId),
+  eq(messageThread.tutorCourseId, matchRequest.tutorCourseId),
+);
 
 function minutesUntil(moment: Date, now: number): number {
   return Math.max(0, Math.round((moment.getTime() - now) / 60_000));
@@ -278,6 +299,7 @@ export type TutorInboxItem = {
   gradeEarned: string;
 
   expiresInMinutes: number;
+  threadId: string | null;
 };
 
 export async function inboxForTutor(tutor: TutorActor): Promise<TutorInboxItem[]> {
@@ -297,9 +319,11 @@ export async function inboxForTutor(tutor: TutorActor): Promise<TutorInboxItem[]
       professorName: professor.name,
       takenTermName: takenTerm.name,
       gradeEarned: tutorCourse.gradeEarned,
+      threadId: messageThread.id,
     })
     .from(matchRequest)
     .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
+    .leftJoin(messageThread, pairThread)
     .innerJoin(takenTerm, eq(takenTerm.id, tutorCourse.takenTermId))
     .innerJoin(courseOffering, eq(courseOffering.id, matchRequest.courseOfferingId))
     .innerJoin(course, eq(course.id, courseOffering.courseId))

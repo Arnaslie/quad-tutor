@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { MessageLink } from "@/app/messages/message-link";
 import { ButtonLink } from "@/components/button";
 import { Card } from "@/components/card";
 import { formatDay, formatDayTime, formatTime } from "@/components/format";
@@ -84,6 +85,8 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
           />
         </dl>
       </Card>
+
+      <MessageLink threadId={session.threadId} className="self-start" />
 
       <SessionActions
         sessionId={session.sessionId}
