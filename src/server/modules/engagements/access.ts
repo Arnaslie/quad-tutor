@@ -32,7 +32,8 @@ export type SessionContextRow = {
   engagementId: string;
   scheduledAt: Date;
   durationMinutes: number;
-  locationNote: string | null;
+  location: string | null;
+  studentNote: string | null;
   status: "scheduled" | "completed" | "cancelled" | "disputed";
   resolution:
     | "both_confirmed"
@@ -74,7 +75,8 @@ export function sessionContext(exec: Executor = db) {
       engagementId: sessionBooking.engagementId,
       scheduledAt: sessionBooking.scheduledAt,
       durationMinutes: sessionBooking.durationMinutes,
-      locationNote: sessionBooking.locationNote,
+      location: sessionBooking.location,
+      studentNote: sessionBooking.studentNote,
       status: sessionBooking.status,
       resolution: sessionBooking.resolution,
       studentConfirmedAt: sessionBooking.studentConfirmedAt,

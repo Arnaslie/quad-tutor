@@ -35,7 +35,8 @@ function freeUntil(scheduledAt: Date): Date {
 const sessionParties = {
   sessionId: sessionBooking.id,
   scheduledAt: sessionBooking.scheduledAt,
-  locationNote: sessionBooking.locationNote,
+  location: sessionBooking.location,
+  studentNote: sessionBooking.studentNote,
   studentEmail: user.email,
   studentName: user.name,
   tutorEmail: tutorUser.email,
@@ -178,16 +179,29 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
       courseLabel: row.code ?? row.title,
       scheduledAt: row.scheduledAt,
       freeUntil: freeUntil(row.scheduledAt),
-      locationNote: row.locationNote,
+      location: row.location,
+      studentNote: row.studentNote,
     };
     const studentName = displayName(row.studentName, "student");
     const tutorName = displayName(row.tutorName, "tutor");
 
     await sendEmail(
-      sessionBooked({ ...shared, to: row.studentEmail, name: studentName, otherPartyName: tutorName }),
+      sessionBooked({
+        ...shared,
+        recipient: "student",
+        to: row.studentEmail,
+        name: studentName,
+        otherPartyName: tutorName,
+      }),
     );
     await sendEmail(
-      sessionBooked({ ...shared, to: row.tutorEmail, name: tutorName, otherPartyName: studentName }),
+      sessionBooked({
+        ...shared,
+        recipient: "tutor",
+        to: row.tutorEmail,
+        name: tutorName,
+        otherPartyName: studentName,
+      }),
     );
     await db
       .update(sessionBooking)
@@ -219,15 +233,29 @@ export async function notifyUpcomingSessions(institutionId: string): Promise<num
       courseLabel: row.code ?? row.title,
       scheduledAt: row.scheduledAt,
       freeUntil: freeUntil(row.scheduledAt),
+      location: row.location,
+      studentNote: row.studentNote,
     };
     const studentName = displayName(row.studentName, "student");
     const tutorName = displayName(row.tutorName, "tutor");
 
     await sendEmail(
-      sessionTomorrow({ ...shared, to: row.studentEmail, name: studentName, otherPartyName: tutorName }),
+      sessionTomorrow({
+        ...shared,
+        recipient: "student",
+        to: row.studentEmail,
+        name: studentName,
+        otherPartyName: tutorName,
+      }),
     );
     await sendEmail(
-      sessionTomorrow({ ...shared, to: row.tutorEmail, name: tutorName, otherPartyName: studentName }),
+      sessionTomorrow({
+        ...shared,
+        recipient: "tutor",
+        to: row.tutorEmail,
+        name: tutorName,
+        otherPartyName: studentName,
+      }),
     );
     await db
       .update(sessionBooking)

@@ -73,8 +73,11 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
           <Row label="Tutor" value={otherParty} />
           <Row
             label="Where"
-            value={session.locationNote ?? "Not set — agree it between you"}
+            value={session.location ?? `${otherParty} has not set a spot yet`}
           />
+          {session.studentNote ? (
+            <Row label="Your note" value={session.studentNote} />
+          ) : null}
           <Row
             label="This package"
             value={`${session.sessionsRemaining} of ${session.sessionsPurchased} left to book`}

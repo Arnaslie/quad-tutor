@@ -206,6 +206,7 @@ async function PurchaseStep({ actorRequest }: { actorRequest: StudentRequest }) 
       <PurchasePanel
         requestId={actorRequest.id}
         tutorName={displayName(actorRequest.tutorName, "tutor")}
+        location={actorRequest.tutorLocation}
         slots={slots.map((slot) => slot.toISOString())}
         exams={exams}
         options={packageOptions()}

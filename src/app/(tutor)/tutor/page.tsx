@@ -10,8 +10,10 @@ import { requireTutor, type TutorActor } from "@/server/modules/identity/actor";
 import { inboxForTutor, type TutorInboxItem } from "@/server/modules/matching/requests";
 import { availabilityForTutor } from "@/server/modules/tutoring/availability";
 import { coursesForTutor } from "@/server/modules/tutoring/courses";
+import { defaultLocationFor } from "@/server/modules/tutoring/location";
 
 import { displayName } from "@/server/modules/identity/display-name";
+import { LocationNudge, SET_LOCATION_HREF } from "./location-nudge";
 import { RequestActions } from "./request-actions";
 
 export const metadata: Metadata = { title: "Inbox" };
@@ -20,7 +22,10 @@ const URGENT_MINUTES = 120;
 
 export default async function TutorInboxPage() {
   const tutor = await requireTutor();
-  const requests = await inboxForTutor(tutor);
+  const [requests, location] = await Promise.all([
+    inboxForTutor(tutor),
+    defaultLocationFor(tutor),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -30,21 +35,30 @@ export default async function TutorInboxPage() {
       />
 
       {requests.length === 0 ? (
-        <NothingWaiting tutor={tutor} />
+        <NothingWaiting tutor={tutor} location={location} />
       ) : (
-        <ul className="flex flex-col gap-4">
-          {requests.map((request) => (
-            <li key={request.id}>
-              <RequestCard request={request} />
-            </li>
-          ))}
-        </ul>
+        <>
+          {location ? null : <LocationNudge />}
+          <ul className="flex flex-col gap-4">
+            {requests.map((request) => (
+              <li key={request.id}>
+                <RequestCard request={request} />
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
 }
 
-async function NothingWaiting({ tutor }: { tutor: TutorActor }) {
+async function NothingWaiting({
+  tutor,
+  location,
+}: {
+  tutor: TutorActor;
+  location: string | null;
+}) {
   const [claims, windows] = await Promise.all([
     coursesForTutor(tutor),
     availabilityForTutor(tutor),
@@ -83,6 +97,17 @@ async function NothingWaiting({ tutor }: { tutor: TutorActor }) {
         title="Add your hours"
         description="Your course is live, but a student books a time out of your weekly hours — and you have none set, so there is nothing to book."
         action={<ButtonLink href="/tutor/availability">Set your hours</ButtonLink>}
+      />
+    );
+  }
+
+  if (!location) {
+    return (
+      <EmptyState
+        icon="pin"
+        title="Say where you meet"
+        description="Your course and hours are live. Set your usual spot so students know where to go before they book — otherwise they are told it is not decided yet."
+        action={<ButtonLink href={SET_LOCATION_HREF}>Set your spot</ButtonLink>}
       />
     );
   }

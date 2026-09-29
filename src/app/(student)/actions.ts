@@ -189,11 +189,11 @@ export async function book(
 ): Promise<ActionResult> {
   const actor = await requireActor();
 
-  const note = formData.get("locationNote");
+  const note = formData.get("studentNote");
   const parsed = bookSessionInput.safeParse({
     engagementId: formData.get("engagementId"),
     slotStartsAt: formData.get("slotStartsAt"),
-    locationNote: typeof note === "string" && note.trim().length > 0 ? note : undefined,
+    studentNote: typeof note === "string" && note.trim().length > 0 ? note : undefined,
   });
 
   if (!parsed.success) return { ok: false, error: "Pick a time for this session." };
@@ -203,7 +203,7 @@ export async function book(
       actor,
       engagementId: parsed.data.engagementId,
       slotStartsAt: parsed.data.slotStartsAt,
-      locationNote: parsed.data.locationNote,
+      studentNote: parsed.data.studentNote,
     });
   } catch (error) {
     return toResult(error);

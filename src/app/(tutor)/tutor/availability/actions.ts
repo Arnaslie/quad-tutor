@@ -11,7 +11,11 @@ import { TutoringError } from "@/server/modules/tutoring/courses";
 import {
   addAvailabilityInput,
   removeAvailabilityInput,
+  setDefaultLocationInput,
 } from "@/server/modules/tutoring/input";
+import { setDefaultLocation } from "@/server/modules/tutoring/location";
+
+import type { LocationState } from "../location-form";
 
 export type AvailabilityState =
   | { status: "idle" }
@@ -60,4 +64,27 @@ export async function removeAvailabilityAction(formData: FormData): Promise<void
   }
 
   revalidatePath("/tutor/availability");
+}
+
+export async function setDefaultLocationAction(
+  _previous: LocationState,
+  formData: FormData,
+): Promise<LocationState> {
+  const tutor = await requireTutor();
+
+  const parsed = setDefaultLocationInput.safeParse({ location: formData.get("location") });
+  if (!parsed.success) {
+    return { status: "error", message: "Say where you meet, in 200 characters or fewer." };
+  }
+
+  const { filled } = await setDefaultLocation({ tutor, location: parsed.data.location });
+
+  revalidatePath("/", "layout");
+  return {
+    status: "saved",
+    message:
+      filled > 0
+        ? `Saved, and added to ${filled} upcoming ${filled === 1 ? "session" : "sessions"} that had no spot.`
+        : "Saved. New bookings meet here.",
+  };
 }

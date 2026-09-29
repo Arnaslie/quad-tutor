@@ -7,14 +7,17 @@ import { Field, Input } from "@/components/field";
 import { formatDay, formatTime } from "@/components/format";
 
 import { book, type ActionResult } from "../actions";
+import { MeetingSpot } from "../meeting-spot";
 
 export function BookNext({
   engagementId,
   tutorName,
+  location,
   slots,
 }: {
   engagementId: string;
   tutorName: string;
+  location: string | null;
   slots: string[];
 }) {
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
@@ -76,16 +79,18 @@ export function BookNext({
         ) : null}
       </fieldset>
 
+      <MeetingSpot tutorName={tutorName} location={location} />
+
       <Field
-        id="location-note"
-        label="Where (optional)"
-        hint="Sessions happen wherever the two of you choose — a library room, a table in the Ferg."
+        id="student-note"
+        label={`Note for ${tutorName} (optional)`}
+        hint="What you want to cover, or anything they should bring."
       >
         <Input
-          id="location-note"
-          name="locationNote"
+          id="student-note"
+          name="studentNote"
           maxLength={200}
-          placeholder="Gorgas Library, 2nd floor"
+          placeholder="Chapter 4 problem set, question 7"
         />
       </Field>
 

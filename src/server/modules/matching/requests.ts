@@ -210,6 +210,7 @@ export type StudentRequest = {
   status: "pending" | "accepted" | "declined" | "expired" | "withdrawn";
   expiresAt: Date;
   tutorName: string;
+  tutorLocation: string | null;
   courseCode: string;
   courseTitle: string;
   offeringId: string;
@@ -231,6 +232,7 @@ export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]
       status: matchRequest.status,
       expiresAt: matchRequest.expiresAt,
       tutorName: user.name,
+      tutorLocation: tutorProfile.defaultLocation,
       courseCode: courseCodeAlias.code,
       courseTitle: course.title,
       offeringId: matchRequest.courseOfferingId,

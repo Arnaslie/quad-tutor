@@ -7,13 +7,15 @@ import { PageHeader } from "@/components/page-header";
 import { SESSION_MINUTES } from "@/server/modules/engagements/attendance";
 import { requireTutor } from "@/server/modules/identity/actor";
 import { availabilityForTutor } from "@/server/modules/tutoring/availability";
+import { defaultLocationFor } from "@/server/modules/tutoring/location";
 
 import {
   slotsPerWeek,
   type AvailabilityWindow,
 } from "@/server/modules/tutoring/windows";
 
-import { removeAvailabilityAction } from "./actions";
+import { LocationForm } from "../location-form";
+import { removeAvailabilityAction, setDefaultLocationAction } from "./actions";
 import { AvailabilityForm } from "./availability-form";
 import { WEEKDAYS, formatMinuteOfDay } from "./time";
 
@@ -21,7 +23,10 @@ export const metadata: Metadata = { title: "Hours" };
 
 export default async function TutorAvailabilityPage() {
   const tutor = await requireTutor();
-  const windows = await availabilityForTutor(tutor);
+  const [windows, location] = await Promise.all([
+    availabilityForTutor(tutor),
+    defaultLocationFor(tutor),
+  ]);
 
   const byDay = WEEKDAYS.map((day, weekday) => ({
     day,
@@ -31,9 +36,25 @@ export default async function TutorAvailabilityPage() {
   return (
     <div className="flex max-w-xl flex-col gap-6">
       <PageHeader
-        title="When you are free"
+        title="When and where you tutor"
         description={`Recurring weekly. Students pick a ${SESSION_MINUTES}-minute slot out of these once you have accepted them, never at short notice.`}
       />
+
+      <Card className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-medium text-foreground">Where you meet</h2>
+          <p className="text-sm text-muted">
+            {location
+              ? "Every new booking meets here, and students see it before they pay. You can move a single session from your sessions page."
+              : "You have not set a spot yet, so students booking you are told it is not decided. Pick somewhere on campus you can always get a table."}
+          </p>
+        </div>
+        <LocationForm
+          action={setDefaultLocationAction}
+          current={location}
+          label="Your usual spot"
+        />
+      </Card>
 
       {byDay.length === 0 ? (
         <EmptyState

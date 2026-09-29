@@ -12,17 +12,22 @@ import {
   type SessionListItem,
 } from "@/server/modules/engagements/reads";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
+import { defaultLocationFor } from "@/server/modules/tutoring/location";
 
 import { displayName } from "@/server/modules/identity/display-name";
+import { LocationForm } from "../location-form";
+import { LocationNudge } from "../location-nudge";
+import { changeSessionLocation } from "./actions";
 import { SessionActions } from "./session-actions";
 
 export const metadata: Metadata = { title: "Sessions" };
 
 export default async function TutorSessionsPage() {
   const tutor = await requireTutor();
-  const [board, earnings] = await Promise.all([
+  const [board, earnings, location] = await Promise.all([
     sessionBoardForTutor(tutor),
     earningsForTutor(tutor),
+    defaultLocationFor(tutor),
   ]);
 
   const total =
@@ -34,6 +39,8 @@ export default async function TutorSessionsPage() {
         title="Your sessions"
         description="Confirm attendance after each one. Pay is held until a session is delivered."
       />
+
+      {location ? null : <LocationNudge />}
 
       <Card>
         <p className="text-sm text-foreground">
@@ -103,6 +110,9 @@ function SessionCard({ item }: { item: SessionListItem }) {
     .filter(Boolean)
     .join(" · ");
 
+  const student = displayName(item.otherPartyName, "student");
+  const upcoming = item.action === "cancel" || item.action === "late_cancel";
+
   return (
     <Card className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
@@ -113,17 +123,34 @@ function SessionCard({ item }: { item: SessionListItem }) {
           {formatDayTime(item.scheduledAt)}
         </h3>
         <p className="text-sm text-muted">
-          {item.durationMinutes} min · {displayName(item.otherPartyName, "student")}
-          {item.locationNote ? ` · ${item.locationNote}` : ""}
+          {item.durationMinutes} min · {student}
+          {item.location ? ` · ${item.location}` : upcoming ? " · no spot set" : ""}
         </p>
       </div>
+
+      {item.studentNote ? (
+        <p className="rounded-xl bg-surface-sunken px-3 py-2 text-sm text-muted">
+          <span className="text-foreground">{student}:</span> {item.studentNote}
+        </p>
+      ) : null}
+
+      {upcoming ? (
+        <LocationForm
+          action={changeSessionLocation}
+          current={item.location}
+          label="Where this session meets"
+          hint={`${student} sees the new spot on their session page.`}
+          sessionId={item.sessionId}
+          collapsed
+        />
+      ) : null}
 
       {item.action === "confirm_or_deny" ||
       item.action === "cancel" ||
       item.action === "late_cancel" ? (
         <SessionActions
           sessionId={item.sessionId}
-          studentName={displayName(item.otherPartyName, "student")}
+          studentName={student}
           action={item.action}
         />
       ) : (

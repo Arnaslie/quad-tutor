@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, like, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, like, notInArray, or, sql } from "drizzle-orm";
 
 import { db } from "./index";
 import {
@@ -40,7 +40,7 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
 
 const MARKER = "db:demo";
-const LOCATION_NOTE = `Gorgas Library, 2nd floor [${MARKER}]`;
+const STUDENT_NOTE = `Bringing last year's midterm [${MARKER}]`;
 
 const STUDENT = "seed_owen-drake";
 const ACCEPTING_TUTOR = "seed_jordan-ellis";
@@ -169,7 +169,12 @@ async function cleanup(
     const marked = await tx
       .selectDistinct({ id: sessionBooking.engagementId })
       .from(sessionBooking)
-      .where(like(sessionBooking.locationNote, `%${MARKER}%`));
+      .where(
+        or(
+          like(sessionBooking.studentNote, `%${MARKER}%`),
+          like(sessionBooking.location, `%${MARKER}%`),
+        ),
+      );
 
     const fromRequests = await tx
       .select({ id: engagement.id })
@@ -341,7 +346,7 @@ async function main(): Promise<void> {
       actor: student,
       engagementId,
       slotStartsAt: open[0],
-      locationNote: LOCATION_NOTE,
+      studentNote: STUDENT_NOTE,
     });
     booked.push(sessionId);
   }

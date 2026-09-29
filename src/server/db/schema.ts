@@ -127,6 +127,7 @@ export const tutorProfile = pgTable(
 
     headline: text("headline"),
     bio: text("bio"),
+    defaultLocation: text("default_location"),
 
     stripeAccountId: text("stripe_account_id"),
     kycStatus: kycStatus("kyc_status").notNull().default("not_started"),
@@ -352,7 +353,8 @@ export const sessionBooking = pgTable(
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
     durationMinutes: integer("duration_minutes").notNull().default(60),
 
-    locationNote: text("location_note"),
+    location: text("location"),
+    studentNote: text("student_note"),
 
     status: sessionStatus("status").notNull().default("scheduled"),
 

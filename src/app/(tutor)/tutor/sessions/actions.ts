@@ -1,5 +1,7 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+
 import { SessionError } from "@/server/modules/engagements/access";
 import {
   confirmAttendance,
@@ -10,9 +12,12 @@ import {
   cancelSessionInput,
   confirmAttendanceInput,
   denyAttendanceInput,
+  setSessionLocationInput,
 } from "@/server/modules/engagements/input";
-import { cancelSession } from "@/server/modules/engagements/scheduling";
+import { cancelSession, setSessionLocation } from "@/server/modules/engagements/scheduling";
 import { requireTutor } from "@/server/modules/identity/actor";
+
+import type { LocationState } from "../location-form";
 
 export type SessionActionState =
   | { status: "idle" }
@@ -69,6 +74,31 @@ export async function cancelTutorSession(
   } catch (error) {
     return { status: "error", message: readable(error) };
   }
+}
+
+export async function changeSessionLocation(
+  _previous: LocationState,
+  formData: FormData,
+): Promise<LocationState> {
+  const actor = await requireTutor();
+
+  const parsed = setSessionLocationInput.safeParse({
+    sessionId: formData.get("sessionId"),
+    location: formData.get("location"),
+  });
+  if (!parsed.success) {
+    return { status: "error", message: "Say where you meet, in 200 characters or fewer." };
+  }
+
+  try {
+    await setSessionLocation({ actor, ...parsed.data });
+  } catch (error) {
+    return { status: "error", message: readable(error) };
+  }
+
+  revalidatePath("/tutor/sessions");
+  revalidatePath(`/sessions/${parsed.data.sessionId}`);
+  return { status: "saved", message: "Moved. The student sees the new spot on their session page." };
 }
 
 function readable(error: unknown): string {

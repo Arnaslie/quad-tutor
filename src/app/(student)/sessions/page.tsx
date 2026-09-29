@@ -210,6 +210,7 @@ async function TopUpStep({ engagementId }: { engagementId: string }) {
         <TopUp
           engagementId={candidate.engagementId}
           tutorName={tutor}
+          location={candidate.tutorLocation}
           priceMinor={candidate.priceMinor}
           currency={candidate.currency}
           slots={slots.map((slot) => slot.toISOString())}
@@ -336,6 +337,7 @@ async function BookingStep({ engagementId }: { engagementId: string }) {
         <BookNext
           engagementId={pkg.engagementId}
           tutorName={tutor}
+          location={pkg.tutorLocation}
           slots={slots.map((slot) => slot.toISOString())}
         />
       )}

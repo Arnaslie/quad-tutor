@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { meetingLocation } from "@/server/modules/tutoring/input";
+
 export const sessionRef = z.object({
   sessionId: z.uuid(),
 });
@@ -29,8 +31,10 @@ export const bookSessionInput = z.object({
   engagementId: z.uuid(),
 
   slotStartsAt: z.coerce.date(),
-  locationNote: z.string().trim().max(200).optional(),
+  studentNote: z.string().trim().max(200).optional(),
 });
+
+export const setSessionLocationInput = sessionRef.extend({ location: meetingLocation });
 
 /** Back office only — see the TODO(admin) note on `resolveDispute`. */
 export const resolveDisputeInput = sessionRef.extend({
@@ -46,4 +50,5 @@ export type ConfirmAttendanceInput = z.infer<typeof confirmAttendanceInput>;
 export type DenyAttendanceInput = z.infer<typeof denyAttendanceInput>;
 export type CancelSessionInput = z.infer<typeof cancelSessionInput>;
 export type BookSessionInput = z.infer<typeof bookSessionInput>;
+export type SetSessionLocationInput = z.infer<typeof setSessionLocationInput>;
 export type ResolveDisputeInput = z.infer<typeof resolveDisputeInput>;

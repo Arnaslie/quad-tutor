@@ -21,6 +21,7 @@ export function SessionRow({ session }: { session: SessionListItem }) {
           {displayName(session.otherPartyName, "tutor")}
           {session.status === "cancelled" ? " · cancelled" : ""}
           {session.status === "disputed" ? " · under review" : ""}
+          {session.status === "scheduled" && session.location ? ` · ${session.location}` : ""}
         </p>
       </div>
       <Icon name="arrow-right" className="size-5 shrink-0 text-muted" />
