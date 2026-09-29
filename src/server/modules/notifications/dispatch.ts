@@ -1,4 +1,4 @@
-import { and, eq, exists, gt, gte, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, exists, gt, gte, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -38,7 +38,7 @@ const sessionParties = {
   scheduledAt: sessionBooking.scheduledAt,
   location: sessionBooking.location,
   studentNote: sessionBooking.studentNote,
-  locationChangedAt: sessionBooking.locationChangedAt,
+  locationVersion: sessionBooking.locationVersion,
   studentEmail: user.email,
   studentName: user.name,
   tutorEmail: tutorUser.email,
@@ -207,7 +207,7 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
     );
     await db
       .update(sessionBooking)
-      .set({ bookedNotifiedAt: new Date() })
+      .set({ bookedNotifiedAt: new Date(), locationNotifiedVersion: row.locationVersion })
       .where(eq(sessionBooking.id, row.sessionId));
     sent += 2;
   }
@@ -356,11 +356,8 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
     and(
       eq(sessionBooking.status, "scheduled"),
       gt(sessionBooking.scheduledAt, new Date()),
-      gt(sessionBooking.locationChangedAt, sessionBooking.bookedNotifiedAt),
-      or(
-        isNull(sessionBooking.locationChangeNotifiedAt),
-        gt(sessionBooking.locationChangedAt, sessionBooking.locationChangeNotifiedAt),
-      ),
+      isNotNull(sessionBooking.bookedNotifiedAt),
+      gt(sessionBooking.locationVersion, sessionBooking.locationNotifiedVersion),
       eq(tutorProfile.institutionId, institutionId),
       eq(studentProfile.institutionId, institutionId),
     ),
@@ -368,7 +365,7 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
 
   let sent = 0;
   for (const row of rows) {
-    if (!row.location || !row.locationChangedAt) continue;
+    if (!row.location) continue;
 
     await sendEmail(
       sessionMoved({
@@ -382,7 +379,7 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
     );
     await db
       .update(sessionBooking)
-      .set({ locationChangeNotifiedAt: row.locationChangedAt })
+      .set({ locationNotifiedVersion: row.locationVersion })
       .where(eq(sessionBooking.id, row.sessionId));
     sent += 1;
   }

@@ -15,11 +15,10 @@ import {
   denyAttendance,
 } from "@/server/modules/engagements/confirmation";
 import {
-  bookSessionInput,
   cancelSessionInput,
   confirmAttendanceInput,
   denyAttendanceInput,
-  purchaseTopUpInput,
+  engagementSlotInput,
   studentNote,
 } from "@/server/modules/engagements/input";
 import { SessionError } from "@/server/modules/engagements/access";
@@ -169,7 +168,7 @@ export async function topUp(
 ): Promise<ActionResult> {
   const actor = await requireActor();
 
-  const parsed = purchaseTopUpInput.safeParse({
+  const parsed = engagementSlotInput.safeParse({
     engagementId: formData.get("engagementId"),
     slotStartsAt: formData.get("slotStartsAt"),
     studentNote: noteFrom(formData),
@@ -200,7 +199,7 @@ export async function book(
 ): Promise<ActionResult> {
   const actor = await requireActor();
 
-  const parsed = bookSessionInput.safeParse({
+  const parsed = engagementSlotInput.safeParse({
     engagementId: formData.get("engagementId"),
     slotStartsAt: formData.get("slotStartsAt"),
     studentNote: noteFrom(formData),

@@ -35,7 +35,7 @@ export async function setDefaultLocation(params: {
       .update(sessionBooking)
       .set({
         location: params.location,
-        locationChangedAt: sql`case when ${sessionBooking.bookedNotifiedAt} is not null then ${now.toISOString()}::timestamptz end`,
+        locationVersion: sql`${sessionBooking.locationVersion} + 1`,
       })
       .where(
         and(

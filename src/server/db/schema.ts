@@ -356,10 +356,8 @@ export const sessionBooking = pgTable(
     locationNote: text("location_note"),
     location: text("location"),
     studentNote: text("student_note"),
-    locationChangedAt: timestamp("location_changed_at", { withTimezone: true }),
-    locationChangeNotifiedAt: timestamp("location_change_notified_at", {
-      withTimezone: true,
-    }),
+    locationVersion: integer("location_version").notNull().default(0),
+    locationNotifiedVersion: integer("location_notified_version").notNull().default(0),
 
     status: sessionStatus("status").notNull().default("scheduled"),
 

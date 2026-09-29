@@ -23,14 +23,12 @@ export const slotsForTopUpInput = engagementRef;
 
 export const studentNote = z.string().trim().max(200).optional();
 
-export const purchaseTopUpInput = z.object({
+export const engagementSlotInput = z.object({
   engagementId: z.uuid(),
 
   slotStartsAt: z.coerce.date(),
   studentNote,
 });
-
-export const bookSessionInput = purchaseTopUpInput;
 
 export const setSessionLocationInput = sessionRef.extend({ location: meetingLocation });
 
@@ -43,10 +41,9 @@ export const resolveDisputeInput = sessionRef.extend({
 export type SlotsForRequestInput = z.infer<typeof slotsForRequestInput>;
 export type SlotsForEngagementInput = z.infer<typeof slotsForEngagementInput>;
 export type SlotsForTopUpInput = z.infer<typeof slotsForTopUpInput>;
-export type PurchaseTopUpInput = z.infer<typeof purchaseTopUpInput>;
+export type EngagementSlotInput = z.infer<typeof engagementSlotInput>;
 export type ConfirmAttendanceInput = z.infer<typeof confirmAttendanceInput>;
 export type DenyAttendanceInput = z.infer<typeof denyAttendanceInput>;
 export type CancelSessionInput = z.infer<typeof cancelSessionInput>;
-export type BookSessionInput = z.infer<typeof bookSessionInput>;
 export type SetSessionLocationInput = z.infer<typeof setSessionLocationInput>;
 export type ResolveDisputeInput = z.infer<typeof resolveDisputeInput>;
