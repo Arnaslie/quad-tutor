@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Icon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
 import {
+  collegesWithCourses,
   courseById,
   offeringsForCourse,
   searchSeededCourses,
@@ -17,33 +18,48 @@ import { CourseSearch } from "./course-search";
 
 export const metadata: Metadata = { title: "Courses" };
 
-const courseParam = z.uuid();
+const uuidParam = z.uuid();
+
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 export default async function CoursesPage(props: PageProps<"/courses">) {
   const actor = await requireActor();
   const searchParams = await props.searchParams;
 
-  const raw = searchParams.course;
-  const selected = courseParam.safeParse(Array.isArray(raw) ? raw[0] : raw);
+  const selected = uuidParam.safeParse(first(searchParams.course));
 
   if (selected.success) {
     return <OfferingStep courseId={selected.data} institutionId={actor.institutionId} />;
   }
 
-  const queryRaw = searchParams.q;
-  const query = (Array.isArray(queryRaw) ? queryRaw[0] : queryRaw) ?? "";
+  const query = first(searchParams.q) ?? "";
+  const college = uuidParam.safeParse(first(searchParams.college));
 
-  return <CourseStep query={query} institutionId={actor.institutionId} />;
+  return (
+    <CourseStep
+      query={query}
+      collegeId={college.success ? college.data : undefined}
+      institutionId={actor.institutionId}
+    />
+  );
 }
 
 async function CourseStep({
   query,
+  collegeId,
   institutionId,
 }: {
   query: string;
+  collegeId: string | undefined;
   institutionId: string;
 }) {
-  const courses = await searchSeededCourses({ institutionId, query });
+  const [courses, colleges] = await Promise.all([
+    searchSeededCourses({ institutionId, query, collegeId }),
+    collegesWithCourses(institutionId),
+  ]);
+  const filtered = colleges.find((c) => c.collegeId === collegeId);
 
   return (
     <div className="flex flex-col gap-6">
@@ -52,15 +68,19 @@ async function CourseStep({
         description="Pick the course, then the section and professor. Under 45 seconds, start to finish."
       />
 
-      <CourseSearch initialQuery={query} />
+      <CourseSearch initialQuery={query} collegeId={collegeId} colleges={colleges} />
 
       {courses.length === 0 ? (
         <EmptyState
           icon="book"
-          title={query.trim() ? `Nothing matching “${query.trim()}”` : "No courses yet"}
-          description={
+          title={
             query.trim()
-              ? "We cover a short list of the courses people actually get stuck in, not the whole catalog. Try the code, or a word from the title."
+              ? `Nothing matching “${query.trim()}”${filtered ? ` in ${filtered.name}` : ""}`
+              : "No courses yet"
+          }
+          description={
+            query.trim() || collegeId
+              ? "We cover a short list of the courses people actually get stuck in, not the whole catalog. Try the code, a word from the title, or All colleges."
               : "The catalog has not been seeded for this campus yet."
           }
         />

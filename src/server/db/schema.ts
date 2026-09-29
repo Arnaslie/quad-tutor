@@ -165,6 +165,19 @@ export const professor = pgTable(
   (t) => [index("professor_institution_idx").on(t.institutionId)],
 );
 
+export const college = pgTable(
+  "college",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [uniqueIndex("college_institution_name_idx").on(t.institutionId, t.name)],
+);
+
 export const course = pgTable(
   "course",
   {
@@ -172,12 +185,16 @@ export const course = pgTable(
     institutionId: uuid("institution_id")
       .notNull()
       .references(() => institution.id),
+    collegeId: uuid("college_id").references(() => college.id),
     title: text("title").notNull(),
     department: text("department").notNull(),
 
     isSeeded: boolean("is_seeded").notNull().default(false),
   },
-  (t) => [index("course_institution_idx").on(t.institutionId)],
+  (t) => [
+    index("course_institution_idx").on(t.institutionId),
+    index("course_college_idx").on(t.collegeId),
+  ],
 );
 
 export const courseCodeAlias = pgTable(
