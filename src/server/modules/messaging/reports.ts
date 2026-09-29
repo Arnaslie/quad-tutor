@@ -17,7 +17,13 @@ import { tutorUser, type Executor } from "@/server/modules/engagements/access";
 import type { Actor, OperatorActor } from "@/server/modules/identity/actor";
 
 import { DELETED_USER, type ReportOutcome, type ReportReason } from "./rules";
-import { MessagingError, messagesFor, participantThread, type ThreadMessage } from "./threads";
+import {
+  MessagingError,
+  courseLabel,
+  messagesFor,
+  participantThread,
+  type ThreadMessage,
+} from "./threads";
 
 const reporter = alias(user, "reporter");
 
@@ -51,7 +57,7 @@ function reportRows(exec: Executor = db) {
       reporterName: reporter.name,
       studentName: user.name,
       tutorName: tutorUser.name,
-      courseLabel: sql<string>`coalesce(${courseCodeAlias.code}, ${course.title})`,
+      courseLabel,
     })
     .from(messageReport)
     .innerJoin(

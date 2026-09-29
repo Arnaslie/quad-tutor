@@ -17,7 +17,7 @@ import { sendEmail } from "@/server/modules/notifications/email";
 import { messageWaiting } from "@/server/modules/notifications/messages";
 
 import { ALERT_GAP_MINUTES, THREAD_SIDES, otherSide, previewLine, type ThreadSide } from "./rules";
-import { readThroughColumn, threadBlocked, unreadFor } from "./threads";
+import { courseLabel, readThroughColumn, threadBlocked, unreadFor } from "./threads";
 
 const ALERTED = {
   student: { column: messageThread.studentAlertedAt, key: "studentAlertedAt" },
@@ -59,7 +59,7 @@ async function alertSide(side: ThreadSide, scope: SQL): Promise<number> {
       to: recipient.email,
       recipientName: recipient.name,
       senderName: sender.name,
-      courseLabel: sql<string>`coalesce(${courseCodeAlias.code}, ${course.title})`,
+      courseLabel,
       messageId: sql<string>`${latest}`,
       body: sql<string>`(select ${message.body} from ${message} where ${message.id} = ${latest})`,
     })

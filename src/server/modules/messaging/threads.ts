@@ -93,7 +93,7 @@ function sideFor(actor: Actor, studentProfileId: string): ThreadSide {
   return studentProfileId === actor.studentProfileId ? "student" : "tutor";
 }
 
-const courseLabel = sql<string>`coalesce(${courseCodeAlias.code}, ${course.title})`;
+export const courseLabel = sql<string>`coalesce(${courseCodeAlias.code}, ${course.title})`;
 
 function threadRows<E extends Record<string, SQL>>(exec: Executor = db, extra = {} as E) {
   return exec
