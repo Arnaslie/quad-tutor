@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { MessageLink } from "@/app/messages/message-link";
 import { ButtonLink } from "@/components/button";
 import { Card } from "@/components/card";
 import { EmptyState } from "@/components/empty-state";
@@ -165,6 +166,8 @@ function RequestCard({ request }: { request: TutorInboxItem }) {
         You took {request.courseCode} in {request.takenTermName} and earned{" "}
         {request.gradeEarned}.
       </p>
+
+      <MessageLink threadId={request.threadId} className="self-start" />
 
       <RequestActions
         requestId={request.id}

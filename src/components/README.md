@@ -120,7 +120,7 @@ them" reads honest, "that is all we found" reads broken.
 ```
 
 `IconName`: `book | send | calendar | inbox | clock | cap | user | check |
-arrow-right | pin`. No icon package. Need another? Add a path to `PATHS` — do not inline
+arrow-right | pin | chat | flag`. No icon package. Need another? Add a path to `PATHS` — do not inline
 an `<svg>` in a screen.
 
 ---
@@ -185,6 +185,11 @@ fifth surface goes behind one of these, not beside them.
 |---|---|
 | student | `/courses`, `/courses/[offeringId]`, `/requests`, `/sessions`, `/sessions/[id]` |
 | tutor | `/tutor`, `/tutor/courses`, `/tutor/availability`, `/tutor/sessions` |
+| ops | `/ops/verifications`, `/ops/reports` |
+
+`/messages` sits outside both groups, since one user can be on either side of a
+thread. It reaches every surface through a header icon with an unread count
+(`messages-link.tsx`), not a tab, which keeps the tutor bar at four.
 
 `/tutor/start` is the `becomeTutor` entry point and is deliberately not a tab.
 
