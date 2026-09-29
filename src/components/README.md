@@ -120,7 +120,7 @@ them" reads honest, "that is all we found" reads broken.
 ```
 
 `IconName`: `book | send | calendar | inbox | clock | cap | user | check |
-arrow-right`. No icon package. Need a tenth? Add a path to `PATHS` — do not inline
+arrow-right | pin`. No icon package. Need another? Add a path to `PATHS` — do not inline
 an `<svg>` in a screen.
 
 ---

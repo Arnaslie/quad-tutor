@@ -7,16 +7,19 @@ import { formatDay, formatTime } from "@/components/format";
 import { Money } from "@/components/money";
 
 import { topUp, type ActionResult } from "../actions";
+import { MeetingSpot, StudentNoteField } from "../meeting-spot";
 
 export function TopUp({
   engagementId,
   tutorName,
+  location,
   priceMinor,
   currency,
   slots,
 }: {
   engagementId: string;
   tutorName: string;
+  location: string | null;
   priceMinor: number;
   currency: string;
   slots: string[];
@@ -79,6 +82,10 @@ export function TopUp({
           </Button>
         ) : null}
       </fieldset>
+
+      <MeetingSpot tutorName={tutorName} location={location} />
+
+      <StudentNoteField tutorName={tutorName} />
 
       {state && !state.ok ? (
         <p role="alert" className="text-sm text-danger">

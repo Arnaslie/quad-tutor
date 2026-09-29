@@ -23,6 +23,11 @@ export const removeAvailabilityInput = z.object({
   windowId: z.uuid(),
 });
 
+export const meetingLocation = z.string().trim().min(1).max(200);
+
+export const setDefaultLocationInput = z.object({ location: meetingLocation });
+
 export type ClaimCourseInput = z.infer<typeof claimCourseInput>;
 export type AddAvailabilityInput = z.infer<typeof addAvailabilityInput>;
 export type RemoveAvailabilityInput = z.infer<typeof removeAvailabilityInput>;
+export type SetDefaultLocationInput = z.infer<typeof setDefaultLocationInput>;

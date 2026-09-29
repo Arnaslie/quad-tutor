@@ -1,4 +1,4 @@
-import { and, eq, exists, gte, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, exists, gt, gte, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -25,6 +25,7 @@ import {
   requestWaiting,
   sectionCovered,
   sessionBooked,
+  sessionMoved,
   sessionTomorrow,
 } from "./messages";
 
@@ -35,7 +36,9 @@ function freeUntil(scheduledAt: Date): Date {
 const sessionParties = {
   sessionId: sessionBooking.id,
   scheduledAt: sessionBooking.scheduledAt,
-  locationNote: sessionBooking.locationNote,
+  location: sessionBooking.location,
+  studentNote: sessionBooking.studentNote,
+  notifiedLocation: sessionBooking.notifiedLocation,
   studentEmail: user.email,
   studentName: user.name,
   tutorEmail: tutorUser.email,
@@ -178,20 +181,36 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
       courseLabel: row.code ?? row.title,
       scheduledAt: row.scheduledAt,
       freeUntil: freeUntil(row.scheduledAt),
-      locationNote: row.locationNote,
+      location: row.location,
+      studentNote: row.studentNote,
     };
     const studentName = displayName(row.studentName, "student");
     const tutorName = displayName(row.tutorName, "tutor");
 
     await sendEmail(
-      sessionBooked({ ...shared, to: row.studentEmail, name: studentName, otherPartyName: tutorName }),
+      sessionBooked({
+        ...shared,
+        recipient: "student",
+        to: row.studentEmail,
+        name: studentName,
+        otherPartyName: tutorName,
+      }),
     );
     await sendEmail(
-      sessionBooked({ ...shared, to: row.tutorEmail, name: tutorName, otherPartyName: studentName }),
+      sessionBooked({
+        ...shared,
+        recipient: "tutor",
+        to: row.tutorEmail,
+        name: tutorName,
+        otherPartyName: studentName,
+      }),
     );
     await db
       .update(sessionBooking)
-      .set({ bookedNotifiedAt: new Date() })
+      .set({
+        bookedNotifiedAt: new Date(),
+        notifiedLocation: row.location,
+      })
       .where(eq(sessionBooking.id, row.sessionId));
     sent += 2;
   }
@@ -219,15 +238,29 @@ export async function notifyUpcomingSessions(institutionId: string): Promise<num
       courseLabel: row.code ?? row.title,
       scheduledAt: row.scheduledAt,
       freeUntil: freeUntil(row.scheduledAt),
+      location: row.location,
+      studentNote: row.studentNote,
     };
     const studentName = displayName(row.studentName, "student");
     const tutorName = displayName(row.tutorName, "tutor");
 
     await sendEmail(
-      sessionTomorrow({ ...shared, to: row.studentEmail, name: studentName, otherPartyName: tutorName }),
+      sessionTomorrow({
+        ...shared,
+        recipient: "student",
+        to: row.studentEmail,
+        name: studentName,
+        otherPartyName: tutorName,
+      }),
     );
     await sendEmail(
-      sessionTomorrow({ ...shared, to: row.tutorEmail, name: tutorName, otherPartyName: studentName }),
+      sessionTomorrow({
+        ...shared,
+        recipient: "tutor",
+        to: row.tutorEmail,
+        name: tutorName,
+        otherPartyName: studentName,
+      }),
     );
     await db
       .update(sessionBooking)
@@ -321,11 +354,50 @@ function reminderHorizon(now: Date): Date {
   return new Date(now.getTime() + span);
 }
 
+export async function notifyMovedSessions(institutionId: string): Promise<number> {
+  const rows = await sessionQuery().where(
+    and(
+      eq(sessionBooking.status, "scheduled"),
+      gt(sessionBooking.scheduledAt, new Date()),
+      isNotNull(sessionBooking.bookedNotifiedAt),
+      sql`${sessionBooking.location} is distinct from ${sessionBooking.notifiedLocation}`,
+      eq(tutorProfile.institutionId, institutionId),
+      eq(studentProfile.institutionId, institutionId),
+    ),
+  );
+
+  let sent = 0;
+  for (const row of rows) {
+    if (!row.location) continue;
+
+    await sendEmail(
+      sessionMoved({
+        to: row.studentEmail,
+        name: displayName(row.studentName, "student"),
+        otherPartyName: displayName(row.tutorName, "tutor"),
+        courseLabel: row.code ?? row.title,
+        scheduledAt: row.scheduledAt,
+        location: row.location,
+        firstSpot: row.notifiedLocation === null,
+        sessionId: row.sessionId,
+      }),
+    );
+    await db
+      .update(sessionBooking)
+      .set({ notifiedLocation: row.location })
+      .where(eq(sessionBooking.id, row.sessionId));
+    sent += 1;
+  }
+
+  return sent;
+}
+
 export async function runNotifications(institutionId: string): Promise<number> {
   return (
     (await notifyPendingRequests(institutionId)) +
     (await notifyAcceptedRequests(institutionId)) +
     (await notifyBookedSessions(institutionId)) +
+    (await notifyMovedSessions(institutionId)) +
     (await notifyUpcomingSessions(institutionId)) +
     (await notifyCoveredSections(institutionId))
   );

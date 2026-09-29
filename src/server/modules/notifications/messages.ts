@@ -88,7 +88,9 @@ export function sessionBooked(params: {
   courseLabel: string;
   scheduledAt: Date;
   freeUntil: Date;
-  locationNote: string | null;
+  recipient: "student" | "tutor";
+  location: string | null;
+  studentNote: string | null;
 }): Email {
   return {
     to: params.to,
@@ -98,12 +100,56 @@ export function sessionBooked(params: {
       "",
       `${params.courseLabel} with ${params.otherPartyName}`,
       formatDayTime(params.scheduledAt),
-      params.locationNote ? params.locationNote : "You two agree where to meet.",
+      ...whereLines(params),
       "",
       `Cancelling is free until ${formatDayTime(params.freeUntil)}. After that it`,
       "counts as a late cancel.",
       "",
       url("/sessions"),
+      ...SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+function whereLines(params: {
+  otherPartyName: string;
+  recipient: "student" | "tutor";
+  location: string | null;
+  studentNote: string | null;
+}): string[] {
+  const where = params.location
+    ? [`Where: ${params.location}`]
+    : params.recipient === "tutor"
+      ? [`You have not set where you meet yet. Set it here: ${url("/tutor/availability")}`]
+      : [`${params.otherPartyName} has not set where you meet yet. It will be on your session page once they do.`];
+
+  return params.recipient === "tutor" && params.studentNote
+    ? [...where, `Note from ${params.otherPartyName}: ${params.studentNote}`]
+    : where;
+}
+
+export function sessionMoved(params: {
+  to: string;
+  name: string;
+  otherPartyName: string;
+  courseLabel: string;
+  scheduledAt: Date;
+  location: string;
+  firstSpot: boolean;
+  sessionId: string;
+}): Email {
+  return {
+    to: params.to,
+    subject: `${params.firstSpot ? "Spot set" : "New spot"}: ${params.courseLabel} with ${params.otherPartyName}`,
+    text: [
+      `${params.name},`,
+      "",
+      `${params.otherPartyName} ${params.firstSpot ? "set" : "changed"} where you meet for ${params.courseLabel}`,
+      `on ${formatDayTime(params.scheduledAt)}.`,
+      "",
+      `Where: ${params.location}`,
+      "",
+      url(`/sessions/${params.sessionId}`),
       ...SIGN_OFF,
     ].join("\n"),
   };
@@ -116,6 +162,9 @@ export function sessionTomorrow(params: {
   courseLabel: string;
   scheduledAt: Date;
   freeUntil: Date;
+  recipient: "student" | "tutor";
+  location: string | null;
+  studentNote: string | null;
 }): Email {
   return {
     to: params.to,
@@ -124,6 +173,7 @@ export function sessionTomorrow(params: {
       `${params.name},`,
       "",
       `${params.courseLabel} with ${params.otherPartyName} is ${formatDayTime(params.scheduledAt)}.`,
+      ...whereLines(params),
       "",
       `Can't make it? Cancelling is free until ${formatDayTime(params.freeUntil)} —`,
       "after that it counts as a late cancel.",

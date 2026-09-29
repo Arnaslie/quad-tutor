@@ -9,11 +9,16 @@ import {
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
-import type { Actor } from "@/server/modules/identity/actor";
+import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
 import { availableSlots, confirmationDeadline } from "./purchase";
 import { SessionError, lockSession, loadParticipation, type Executor } from "./access";
-import { SESSION_MINUTES, isLateCancel, remindedAtForNewBooking } from "./attendance";
+import {
+  LATE_CANCEL_HOURS,
+  SESSION_MINUTES,
+  isLateCancel,
+  remindedAtForNewBooking,
+} from "./attendance";
 
 export async function sessionsRemaining(params: {
   exec?: Executor;
@@ -38,7 +43,12 @@ export async function sessionsRemaining(params: {
 async function loadBookablePackage(
   actor: Actor,
   engagementId: string,
-): Promise<{ id: string; tutorProfileId: string; sessionsPurchased: number }> {
+): Promise<{
+  id: string;
+  tutorProfileId: string;
+  sessionsPurchased: number;
+  defaultLocation: string | null;
+}> {
   const context = await db
     .select({
       id: engagement.id,
@@ -46,6 +56,7 @@ async function loadBookablePackage(
       studentProfileId: engagement.studentProfileId,
       sessionsPurchased: engagement.sessionsPurchased,
       tutorProfileId: tutorProfile.id,
+      defaultLocation: tutorProfile.defaultLocation,
     })
     .from(engagement)
     .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
@@ -71,6 +82,7 @@ async function loadBookablePackage(
     id: target.id,
     tutorProfileId: target.tutorProfileId,
     sessionsPurchased: target.sessionsPurchased,
+    defaultLocation: target.defaultLocation,
   };
 }
 
@@ -98,7 +110,7 @@ export async function bookSession(params: {
   actor: Actor;
   engagementId: string;
   slotStartsAt: Date;
-  locationNote?: string | null;
+  studentNote?: string | null;
 }): Promise<{ sessionId: string; remaining: number }> {
   const target = await loadBookablePackage(params.actor, params.engagementId);
 
@@ -145,7 +157,8 @@ export async function bookSession(params: {
         engagementId: target.id,
         scheduledAt: params.slotStartsAt,
         durationMinutes: SESSION_MINUTES,
-        locationNote: params.locationNote ?? null,
+        location: target.defaultLocation,
+        studentNote: params.studentNote ?? null,
         confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
         remindedAt: remindedAtForNewBooking(params.slotStartsAt),
       })
@@ -207,5 +220,40 @@ export async function cancelSession(params: {
     }
 
     return { late };
+  });
+}
+
+export async function setSessionLocation(params: {
+  actor: TutorActor;
+  sessionId: string;
+  location: string;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    await lockSession(tx, params.sessionId);
+    const session = await loadParticipation({
+      exec: tx,
+      sessionId: params.sessionId,
+      actor: params.actor,
+    });
+
+    if (session.role !== "tutor") {
+      throw new SessionError("Only the tutor sets where a session happens.");
+    }
+    const now = new Date();
+    if (session.status !== "scheduled" || now >= session.scheduledAt) {
+      throw new SessionError("That session has already started or finished.");
+    }
+    if (isLateCancel(session.scheduledAt, now)) {
+      throw new SessionError(
+        `Inside ${LATE_CANCEL_HOURS} hours of a session the spot is fixed, so the student is not sent somewhere new at short notice. Cancel if you cannot make it there.`,
+      );
+    }
+
+    if (session.location === params.location) return;
+
+    await tx
+      .update(sessionBooking)
+      .set({ location: params.location })
+      .where(eq(sessionBooking.id, session.sessionId));
   });
 }

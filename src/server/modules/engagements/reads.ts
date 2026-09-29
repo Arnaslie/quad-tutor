@@ -37,7 +37,8 @@ export type SessionListItem = {
   engagementId: string;
   scheduledAt: Date;
   durationMinutes: number;
-  locationNote: string | null;
+  location: string | null;
+  studentNote: string | null;
   status: SessionContextRow["status"];
   resolution: SessionContextRow["resolution"];
   confirmationWindowEndsAt: Date | null;
@@ -87,7 +88,8 @@ function toListItem(
     engagementId: row.engagementId,
     scheduledAt: row.scheduledAt,
     durationMinutes: row.durationMinutes,
-    locationNote: row.locationNote,
+    location: row.location,
+    studentNote: row.studentNote,
     status: row.status,
     resolution: row.resolution,
     confirmationWindowEndsAt: row.confirmationWindowEndsAt,
@@ -178,6 +180,7 @@ export async function sessionBoardForTutor(tutor: TutorActor): Promise<SessionBo
 
 export type StudentPackage = {
   engagementId: string;
+  tutorLocation: string | null;
   kind: PackageKind;
   sessionsPurchased: number;
 
@@ -209,6 +212,7 @@ const remainingCount = sql<number>`greatest(0, ${engagement.sessionsPurchased} -
 
 export type TopUpCandidate = {
   engagementId: string;
+  tutorLocation: string | null;
   tutorName: string;
   courseCode: string | null;
   courseTitle: string;
@@ -225,6 +229,7 @@ export async function topUpCandidates(actor: Actor): Promise<TopUpCandidate[]> {
       engagementId: engagement.id,
       sessionsRemaining: remainingCount,
       tutorName: user.name,
+      tutorLocation: tutorProfile.defaultLocation,
       courseCode: courseCodeAlias.code,
       courseTitle: course.title,
       currency: engagement.currency,
@@ -267,6 +272,7 @@ export async function topUpCandidates(actor: Actor): Promise<TopUpCandidate[]> {
     .map((row) => ({
       engagementId: row.engagementId,
       tutorName: row.tutorName,
+      tutorLocation: row.tutorLocation,
       courseCode: row.courseCode,
       courseTitle: row.courseTitle,
       priceMinor: option.priceMinor,
@@ -286,6 +292,7 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
       pricePaidMinor: engagement.pricePaidMinor,
       currency: engagement.currency,
       tutorName: user.name,
+      tutorLocation: tutorProfile.defaultLocation,
       courseCode: courseCodeAlias.code,
       courseTitle: course.title,
       section: courseOffering.section,

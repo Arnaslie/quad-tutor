@@ -1,4 +1,4 @@
-import { and, count, eq, getTableName } from "drizzle-orm";
+import { and, count, eq, getTableName, isNull } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 
 import { db } from "./index";
@@ -272,6 +272,7 @@ type TutorFixture = {
   headline: string;
   bio: string;
   graduatesOn: string;
+  meets?: string;
   courses: readonly {
     course: CourseKey;
     grade: string;
@@ -290,6 +291,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Econ major, TA for intro micro",
     bio: "I took EC 110 with Nunez and still have every problem set I wrote.",
     graduatesOn: "2028-05-06",
+    meets: "Bruno Business Library, ground floor tables",
     courses: [{ course: "ec110", grade: "A-", takenTerm: "Fall 2025", takenUnder: "Carla Nunez" }],
     availability: [window_(1, "18:00", "21:00"), window_(3, "18:00", "21:00")],
   },
@@ -299,6 +301,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Math and econ, calc tutor since sophomore year",
     bio: "Whitaker's exams reuse the same four proof shapes. I can show you which.",
     graduatesOn: "2027-05-08",
+    meets: "Gorgas Library, 2nd floor study rooms",
     courses: [
       { course: "math125", grade: "A", takenTerm: "Fall 2025", takenUnder: "Ellen Whitaker" },
       { course: "ec110", grade: "A", takenTerm: "Fall 2024", takenUnder: null },
@@ -311,6 +314,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Mechanical engineering, calc sequence start to finish",
     bio: "Took 125 and 126 back to back under Doyle. The curve is not what people think.",
     graduatesOn: "2027-12-11",
+    meets: "Rodgers Library, group study room 2",
     courses: [
       { course: "math125", grade: "A-", takenTerm: "Spring 2026", takenUnder: "Marcus Doyle" },
       { course: "math126", grade: "A", takenTerm: "Fall 2025", takenUnder: "Marcus Doyle" },
@@ -323,6 +327,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Physics major who lives in the math building",
     bio: "Series and sequences are where 126 loses people. That is most of what I do.",
     graduatesOn: "2027-05-08",
+    meets: "Rodgers Library, 1st floor by the windows",
     courses: [
       { course: "math125", grade: "A", takenTerm: "Spring 2025", takenUnder: "Ellen Whitaker" },
       { course: "math126", grade: "A-", takenTerm: "Spring 2026", takenUnder: "Priya Raman" },
@@ -335,6 +340,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "CS, and I still remember Raman's quiz format",
     bio: "I tutor 125 and 201. Both are pacing problems more than concept problems.",
     graduatesOn: "2027-05-08",
+    meets: "Gorgas Library, 3rd floor quiet area",
     courses: [
       { course: "math125", grade: "A+", takenTerm: "Fall 2024", takenUnder: "Priya Raman" },
       { course: "cs201", grade: "A", takenTerm: "Fall 2025", takenUnder: "Jae-Won Park" },
@@ -366,6 +372,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Stats major, R and calc",
     bio: "Haddad's data analysis projects are graded on writeups, not code. Nobody tells you that.",
     graduatesOn: "2027-12-11",
+    meets: "Bruno Business Library, upstairs",
     courses: [
       { course: "math125", grade: "A-", takenTerm: "Fall 2025", takenUnder: "Marcus Doyle" },
       { course: "st260", grade: "A", takenTerm: "Spring 2026", takenUnder: "Omar Haddad" },
@@ -378,6 +385,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Pre-med, general chemistry",
     bio: "Brackett writes the same stoichiometry trap every term. Once you see it you stop falling for it.",
     graduatesOn: "2027-05-08",
+    meets: "Shelby Hall atrium, tables by the cafe",
     courses: [{ course: "ch101", grade: "A", takenTerm: "Spring 2026", takenUnder: "Alan Brackett" }],
     availability: [window_(2, "17:00", "20:00"), window_(6, "11:00", "15:00")],
   },
@@ -387,6 +395,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Chemistry major, both semesters of gen chem",
     bio: "Ferraro's lab writeups are half the grade and almost nobody optimises for them.",
     graduatesOn: "2027-12-11",
+    meets: "Ferguson Center, 2nd floor lounge",
     courses: [
       { course: "ch101", grade: "A-", takenTerm: "Fall 2025", takenUnder: "Nina Ferraro" },
       { course: "ch102", grade: "A", takenTerm: "Spring 2026", takenUnder: "Nina Ferraro" },
@@ -399,6 +408,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "CS and chem double major",
     bio: "I took gen chem a while ago, so I am cheap and patient.",
     graduatesOn: "2027-05-08",
+    meets: "Gorgas Library, 1st floor Starbucks",
     courses: [
       { course: "ch101", grade: "A", takenTerm: "Fall 2024", takenUnder: "Alan Brackett" },
       { course: "cs201", grade: "A-", takenTerm: "Spring 2026", takenUnder: "Bethany Cole" },
@@ -411,6 +421,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Biochem, gen chem I and II",
     bio: "Titration curves, equilibrium, and the two weeks of kinetics that sink people.",
     graduatesOn: "2028-05-06",
+    meets: "Science and Engineering Complex lobby",
     courses: [
       { course: "ch101", grade: "A", takenTerm: "Spring 2026", takenUnder: null },
       { course: "ch102", grade: "A-", takenTerm: "Fall 2025", takenUnder: "Alan Brackett" },
@@ -423,6 +434,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Biology, and the intro CS course",
     bio: "Holloway tests vocabulary harder than mechanism. Study accordingly.",
     graduatesOn: "2027-12-11",
+    meets: "Rodgers Library, 2nd floor",
     courses: [
       { course: "bsc114", grade: "A", takenTerm: "Fall 2025", takenUnder: "Grace Holloway" },
       { course: "cs100", grade: "A", takenTerm: "Spring 2026", takenUnder: "Bethany Cole" },
@@ -435,6 +447,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Neuroscience, intro bio",
     bio: "Ortiz's section moves fast through genetics. I have the timeline written down.",
     graduatesOn: "2028-05-06",
+    meets: "Ferguson Center food court",
     courses: [{ course: "bsc114", grade: "A-", takenTerm: "Spring 2026", takenUnder: "Samuel Ortiz" }],
     availability: [window_(6, "09:00", "13:00")],
   },
@@ -456,6 +469,7 @@ const TUTORS: readonly TutorFixture[] = [
     headline: "Finance, micro and stats",
     bio: "Graphs first, algebra second. Micro gets much easier in that order.",
     graduatesOn: "2027-05-08",
+    meets: "Bruno Business Library, ground floor",
     courses: [
       { course: "ec110", grade: "A", takenTerm: "Spring 2026", takenUnder: "Carla Nunez" },
       { course: "st260", grade: "A-", takenTerm: "Fall 2024", takenUnder: null },
@@ -751,6 +765,13 @@ async function seedTutors(
           })
           .returning({ id: tutorProfile.id }),
     );
+
+    if (fixture.meets) {
+      await db
+        .update(tutorProfile)
+        .set({ defaultLocation: fixture.meets })
+        .where(and(eq(tutorProfile.id, tutorProfileId), isNull(tutorProfile.defaultLocation)));
+    }
 
     people.set(fixture.key, { ...person, tutorProfileId });
 

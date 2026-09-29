@@ -136,6 +136,7 @@ export async function purchasePackage(params: {
   kind: PackageKind;
   anchorExamId: string | null;
   slotStartsAt: Date;
+  studentNote?: string | null;
 }): Promise<{ engagementId: string }> {
   const option = packageOption(params.kind);
 
@@ -149,6 +150,7 @@ export async function purchasePackage(params: {
         courseOfferingId: matchRequest.courseOfferingId,
         tutorProfileId: tutorCourse.tutorProfileId,
         tutorUserId: tutorProfile.userId,
+        defaultLocation: tutorProfile.defaultLocation,
       })
       .from(matchRequest)
       .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
@@ -204,6 +206,8 @@ export async function purchasePackage(params: {
       engagementId: created.id,
       scheduledAt: params.slotStartsAt,
       durationMinutes: SESSION_MINUTES,
+      location: request.defaultLocation,
+      studentNote: params.studentNote ?? null,
       confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
       remindedAt: remindedAtForNewBooking(params.slotStartsAt),
     });
@@ -239,6 +243,7 @@ async function topUpSource(
       sessionsRemaining: remaining,
       tutorProfileId: tutorProfile.id,
       tutorUserId: tutorProfile.userId,
+      defaultLocation: tutorProfile.defaultLocation,
       termEndsOn: term.endsOn,
     })
     .from(engagement)
@@ -292,6 +297,7 @@ export async function purchaseTopUp(params: {
   actor: Actor;
   engagementId: string;
   slotStartsAt: Date;
+  studentNote?: string | null;
 }): Promise<{ engagementId: string }> {
   const option = topUpOption();
 
@@ -322,6 +328,8 @@ export async function purchaseTopUp(params: {
       engagementId: created.id,
       scheduledAt: params.slotStartsAt,
       durationMinutes: SESSION_MINUTES,
+      location: source.defaultLocation,
+      studentNote: params.studentNote ?? null,
       confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
       remindedAt: remindedAtForNewBooking(params.slotStartsAt),
     });

@@ -3,18 +3,20 @@
 import { useActionState, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/button";
-import { Field, Input } from "@/components/field";
 import { formatDay, formatTime } from "@/components/format";
 
 import { book, type ActionResult } from "../actions";
+import { MeetingSpot, StudentNoteField } from "../meeting-spot";
 
 export function BookNext({
   engagementId,
   tutorName,
+  location,
   slots,
 }: {
   engagementId: string;
   tutorName: string;
+  location: string | null;
   slots: string[];
 }) {
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
@@ -76,18 +78,9 @@ export function BookNext({
         ) : null}
       </fieldset>
 
-      <Field
-        id="location-note"
-        label="Where (optional)"
-        hint="Sessions happen wherever the two of you choose — a library room, a table in the Ferg."
-      >
-        <Input
-          id="location-note"
-          name="locationNote"
-          maxLength={200}
-          placeholder="Gorgas Library, 2nd floor"
-        />
-      </Field>
+      <MeetingSpot tutorName={tutorName} location={location} />
+
+      <StudentNoteField tutorName={tutorName} />
 
       {state && !state.ok ? (
         <p role="alert" className="text-sm text-danger">
