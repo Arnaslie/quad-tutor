@@ -128,6 +128,31 @@ function whereLines(params: {
     : where;
 }
 
+export function sessionMoved(params: {
+  to: string;
+  name: string;
+  otherPartyName: string;
+  courseLabel: string;
+  scheduledAt: Date;
+  location: string;
+}): Email {
+  return {
+    to: params.to,
+    subject: `New spot: ${params.courseLabel} with ${params.otherPartyName}`,
+    text: [
+      `${params.name},`,
+      "",
+      `${params.otherPartyName} changed where you meet for ${params.courseLabel}`,
+      `on ${formatDayTime(params.scheduledAt)}.`,
+      "",
+      `Where: ${params.location}`,
+      "",
+      url("/sessions"),
+      ...SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
 export function sessionTomorrow(params: {
   to: string;
   name: string;

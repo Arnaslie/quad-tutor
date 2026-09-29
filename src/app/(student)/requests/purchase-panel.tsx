@@ -9,7 +9,7 @@ import { Money } from "@/components/money";
 import type { PackageKind, PackageOption } from "@/server/modules/billing/pricing";
 
 import { purchase, type ActionResult } from "../actions";
-import { MeetingSpot } from "../meeting-spot";
+import { MeetingSpot, StudentNoteField } from "../meeting-spot";
 
 export type ExamChoice = {
   id: string;
@@ -155,6 +155,8 @@ export function PurchasePanel({
       </fieldset>
 
       <MeetingSpot tutorName={tutorName} location={location} />
+
+      <StudentNoteField tutorName={tutorName} />
 
       {state && !state.ok ? (
         <p role="alert" className="text-sm text-danger">

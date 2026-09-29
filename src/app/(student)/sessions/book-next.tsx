@@ -3,11 +3,10 @@
 import { useActionState, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/button";
-import { Field, Input } from "@/components/field";
 import { formatDay, formatTime } from "@/components/format";
 
 import { book, type ActionResult } from "../actions";
-import { MeetingSpot } from "../meeting-spot";
+import { MeetingSpot, StudentNoteField } from "../meeting-spot";
 
 export function BookNext({
   engagementId,
@@ -81,18 +80,7 @@ export function BookNext({
 
       <MeetingSpot tutorName={tutorName} location={location} />
 
-      <Field
-        id="student-note"
-        label={`Note for ${tutorName} (optional)`}
-        hint="What you want to cover, or anything they should bring."
-      >
-        <Input
-          id="student-note"
-          name="studentNote"
-          maxLength={200}
-          placeholder="Chapter 4 problem set, question 7"
-        />
-      </Field>
+      <StudentNoteField tutorName={tutorName} />
 
       {state && !state.ok ? (
         <p role="alert" className="text-sm text-danger">

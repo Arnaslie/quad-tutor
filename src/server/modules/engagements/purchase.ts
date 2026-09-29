@@ -136,6 +136,7 @@ export async function purchasePackage(params: {
   kind: PackageKind;
   anchorExamId: string | null;
   slotStartsAt: Date;
+  studentNote?: string | null;
 }): Promise<{ engagementId: string }> {
   const option = packageOption(params.kind);
 
@@ -206,6 +207,7 @@ export async function purchasePackage(params: {
       scheduledAt: params.slotStartsAt,
       durationMinutes: SESSION_MINUTES,
       location: request.defaultLocation,
+      studentNote: params.studentNote ?? null,
       confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
       remindedAt: remindedAtForNewBooking(params.slotStartsAt),
     });
@@ -295,6 +297,7 @@ export async function purchaseTopUp(params: {
   actor: Actor;
   engagementId: string;
   slotStartsAt: Date;
+  studentNote?: string | null;
 }): Promise<{ engagementId: string }> {
   const option = topUpOption();
 
@@ -326,6 +329,7 @@ export async function purchaseTopUp(params: {
       scheduledAt: params.slotStartsAt,
       durationMinutes: SESSION_MINUTES,
       location: source.defaultLocation,
+      studentNote: params.studentNote ?? null,
       confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
       remindedAt: remindedAtForNewBooking(params.slotStartsAt),
     });

@@ -11,6 +11,7 @@ import {
   sessionBoardForTutor,
   type SessionListItem,
 } from "@/server/modules/engagements/reads";
+import { LATE_CANCEL_HOURS } from "@/server/modules/engagements/attendance";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 import { defaultLocationFor } from "@/server/modules/tutoring/location";
 
@@ -134,15 +135,21 @@ function SessionCard({ item }: { item: SessionListItem }) {
         </p>
       ) : null}
 
-      {upcoming ? (
+      {item.action === "cancel" ? (
         <LocationForm
           action={changeSessionLocation}
           current={item.location}
           label="Where this session meets"
-          hint={`${student} sees the new spot on their session page.`}
+          hint={`${student} gets an email with the new spot. You can move it until ${LATE_CANCEL_HOURS} hours before.`}
           sessionId={item.sessionId}
           collapsed
         />
+      ) : null}
+      {item.action === "late_cancel" ? (
+        <p className="text-sm text-muted">
+          Inside {LATE_CANCEL_HOURS} hours the spot is fixed, so {student} is not sent
+          somewhere new at short notice.
+        </p>
       ) : null}
 
       {item.action === "confirm_or_deny" ||

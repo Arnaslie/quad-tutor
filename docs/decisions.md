@@ -122,14 +122,18 @@ The residual risk is unchanged and unsolved: this is still the weak point of the
 no-video decision, and it is the reason the dispute path exists rather than a
 tiebreaker rule.
 
-**The tutor owns the meeting spot.** With no messaging in the app, "agree it between
-you" sends both people off-platform to arrange the first session, and that is where
-disintermediation starts. A tutor sets a default spot once; every booking copies it
-onto the session (`session_booking.location`) so the student sees where they meet
-before paying, and a later change to the default never moves a session already
-booked. The tutor can move a single session. The student gets an optional note to
-the tutor, never the location. Setting a default for the first time fills upcoming
-sessions that had no spot.
+**The tutor owns the meeting spot**, so the student sees where they will meet before
+paying. A tutor sets a default spot once and every booking copies it onto the session
+(`session_booking.location`). Three rules:
+
+- The student can send the tutor a note but never sets the place.
+- Changing the default never moves a session already booked.
+- Every save of the default fills upcoming sessions that have no spot yet.
+
+The tutor can move a single session, but not inside the late-cancel window
+(`LATE_CANCEL_HOURS`): a student sent somewhere new at short notice who goes to the
+old spot would be recorded as a no-show the platform caused. A move after the booking
+email has gone out, whether by hand or by the fill, emails the student the new spot.
 
 **Intake under 45 seconds.** Course selection is the primary input (schedule
 screenshot → OCR, with catalog type-ahead as fallback); section and professor are a

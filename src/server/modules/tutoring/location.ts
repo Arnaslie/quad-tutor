@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { engagement, sessionBooking, tutorCourse, tutorProfile } from "@/server/db/schema";
@@ -13,11 +13,12 @@ export async function defaultLocationFor(tutor: TutorActor): Promise<string | nu
   return row?.location ?? null;
 }
 
-/** Upcoming sessions booked before the tutor had a spot take this one; set spots stay put. */
 export async function setDefaultLocation(params: {
   tutor: TutorActor;
   location: string;
 }): Promise<{ filled: number }> {
+  const now = new Date();
+
   return db.transaction(async (tx) => {
     await tx
       .update(tutorProfile)
@@ -32,13 +33,16 @@ export async function setDefaultLocation(params: {
 
     const filled = await tx
       .update(sessionBooking)
-      .set({ location: params.location })
+      .set({
+        location: params.location,
+        locationChangedAt: sql`case when ${sessionBooking.bookedNotifiedAt} is not null then ${now.toISOString()}::timestamptz end`,
+      })
       .where(
         and(
           inArray(sessionBooking.engagementId, theirs),
           eq(sessionBooking.status, "scheduled"),
           isNull(sessionBooking.location),
-          gt(sessionBooking.scheduledAt, new Date()),
+          gt(sessionBooking.scheduledAt, now),
         ),
       )
       .returning({ id: sessionBooking.id });

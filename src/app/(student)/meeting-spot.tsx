@@ -1,4 +1,22 @@
+import { Field, Input } from "@/components/field";
 import { Icon } from "@/components/icons";
+
+export function StudentNoteField({ tutorName }: { tutorName: string }) {
+  return (
+    <Field
+      id="student-note"
+      label={`Note for ${tutorName} (optional)`}
+      hint="What you want to cover, or anything they should bring."
+    >
+      <Input
+        id="student-note"
+        name="studentNote"
+        maxLength={200}
+        placeholder="Chapter 4 problem set, question 7"
+      />
+    </Field>
+  );
+}
 
 export function MeetingSpot({
   tutorName,
@@ -14,7 +32,7 @@ export function MeetingSpot({
         <p className="flex flex-col gap-0.5">
           <span className="font-medium text-foreground">You meet at {location}</span>
           <span className="text-muted">
-            {tutorName} chose this spot. If it changes, your session page shows the new one.
+            {tutorName} chose this spot. If it changes, you get an email.
           </span>
         </p>
       ) : (

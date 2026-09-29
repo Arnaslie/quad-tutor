@@ -13,7 +13,12 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
 import { availableSlots, confirmationDeadline } from "./purchase";
 import { SessionError, lockSession, loadParticipation, type Executor } from "./access";
-import { SESSION_MINUTES, isLateCancel, remindedAtForNewBooking } from "./attendance";
+import {
+  LATE_CANCEL_HOURS,
+  SESSION_MINUTES,
+  isLateCancel,
+  remindedAtForNewBooking,
+} from "./attendance";
 
 export async function sessionsRemaining(params: {
   exec?: Executor;
@@ -234,13 +239,19 @@ export async function setSessionLocation(params: {
     if (session.role !== "tutor") {
       throw new SessionError("Only the tutor sets where a session happens.");
     }
-    if (session.status !== "scheduled" || Date.now() >= session.scheduledAt.getTime()) {
+    const now = new Date();
+    if (session.status !== "scheduled" || now >= session.scheduledAt) {
       throw new SessionError("That session has already started or finished.");
+    }
+    if (isLateCancel(session.scheduledAt, now)) {
+      throw new SessionError(
+        `Inside ${LATE_CANCEL_HOURS} hours of a session the spot is fixed, so the student is not sent somewhere new at short notice. Cancel if you cannot make it there.`,
+      );
     }
 
     await tx
       .update(sessionBooking)
-      .set({ location: params.location })
+      .set({ location: params.location, locationChangedAt: now })
       .where(eq(sessionBooking.id, session.sessionId));
   });
 }

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, like, notInArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, like, notInArray, sql } from "drizzle-orm";
 
 import { db } from "./index";
 import {
@@ -169,12 +169,7 @@ async function cleanup(
     const marked = await tx
       .selectDistinct({ id: sessionBooking.engagementId })
       .from(sessionBooking)
-      .where(
-        or(
-          like(sessionBooking.studentNote, `%${MARKER}%`),
-          like(sessionBooking.location, `%${MARKER}%`),
-        ),
-      );
+      .where(like(sessionBooking.studentNote, `%${MARKER}%`));
 
     const fromRequests = await tx
       .select({ id: engagement.id })

@@ -20,6 +20,7 @@ import {
   confirmAttendanceInput,
   denyAttendanceInput,
   purchaseTopUpInput,
+  studentNote,
 } from "@/server/modules/engagements/input";
 import { SessionError } from "@/server/modules/engagements/access";
 import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
@@ -115,7 +116,13 @@ const purchaseSchema = z.object({
   kind: z.enum(["exam_anchored", "through_final"]),
   anchorExamId: z.uuid().nullable(),
   slotStartsAt: z.coerce.date(),
+  studentNote,
 });
+
+function noteFrom(formData: FormData): string | undefined {
+  const note = formData.get("studentNote");
+  return typeof note === "string" && note.trim().length > 0 ? note : undefined;
+}
 
 export async function purchase(
   _previous: ActionResult | null,
@@ -129,6 +136,7 @@ export async function purchase(
     kind: formData.get("kind"),
     anchorExamId: typeof anchor === "string" && anchor.length > 0 ? anchor : null,
     slotStartsAt: formData.get("slotStartsAt"),
+    studentNote: noteFrom(formData),
   });
 
   if (!parsed.success) {
@@ -143,6 +151,7 @@ export async function purchase(
       kind: parsed.data.kind,
       anchorExamId: parsed.data.anchorExamId,
       slotStartsAt: parsed.data.slotStartsAt,
+      studentNote: parsed.data.studentNote,
     });
     engagementId = result.engagementId;
   } catch (error) {
@@ -163,6 +172,7 @@ export async function topUp(
   const parsed = purchaseTopUpInput.safeParse({
     engagementId: formData.get("engagementId"),
     slotStartsAt: formData.get("slotStartsAt"),
+    studentNote: noteFrom(formData),
   });
 
   if (!parsed.success) return { ok: false, error: "Pick a time for this session." };
@@ -173,6 +183,7 @@ export async function topUp(
       actor,
       engagementId: parsed.data.engagementId,
       slotStartsAt: parsed.data.slotStartsAt,
+      studentNote: parsed.data.studentNote,
     });
     engagementId = result.engagementId;
   } catch (error) {
@@ -189,11 +200,10 @@ export async function book(
 ): Promise<ActionResult> {
   const actor = await requireActor();
 
-  const note = formData.get("studentNote");
   const parsed = bookSessionInput.safeParse({
     engagementId: formData.get("engagementId"),
     slotStartsAt: formData.get("slotStartsAt"),
-    studentNote: typeof note === "string" && note.trim().length > 0 ? note : undefined,
+    studentNote: noteFrom(formData),
   });
 
   if (!parsed.success) return { ok: false, error: "Pick a time for this session." };

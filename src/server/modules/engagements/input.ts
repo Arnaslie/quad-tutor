@@ -21,18 +21,16 @@ export const slotsForEngagementInput = engagementRef;
 
 export const slotsForTopUpInput = engagementRef;
 
+export const studentNote = z.string().trim().max(200).optional();
+
 export const purchaseTopUpInput = z.object({
   engagementId: z.uuid(),
 
   slotStartsAt: z.coerce.date(),
+  studentNote,
 });
 
-export const bookSessionInput = z.object({
-  engagementId: z.uuid(),
-
-  slotStartsAt: z.coerce.date(),
-  studentNote: z.string().trim().max(200).optional(),
-});
+export const bookSessionInput = purchaseTopUpInput;
 
 export const setSessionLocationInput = sessionRef.extend({ location: meetingLocation });
 

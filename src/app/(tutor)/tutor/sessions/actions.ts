@@ -98,7 +98,7 @@ export async function changeSessionLocation(
 
   revalidatePath("/tutor/sessions");
   revalidatePath(`/sessions/${parsed.data.sessionId}`);
-  return { status: "saved", message: "Moved. The student sees the new spot on their session page." };
+  return { status: "saved", message: "Moved. The student gets an email with the new spot." };
 }
 
 function readable(error: unknown): string {
