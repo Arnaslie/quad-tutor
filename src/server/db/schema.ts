@@ -10,7 +10,16 @@ import {
   index,
   uniqueIndex,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+
+import {
+  MESSAGE_MAX_LENGTH,
+  REPORT_OUTCOMES,
+  REPORT_REASONS,
+  THREAD_SIDES,
+} from "../modules/messaging/rules";
 
 import { user, session, account, verification } from "./auth-schema";
 
@@ -91,6 +100,12 @@ export const packageKind = pgEnum("package_kind", [
 
   "top_up",
 ]);
+
+export const threadSide = pgEnum("thread_side", THREAD_SIDES);
+
+export const reportReason = pgEnum("report_reason", REPORT_REASONS);
+
+export const reportOutcome = pgEnum("report_outcome", REPORT_OUTCOMES);
 
 export const institution = pgTable("institution", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -519,4 +534,121 @@ export const demandSignal = pgTable(
   (t) => [
     uniqueIndex("demand_signal_unique_idx").on(t.studentProfileId, t.courseOfferingId),
   ],
+);
+
+export const messageThread = pgTable(
+  "message_thread",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    studentProfileId: uuid("student_profile_id")
+      .notNull()
+      .references(() => studentProfile.id),
+    tutorCourseId: uuid("tutor_course_id")
+      .notNull()
+      .references(() => tutorCourse.id),
+
+    studentReadThrough: timestamp("student_read_through", { withTimezone: true }),
+    tutorReadThrough: timestamp("tutor_read_through", { withTimezone: true }),
+    studentAlertedAt: timestamp("student_alerted_at", { withTimezone: true }),
+    tutorAlertedAt: timestamp("tutor_alerted_at", { withTimezone: true }),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("message_thread_pair_idx").on(t.studentProfileId, t.tutorCourseId),
+    index("message_thread_tutor_course_idx").on(t.tutorCourseId),
+  ],
+);
+
+export const message = pgTable(
+  "message",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => messageThread.id),
+    senderSide: threadSide("sender_side").notNull(),
+    senderUserId: text("sender_user_id").references(() => user.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("message_thread_created_idx").on(t.threadId, t.createdAt),
+    index("message_sender_created_idx").on(t.senderUserId, t.createdAt),
+    check("message_body_length", sql`char_length(${t.body}) between 1 and ${sql.raw(String(MESSAGE_MAX_LENGTH))}`),
+  ],
+);
+
+export const userBlock = pgTable(
+  "user_block",
+  {
+    blockerUserId: text("blocker_user_id")
+      .notNull()
+      .references(() => user.id),
+    blockedUserId: text("blocked_user_id")
+      .notNull()
+      .references(() => user.id),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.blockerUserId, t.blockedUserId] }),
+    index("user_block_blocked_idx").on(t.blockedUserId),
+  ],
+);
+
+export const messageReport = pgTable(
+  "message_report",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => messageThread.id),
+    reporterUserId: text("reporter_user_id")
+      .notNull()
+      .references(() => user.id),
+    reason: reportReason("reason").notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => user.id),
+    outcome: reportOutcome("outcome"),
+  },
+  (t) => [
+    index("message_report_institution_idx").on(t.institutionId, t.reviewedAt),
+    index("message_report_thread_idx").on(t.threadId),
+  ],
+);
+
+export const messageThreadAccess = pgTable(
+  "message_thread_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => messageThread.id),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => messageReport.id),
+    operatorUserId: text("operator_user_id")
+      .notNull()
+      .references(() => user.id),
+    accessedAt: timestamp("accessed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("message_thread_access_thread_idx").on(t.threadId, t.accessedAt)],
 );
