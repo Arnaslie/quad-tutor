@@ -8,7 +8,8 @@ import { SignInForm } from "./sign-in-form";
 export const metadata: Metadata = { title: "Sign in" };
 
 const LINK_ERRORS: Record<string, string> = {
-  INVALID_TOKEN: "That sign-in link is no longer valid. Send yourself a new one.",
+  INVALID_TOKEN:
+    "That sign-in link was already used or has expired. Each link works once — use the newest email, or send yourself a new one.",
   EXPIRED_TOKEN: "That sign-in link expired. Send yourself a new one.",
 
   [NAME_REQUIRED_MESSAGE]: NAME_REQUIRED_MESSAGE,
