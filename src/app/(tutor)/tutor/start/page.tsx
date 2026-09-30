@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { Button } from "@/components/button";
 import { Card } from "@/components/card";
 import { PageHeader } from "@/components/page-header";
 import { Icon } from "@/components/icons";
-import { becomeTutor, requireActor } from "@/server/modules/identity/actor";
+import { requireActor } from "@/server/modules/identity/actor";
+import { startTutoring } from "../actions";
 
 export const metadata: Metadata = { title: "Become a tutor" };
 
@@ -20,16 +20,6 @@ export default async function TutorStartPage() {
   const actor = await requireActor();
   if (actor.tutorProfileId) redirect("/tutor");
 
-  async function start() {
-    "use server";
-
-    const current = await requireActor();
-    await becomeTutor(current);
-
-    revalidatePath("/", "layout");
-    redirect("/tutor");
-  }
-
   return (
     <div className="flex max-w-xl flex-col gap-6">
       <PageHeader
@@ -41,14 +31,17 @@ export default async function TutorStartPage() {
         <ul className="flex flex-col gap-3">
           {POINTS.map((point) => (
             <li key={point} className="flex gap-3 text-sm text-foreground">
-              <Icon name="check" className="mt-0.5 size-[18px] shrink-0 text-accent" />
+              <Icon
+                name="check"
+                className="mt-0.5 size-[18px] shrink-0 text-accent"
+              />
               <span>{point}</span>
             </li>
           ))}
         </ul>
       </Card>
 
-      <form action={start}>
+      <form action={startTutoring}>
         <Button type="submit" size="lg" className="w-full sm:w-auto">
           Set up my tutor profile
         </Button>

@@ -1,8 +1,10 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { requireTutor } from "@/server/modules/identity/actor";
+import { becomeTutor, requireActor, requireTutor } from "@/server/modules/identity/actor";
 import { requestRef } from "@/server/modules/matching/input";
 import {
   RequestError,
@@ -16,7 +18,6 @@ const respondInput = requestRef.extend({
 
 export type RespondState =
   | { status: "idle" | "accepted" | "passed" }
-
   | { status: "gone"; message: string };
 
 export async function respondToRequest(
@@ -48,4 +49,11 @@ export async function respondToRequest(
     }
     throw error;
   }
+}
+
+export async function startTutoring() {
+  await becomeTutor(await requireActor());
+
+  revalidatePath("/", "layout");
+  redirect("/tutor");
 }
