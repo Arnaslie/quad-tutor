@@ -80,6 +80,9 @@ export const auth = betterAuth({
           });
         }
 
+        const link = new URL(url);
+        link.pathname = "/sign-in/verify";
+
         await sendEmail({
           to: email,
           // A unique subject stops Gmail threading old, used links above the new one.
@@ -88,7 +91,7 @@ export const auth = betterAuth({
           text: [
             "Sign in to Quad Tutor:",
             "",
-            url,
+            link.toString(),
             "",
             "The link works once and expires shortly.",
             "If you did not ask for it, ignore this — nobody can sign in without it.",
