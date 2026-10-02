@@ -1,5 +1,3 @@
-import { randomInt } from "node:crypto";
-
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -85,9 +83,7 @@ export const auth = betterAuth({
 
         await sendEmail({
           to: email,
-          // A unique subject stops Gmail threading old, used links above the new one.
-          subject: `Quad Tutor sign-in link · ${randomInt(1000, 10000)}`,
-
+          subject: "Quad Tutor sign-in link",
           text: [
             "Sign in to Quad Tutor:",
             "",
