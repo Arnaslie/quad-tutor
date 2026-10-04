@@ -192,6 +192,7 @@ export async function purchasePackage(params: {
       .insert(engagement)
       .values({
         studentProfileId: request.studentProfileId,
+        institutionId: params.actor.institutionId,
         tutorCourseId: request.tutorCourseId,
         courseOfferingId: request.courseOfferingId,
         matchRequestId: request.id,
@@ -204,6 +205,7 @@ export async function purchasePackage(params: {
 
     await tx.insert(sessionBooking).values({
       engagementId: created.id,
+      institutionId: params.actor.institutionId,
       scheduledAt: params.slotStartsAt,
       durationMinutes: SESSION_MINUTES,
       location: request.defaultLocation,
@@ -215,6 +217,7 @@ export async function purchasePackage(params: {
     await record(tx, [
       {
         engagementId: created.id,
+        institutionId: params.actor.institutionId,
         type: "package_purchase",
         amountMinor: option.priceMinor,
       },
@@ -314,6 +317,7 @@ export async function purchaseTopUp(params: {
       .insert(engagement)
       .values({
         studentProfileId: source.studentProfileId,
+        institutionId: params.actor.institutionId,
         tutorCourseId: source.tutorCourseId,
         courseOfferingId: source.courseOfferingId,
         kind: "top_up",
@@ -326,6 +330,7 @@ export async function purchaseTopUp(params: {
 
     await tx.insert(sessionBooking).values({
       engagementId: created.id,
+      institutionId: params.actor.institutionId,
       scheduledAt: params.slotStartsAt,
       durationMinutes: SESSION_MINUTES,
       location: source.defaultLocation,
@@ -337,6 +342,7 @@ export async function purchaseTopUp(params: {
     await record(tx, [
       {
         engagementId: created.id,
+        institutionId: params.actor.institutionId,
         type: "package_purchase",
         amountMinor: option.priceMinor,
       },
@@ -411,11 +417,13 @@ export async function claimGuarantee(params: {
     await record(tx, [
       {
         engagementId: target.id,
+        institutionId: params.actor.institutionId,
         type: "refund",
         amountMinor: target.pricePaidMinor,
       },
       {
         engagementId: target.id,
+        institutionId: params.actor.institutionId,
         type: "guarantee_absorbed",
         amountMinor: target.pricePaidMinor,
       },

@@ -83,10 +83,12 @@ async function campus(slug: string, courses: number): Promise<Campus> {
       .insert(course)
       .values({ institutionId: inst.id, title: `Course ${index}`, department: "TEST" })
       .returning({ id: course.id });
-    await db.insert(courseCodeAlias).values({ courseId: courseRow.id, code: `TST ${index}` });
+    await db
+      .insert(courseCodeAlias)
+      .values({ institutionId: inst.id, courseId: courseRow.id, code: `TST ${index}` });
     const [offering] = await db
       .insert(courseOffering)
-      .values({ courseId: courseRow.id, termId: termRow.id, section: "001" })
+      .values({ institutionId: inst.id, courseId: courseRow.id, termId: termRow.id, section: "001" })
       .returning({ id: courseOffering.id });
     courseIds.push(courseRow.id);
     offeringIds.push(offering.id);
@@ -118,6 +120,7 @@ async function claim(courseId: string): Promise<string> {
     .insert(tutorCourse)
     .values({
       tutorProfileId: tutor.tutorProfileId,
+      institutionId: home.institutionId,
       courseId,
       takenTermId: home.termId,
       gradeEarned: "A",
@@ -158,7 +161,7 @@ before(async () => {
   studentProfileId = student.studentProfileId;
   await db
     .insert(demandSignal)
-    .values({ studentProfileId, courseOfferingId: home.offeringIds[0] });
+    .values({ studentProfileId, institutionId: home.institutionId, courseOfferingId: home.offeringIds[0] });
 });
 
 after(async () => {

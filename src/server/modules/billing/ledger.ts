@@ -7,6 +7,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type LedgerWrite = {
   engagementId: string;
+  institutionId: string;
   sessionId?: string | null;
   type: (typeof ledgerEntry.$inferInsert)["type"];
   amountMinor: number;

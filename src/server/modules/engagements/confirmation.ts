@@ -22,7 +22,12 @@ async function recognise(
   tx: Tx,
   session: Pick<
     SessionContextRow,
-    "engagementId" | "sessionId" | "pricePaidMinor" | "sessionsPurchased" | "currency"
+    | "engagementId"
+    | "institutionId"
+    | "sessionId"
+    | "pricePaidMinor"
+    | "sessionsPurchased"
+    | "currency"
   >,
 ): Promise<void> {
   const sessionMinor = perSessionMinor(session);
@@ -31,6 +36,7 @@ async function recognise(
   await record(tx, [
     {
       engagementId: session.engagementId,
+      institutionId: session.institutionId,
       sessionId: session.sessionId,
       type: "session_earned",
       amountMinor: sessionMinor,
@@ -38,6 +44,7 @@ async function recognise(
     },
     {
       engagementId: session.engagementId,
+      institutionId: session.institutionId,
       sessionId: session.sessionId,
       type: "tutor_payout",
       amountMinor: tutorMinor,
@@ -91,6 +98,7 @@ async function applySettlement(
   if (outcome.studentFact) {
     await tx.insert(reliabilityEvent).values({
       userId: session.studentUserId,
+      institutionId: session.institutionId,
       sessionId: session.sessionId,
       type: outcome.studentFact,
       occurredAt: now,
@@ -289,6 +297,7 @@ export async function resolveDispute(params: {
     if (fact) {
       await tx.insert(reliabilityEvent).values({
         userId: session.studentUserId,
+        institutionId: session.institutionId,
         sessionId: session.sessionId,
         type: fact,
         occurredAt: now,
