@@ -14,7 +14,7 @@ const HOME: Record<Surface, string> = {
   ops: "/ops/verifications",
 };
 
-const BADGE: Partial<Record<Surface, string>> = { tutor: "Tutor", ops: "Ops" };
+const BADGE: Partial<Record<Surface, string>> = { ops: "Ops" };
 
 export function AppShell({
   surface,
