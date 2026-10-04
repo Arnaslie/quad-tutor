@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   and,
   eq,
@@ -55,6 +57,11 @@ import {
   sessionSettled,
   sessionTomorrow,
 } from "./messages";
+
+function spot(row: SessionRow): string {
+  const hash = createHash("sha256").update(row.location ?? "").digest("hex").slice(0, 12);
+  return `${row.locationChangedAt.getTime()}/${hash}`;
+}
 
 function freeUntil(scheduledAt: Date): Date {
   return new Date(scheduledAt.getTime() - LATE_CANCEL_HOURS * 60 * 60 * 1000);
@@ -148,20 +155,21 @@ async function claimAndSend<T extends typeof sessionBooking | typeof matchReques
     } catch (error) {
       if (error instanceof EmailError && error.terminal) {
         console.error(
-          `[notifications] ${params.marker} ${params.id} refused (${error.status}), not retrying`,
+          `[notifications] ${params.marker} ${params.id} refused (${failureStatus(error)}), not retrying`,
         );
         continue;
       }
       await db.update(table).set({ notifyClaimedAt: null }).where(mine);
       console.error(`[notifications] ${params.marker} ${params.id} not sent (${failureStatus(error)})`);
-      return sent;
+      return 0;
     }
   }
-  await db
+  const done = await db
     .update(table)
     .set({ ...(params.done as PgUpdateSetSource<typeof sessionBooking>), notifyClaimedAt: null })
-    .where(mine);
-  return sent;
+    .where(mine)
+    .returning({ id: table.id });
+  return done.length > 0 ? sent : 0;
 }
 
 function answersUnchanged(row: SessionRow): SQL | undefined {
@@ -335,7 +343,7 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
           location: row.location,
           studentNote: row.studentNote,
         }),
-        idempotencyKey: `session-booked/${row.sessionId}/${side}`,
+        idempotencyKey: `session-booked/${row.sessionId}/${side}/${spot(row)}`,
       })),
     });
   }
@@ -699,7 +707,7 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
       pending: and(
         eq(sessionBooking.status, "scheduled"),
         eq(sessionBooking.location, location),
-        eq(sessionBooking.locationChangedAt, row.locationChangedAt),
+        sql`date_trunc('milliseconds', ${sessionBooking.locationChangedAt}) = ${row.locationChangedAt.toISOString()}::timestamptz`,
         sql`${sessionBooking.notifiedLocation} is not distinct from ${row.notifiedLocation}`,
       ),
       done: { notifiedLocation: location },
@@ -710,7 +718,7 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
             location,
             firstSpot: row.notifiedLocation === null,
           }),
-          idempotencyKey: `session-moved/${row.sessionId}/${row.locationChangedAt.getTime()}`,
+          idempotencyKey: `session-moved/${row.sessionId}/${spot(row)}`,
         },
       ],
     });
