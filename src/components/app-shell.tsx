@@ -65,7 +65,7 @@ export function AppShell({
 
           <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
             {unread === undefined ? null : <MessagesLink unread={unread} />}
-            <SurfaceSwitch surface={surface} isTutor={actor.tutorProfileId !== null} />
+            <SurfaceSwitch view={view} isTutor={actor.tutorProfileId !== null} />
             <ProfileMenu name={actor.name} email={actor.email} />
           </div>
         </div>
