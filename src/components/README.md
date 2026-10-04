@@ -1,8 +1,9 @@
 # Shared UI
 
 Everything here is a **server component** unless the file starts with `"use client"`.
-Only `nav-link.tsx`, `profile-menu.tsx` and `sign-out-button.tsx` do. Keep it that way: reach for
-`"use client"` at the leaf that actually needs interaction, not at the screen.
+Only `nav-link.tsx`, `profile-menu.tsx` and `sign-out-button.tsx` do. Keep it that
+way: reach for `"use client"` at the leaf that actually needs interaction, not at
+the screen.
 
 ---
 

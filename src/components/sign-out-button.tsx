@@ -13,7 +13,7 @@ export function SignOutButton() {
   return (
     <Button
       variant="ghost"
-      className="h-9 w-full px-3 text-sm"
+      className="h-9 w-full justify-start! px-3 text-sm"
       disabled={pending}
       onClick={() => {
         startTransition(async () => {

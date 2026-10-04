@@ -20,7 +20,7 @@ export function ProfileMenu({ name, email }: { name: string; email: string }) {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       setOpen(false);
-      button.current?.focus();
+      if (root.current?.contains(document.activeElement)) button.current?.focus();
     }
 
     document.addEventListener("pointerdown", onPointerDown);
@@ -32,7 +32,13 @@ export function ProfileMenu({ name, email }: { name: string; email: string }) {
   }, [open]);
 
   return (
-    <div ref={root} className="relative">
+    <div
+      ref={root}
+      className="relative"
+      onBlur={(event) => {
+        if (!root.current?.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
       <button
         ref={button}
         type="button"
@@ -52,10 +58,11 @@ export function ProfileMenu({ name, email }: { name: string; email: string }) {
       <div
         id={panelId}
         hidden={!open}
-        className="absolute right-0 top-full z-30 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface p-1.5 shadow-lg"
+        tabIndex={-1}
+        className="absolute right-0 top-full z-30 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface p-1.5 shadow-lg focus:outline-none"
       >
         <div className="px-3 py-2">
-          {name && name !== email ? (
+          {name !== email ? (
             <p className="truncate text-sm font-medium text-foreground">{name}</p>
           ) : null}
           <p className="truncate text-sm text-muted">{email}</p>
