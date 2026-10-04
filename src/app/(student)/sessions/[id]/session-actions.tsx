@@ -5,6 +5,11 @@ import { useActionState, useId, useState } from "react";
 import { Button } from "@/components/button";
 import { Card } from "@/components/card";
 import { Field, Textarea } from "@/components/field";
+import {
+  answerCopy,
+  deliveredIfUnanswered,
+  lapseCopy,
+} from "@/server/modules/engagements/answer-outcome";
 import type { ViewerAction } from "@/server/modules/engagements/attendance";
 
 import { cancel, confirm, deny, type ActionResult } from "../../actions";
@@ -34,8 +39,12 @@ export function SessionActions({
         <Note>
           You said this{" "}
           {yourAnswer === "denied" ? "did not happen" : "happened"}. Waiting on{" "}
-          {otherPartyName}. If they say nothing within a day, it settles as
-          attended.
+          {otherPartyName}. If they say nothing within a day,{" "}
+          {lapseCopy(
+            deliveredIfUnanswered({ student: yourAnswer, tutor: theirAnswer }),
+            "your",
+          )}
+          . We will email you when it settles.
         </Note>
       );
     case "awaiting_review":
@@ -161,8 +170,14 @@ function Answer({
   const [disputing, setDisputing] = useState(false);
   const noteId = useId();
 
-  if (confirmState?.ok) return <Result state={confirmState} />;
-  if (denyState?.ok) return <Result state={denyState} />;
+  const answered = (confirmState?.ok && confirmState.answered) || (denyState?.ok && denyState.answered);
+  if (answered) {
+    return (
+      <p role="status" className="text-sm text-accent">
+        {answerCopy({ ...answered, viewer: "student", otherPartyName })}
+      </p>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3">

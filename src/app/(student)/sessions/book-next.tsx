@@ -30,7 +30,8 @@ export function BookNext({
     return (
       <div className="flex flex-col items-start gap-3">
         <p role="status" className="text-sm text-accent">
-          Booked. It is on your session board.
+          Booked for {formatDay(slot)} at {formatTime(slot)}. It is confirmed on{" "}
+          {tutorName}&rsquo;s calendar, and you both get an email with the details.
         </p>
         <ButtonLink href="/sessions">See your sessions</ButtonLink>
       </div>

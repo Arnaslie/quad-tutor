@@ -70,7 +70,7 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
 
       <Card padded={false}>
         <dl className="divide-y divide-border">
-          <Row label="Status" value={statusLine(session)} />
+          <Row label="Status" value={statusLine(session, otherParty)} />
           <Row label="Tutor" value={otherParty} />
           <Row
             label="Where"
@@ -115,10 +115,19 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function statusLine(session: SessionDetail): string {
+function statusLine(session: SessionDetail, otherParty: string): string {
   switch (session.status) {
     case "scheduled":
-      return "Booked";
+      switch (session.action) {
+        case "confirm_or_deny":
+          return "Finished — waiting on your answer";
+        case "awaiting_other_party":
+          return `Waiting on ${otherParty} to answer`;
+        case "none":
+          return "Happening now";
+        default:
+          return `Booked — confirmed on ${otherParty}'s calendar`;
+      }
     case "cancelled":
       return "Cancelled";
     case "disputed":

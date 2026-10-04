@@ -71,8 +71,9 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
 
       {justPurchased ? (
         <Card className="bg-accent-soft text-sm text-accent">
-          Your package is paid for and your first session is booked. Book the rest
-          whenever you like — anything you do not use refunds at the end of term.
+          Your package is paid for and your first session is booked and confirmed on
+          your tutor&rsquo;s calendar. You both get an email with the details. Book the
+          rest whenever you like — anything you do not use refunds at the end of term.
         </Card>
       ) : null}
 

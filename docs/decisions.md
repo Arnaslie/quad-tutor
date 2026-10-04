@@ -135,6 +135,17 @@ The tutor can move a single session, but not inside the late-cancel window
 old spot would be recorded as a no-show the platform caused. A move after the booking
 email has gone out, whether by hand or by the fill, emails the student the new spot.
 
+**Every session state change is an email, not a page to check.** Booking from the
+tutor's posted hours needs no second confirmation, so "booked" means confirmed for both
+and both are emailed. A cancel emails the other party. When a session ends, whoever
+has not answered is asked whether it happened, and the settled result goes to everyone
+except the person whose answer settled it (they saw it on screen). Each send claims a
+timestamp on `session_booking` and carries a Resend idempotency key, so the sweep and
+the `after()` call from the action that caused it send once between them. The copy
+never mentions late cancels or no-shows: those are reliability facts and stay unseen.
+These are not filtered by blocks — a block stops messages, not word of a session that
+was paid for.
+
 **Intake under 45 seconds.** Course selection is the primary input (schedule
 screenshot → OCR, with catalog type-ahead as fallback); section and professor are a
 required second step. Everything the course code already answers is cut.

@@ -456,6 +456,9 @@ export const sessionBooking = pgTable(
 
     bookedNotifiedAt: timestamp("booked_notified_at", { withTimezone: true }),
     remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    cancelNotifiedAt: timestamp("cancel_notified_at", { withTimezone: true }),
+    answerPromptedAt: timestamp("answer_prompted_at", { withTimezone: true }),
+    settledNotifiedAt: timestamp("settled_notified_at", { withTimezone: true }),
     confirmationWindowEndsAt: timestamp("confirmation_window_ends_at", {
       withTimezone: true,
     }),
