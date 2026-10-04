@@ -386,6 +386,7 @@ export const matchRequest = pgTable(
 
     tutorNotifiedAt: timestamp("tutor_notified_at", { withTimezone: true }),
     studentNotifiedAt: timestamp("student_notified_at", { withTimezone: true }),
+    notifyClaimedAt: timestamp("notify_claimed_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -451,6 +452,9 @@ export const sessionBooking = pgTable(
     location: text("location"),
     studentNote: text("student_note"),
     notifiedLocation: text("notified_location"),
+    locationChangedAt: timestamp("location_changed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
 
     status: sessionStatus("status").notNull().default("scheduled"),
 
@@ -470,6 +474,7 @@ export const sessionBooking = pgTable(
     cancelNotifiedAt: timestamp("cancel_notified_at", { withTimezone: true }),
     answerPromptedAt: timestamp("answer_prompted_at", { withTimezone: true }),
     settledNotifiedAt: timestamp("settled_notified_at", { withTimezone: true }),
+    notifyClaimedAt: timestamp("notify_claimed_at", { withTimezone: true }),
     confirmationWindowEndsAt: timestamp("confirmation_window_ends_at", {
       withTimezone: true,
     }),

@@ -33,7 +33,7 @@ export async function setDefaultLocation(params: {
 
     const filled = await tx
       .update(sessionBooking)
-      .set({ location: params.location })
+      .set({ location: params.location, locationChangedAt: now })
       .where(
         and(
           inArray(sessionBooking.engagementId, theirs),

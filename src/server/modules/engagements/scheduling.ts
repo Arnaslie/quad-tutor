@@ -255,7 +255,7 @@ export async function setSessionLocation(params: {
 
     await tx
       .update(sessionBooking)
-      .set({ location: params.location })
+      .set({ location: params.location, locationChangedAt: now })
       .where(eq(sessionBooking.id, session.sessionId));
   });
 }

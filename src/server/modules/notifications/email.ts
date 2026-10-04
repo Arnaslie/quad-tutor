@@ -2,6 +2,7 @@ export class EmailError extends Error {
   constructor(
     message: string,
     readonly status?: number,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -14,6 +15,26 @@ export class EmailError extends Error {
       this.status !== 409 &&
       this.status !== 429
     );
+  }
+}
+
+export function failureStatus(error: unknown): string {
+  if (error instanceof EmailError) {
+    if (error.status === undefined) return error.message;
+    return error.code ? `${error.status} ${error.code}` : String(error.status);
+  }
+  if (!(error instanceof Error)) return "unknown";
+  const cause = (error.cause as { code?: unknown } | undefined)?.code;
+  return typeof cause === "string" ? `${error.name} ${cause}` : error.name;
+}
+
+async function errorName(response: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.json();
+    const name = (body as { name?: unknown } | null)?.name;
+    return typeof name === "string" ? name : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -58,11 +79,15 @@ export async function sendEmail(message: Email): Promise<void> {
     }),
   });
 
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new EmailError(
-      `Resend refused the message (${response.status}): ${detail}`,
-      response.status,
-    );
+  if (response.ok) return;
+  if (response.status !== 409) {
+    await response.body?.cancel();
+    throw new EmailError(`Resend refused the message (${response.status})`, response.status);
   }
+  const name = await errorName(response);
+  if (name === "invalid_idempotent_request") {
+    console.warn(`[email] ${message.idempotencyKey} already delivered`);
+    return;
+  }
+  throw new EmailError(`Resend refused the message (409 ${name ?? "unnamed"})`, 409, name);
 }
