@@ -17,6 +17,11 @@ export class EmailError extends Error {
   }
 }
 
+export function failureStatus(error: unknown): string {
+  if (!(error instanceof EmailError)) return "no response";
+  return error.status === undefined ? error.message : String(error.status);
+}
+
 export type Email = {
   to: string;
   subject: string;
@@ -59,10 +64,7 @@ export async function sendEmail(message: Email): Promise<void> {
   });
 
   if (!response.ok) {
-    const detail = await response.text();
-    throw new EmailError(
-      `Resend refused the message (${response.status}): ${detail}`,
-      response.status,
-    );
+    await response.body?.cancel();
+    throw new EmailError(`Resend refused the message (${response.status})`, response.status);
   }
 }

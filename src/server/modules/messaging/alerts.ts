@@ -13,7 +13,7 @@ import {
 } from "@/server/db/schema";
 import { tutorUser } from "@/server/modules/engagements/access";
 import { displayName } from "@/server/modules/identity/display-name";
-import { sendEmail } from "@/server/modules/notifications/email";
+import { failureStatus, sendEmail } from "@/server/modules/notifications/email";
 import { messageWaiting } from "@/server/modules/notifications/messages";
 
 import { ALERT_GAP_MINUTES, THREAD_SIDES, otherSide, previewLine, type ThreadSide } from "./rules";
@@ -110,7 +110,7 @@ async function alertSide(side: ThreadSide, scope: SQL): Promise<number> {
         .update(messageThread)
         .set({ [alerted.key]: row.alertedAt })
         .where(and(eq(messageThread.id, row.threadId), eq(alerted.column, claimedAt)));
-      console.error(`[notifications] message-alert ${row.threadId}/${side} not sent`, error);
+      console.error(`[notifications] ${alerted.key} ${row.threadId} not sent (${failureStatus(error)})`);
     }
   }
 

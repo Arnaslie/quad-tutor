@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   and,
   eq,
@@ -7,13 +9,16 @@ import {
   inArray,
   isNotNull,
   isNull,
+  lt,
   lte,
   ne,
   not,
+  or,
   sql,
   type Column,
   type SQL,
 } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
 import {
@@ -38,7 +43,7 @@ import { notifyUnreadMessages } from "@/server/modules/messaging/alerts";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 import { REJECTION_REASON_COPY } from "@/server/modules/tutoring/proof-rules";
 
-import { EmailError, sendEmail, type Email } from "./email";
+import { EmailError, failureStatus, sendEmail, type Email } from "./email";
 import {
   answerDue,
   claimNeedsNewProof,
@@ -107,24 +112,35 @@ function addressed(row: SessionRow, side: Side) {
   };
 }
 
-type Marker = "bookedNotifiedAt" | "cancelNotifiedAt" | "answerPromptedAt" | "settledNotifiedAt";
+const LEASE_MS = 10 * 60 * 1000;
 
-async function claimAndSend(params: {
-  sessionId: string;
-  marker: Marker;
-  unchanged: SQL | undefined;
-  also?: Partial<typeof sessionBooking.$inferInsert>;
+async function claimAndSend<T extends typeof sessionBooking | typeof matchRequest>(params: {
+  table: T;
+  id: string;
+  marker: string;
+  pending: SQL | undefined;
+  done: PgUpdateSetSource<T>;
   emails: Email[];
 }): Promise<number> {
-  const column = sessionBooking[params.marker];
+  const table = params.table as typeof sessionBooking;
   const claimedAt = new Date();
   const claimed = await db
-    .update(sessionBooking)
-    .set({ ...params.also, [params.marker]: claimedAt })
-    .where(and(eq(sessionBooking.id, params.sessionId), isNull(column), params.unchanged))
-    .returning({ id: sessionBooking.id });
+    .update(table)
+    .set({ notifyClaimedAt: claimedAt })
+    .where(
+      and(
+        eq(table.id, params.id),
+        params.pending,
+        or(
+          isNull(table.notifyClaimedAt),
+          lt(table.notifyClaimedAt, new Date(claimedAt.getTime() - LEASE_MS)),
+        ),
+      ),
+    )
+    .returning({ id: table.id });
   if (claimed.length === 0) return 0;
 
+  const mine = and(eq(table.id, params.id), eq(table.notifyClaimedAt, claimedAt));
   let sent = 0;
   for (const email of params.emails) {
     try {
@@ -133,18 +149,19 @@ async function claimAndSend(params: {
     } catch (error) {
       if (error instanceof EmailError && error.terminal) {
         console.error(
-          `[notifications] ${params.marker} ${params.sessionId} refused (${error.status}), not retrying`,
+          `[notifications] ${params.marker} ${params.id} refused (${error.status}), not retrying`,
         );
         continue;
       }
-      await db
-        .update(sessionBooking)
-        .set({ [params.marker]: null })
-        .where(and(eq(sessionBooking.id, params.sessionId), eq(column, claimedAt)));
-      console.error(`[notifications] ${params.marker} ${params.sessionId} not sent`, error);
+      await db.update(table).set({ notifyClaimedAt: null }).where(mine);
+      console.error(`[notifications] ${params.marker} ${params.id} not sent (${failureStatus(error)})`);
       return 0;
     }
   }
+  await db
+    .update(table)
+    .set({ ...(params.done as PgUpdateSetSource<typeof sessionBooking>), notifyClaimedAt: null })
+    .where(mine);
   return sent;
 }
 
@@ -211,26 +228,31 @@ export async function notifyPendingRequests(institutionId: string): Promise<numb
       and(
         eq(matchRequest.status, "pending"),
         isNull(matchRequest.tutorNotifiedAt),
-        eq(tutorProfile.institutionId, institutionId),
+        campus(institutionId),
       ),
     );
 
   let sent = 0;
   for (const row of rows) {
-    await sendEmail(
-      requestWaiting({
-        to: row.tutorEmail,
-        tutorName: displayName(row.tutorName, "tutor"),
-        studentName: displayName(row.studentName, "student"),
-        courseLabel: row.code ?? row.title,
-        expiresAt: row.expiresAt,
-      }),
-    );
-    await db
-      .update(matchRequest)
-      .set({ tutorNotifiedAt: new Date() })
-      .where(eq(matchRequest.id, row.id));
-    sent += 1;
+    sent += await claimAndSend({
+      table: matchRequest,
+      id: row.id,
+      marker: "tutorNotifiedAt",
+      pending: and(isNull(matchRequest.tutorNotifiedAt), eq(matchRequest.status, "pending")),
+      done: { tutorNotifiedAt: new Date() },
+      emails: [
+        {
+          ...requestWaiting({
+            to: row.tutorEmail,
+            tutorName: displayName(row.tutorName, "tutor"),
+            studentName: displayName(row.studentName, "student"),
+            courseLabel: row.code ?? row.title,
+            expiresAt: row.expiresAt,
+          }),
+          idempotencyKey: `request-waiting/${row.id}`,
+        },
+      ],
+    });
   }
 
   return sent;
@@ -261,25 +283,30 @@ export async function notifyAcceptedRequests(institutionId: string): Promise<num
       and(
         eq(matchRequest.status, "accepted"),
         isNull(matchRequest.studentNotifiedAt),
-        eq(tutorProfile.institutionId, institutionId),
+        campus(institutionId),
       ),
     );
 
   let sent = 0;
   for (const row of rows) {
-    await sendEmail(
-      requestAccepted({
-        to: row.studentEmail,
-        studentName: displayName(row.studentName, "student"),
-        tutorName: displayName(row.tutorName, "tutor"),
-        courseLabel: row.code ?? row.title,
-      }),
-    );
-    await db
-      .update(matchRequest)
-      .set({ studentNotifiedAt: new Date() })
-      .where(eq(matchRequest.id, row.id));
-    sent += 1;
+    sent += await claimAndSend({
+      table: matchRequest,
+      id: row.id,
+      marker: "studentNotifiedAt",
+      pending: and(isNull(matchRequest.studentNotifiedAt), eq(matchRequest.status, "accepted")),
+      done: { studentNotifiedAt: new Date() },
+      emails: [
+        {
+          ...requestAccepted({
+            to: row.studentEmail,
+            studentName: displayName(row.studentName, "student"),
+            tutorName: displayName(row.tutorName, "tutor"),
+            courseLabel: row.code ?? row.title,
+          }),
+          idempotencyKey: `request-accepted/${row.id}`,
+        },
+      ],
+    });
   }
 
   return sent;
@@ -297,10 +324,11 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
   let sent = 0;
   for (const row of rows) {
     sent += await claimAndSend({
-      sessionId: row.sessionId,
+      table: sessionBooking,
+      id: row.sessionId,
       marker: "bookedNotifiedAt",
-      unchanged: eq(sessionBooking.status, "scheduled"),
-      also: { notifiedLocation: row.location },
+      pending: and(isNull(sessionBooking.bookedNotifiedAt), eq(sessionBooking.status, "scheduled")),
+      done: { bookedNotifiedAt: new Date(), notifiedLocation: row.location },
       emails: SIDES.map((side) => ({
         ...sessionBooked({
           ...addressed(row, side),
@@ -330,9 +358,12 @@ export async function notifyCancelledSessions(institutionId: string): Promise<nu
   for (const row of rows) {
     const side: Side = row.cancelledByUserId === row.studentUserId ? "tutor" : "student";
     sent += await claimAndSend({
-      sessionId: row.sessionId,
+      table: sessionBooking,
+      id: row.sessionId,
       marker: "cancelNotifiedAt",
-      unchanged: and(
+      done: { cancelNotifiedAt: new Date() },
+      pending: and(
+        isNull(sessionBooking.cancelNotifiedAt),
         eq(sessionBooking.status, "cancelled"),
         row.bookedNotifiedAt
           ? isNotNull(sessionBooking.bookedNotifiedAt)
@@ -375,9 +406,15 @@ export async function notifyAnswersDue(institutionId: string): Promise<number> {
     if (!answerBy) continue;
     const answers = { student: answerOf(row, "student"), tutor: answerOf(row, "tutor") };
     sent += await claimAndSend({
-      sessionId: row.sessionId,
+      table: sessionBooking,
+      id: row.sessionId,
       marker: "answerPromptedAt",
-      unchanged: and(eq(sessionBooking.status, "scheduled"), answersUnchanged(row)),
+      pending: and(
+        isNull(sessionBooking.answerPromptedAt),
+        eq(sessionBooking.status, "scheduled"),
+        answersUnchanged(row),
+      ),
+      done: { answerPromptedAt: new Date() },
       emails: SIDES.filter((side) => !answers[side]).map((side) => ({
         ...answerDue({
           ...addressed(row, side),
@@ -421,9 +458,14 @@ export async function notifySettledSessions(institutionId: string): Promise<numb
     const resolution = row.resolution;
     if (!resolution) continue;
     sent += await claimAndSend({
-      sessionId: row.sessionId,
+      table: sessionBooking,
+      id: row.sessionId,
       marker: "settledNotifiedAt",
-      unchanged: eq(sessionBooking.resolution, resolution),
+      pending: and(
+        isNull(sessionBooking.settledNotifiedAt),
+        eq(sessionBooking.resolution, resolution),
+      ),
+      done: { settledNotifiedAt: new Date() },
       emails: settledRecipients(row).map((side) => ({
         ...sessionSettled({ ...addressed(row, side), resolution }),
         idempotencyKey: `session-settled/${row.sessionId}/${resolution}/${side}`,
@@ -451,46 +493,28 @@ export async function notifyUpcomingSessions(institutionId: string): Promise<num
       isNull(sessionBooking.remindedAt),
       gte(sessionBooking.scheduledAt, now),
       lte(sessionBooking.scheduledAt, reminderHorizon(now)),
-      eq(tutorProfile.institutionId, institutionId),
-      eq(studentProfile.institutionId, institutionId),
+      campus(institutionId),
     ),
   );
 
   let sent = 0;
   for (const row of rows) {
-    const shared = {
-      courseLabel: row.code ?? row.title,
-      scheduledAt: row.scheduledAt,
-      freeUntil: freeUntil(row.scheduledAt),
-      location: row.location,
-      studentNote: row.studentNote,
-    };
-    const studentName = displayName(row.studentName, "student");
-    const tutorName = displayName(row.tutorName, "tutor");
-
-    await sendEmail(
-      sessionTomorrow({
-        ...shared,
-        recipient: "student",
-        to: row.studentEmail,
-        name: studentName,
-        otherPartyName: tutorName,
-      }),
-    );
-    await sendEmail(
-      sessionTomorrow({
-        ...shared,
-        recipient: "tutor",
-        to: row.tutorEmail,
-        name: tutorName,
-        otherPartyName: studentName,
-      }),
-    );
-    await db
-      .update(sessionBooking)
-      .set({ remindedAt: new Date() })
-      .where(eq(sessionBooking.id, row.sessionId));
-    sent += 2;
+    sent += await claimAndSend({
+      table: sessionBooking,
+      id: row.sessionId,
+      marker: "remindedAt",
+      pending: and(isNull(sessionBooking.remindedAt), eq(sessionBooking.status, "scheduled")),
+      done: { remindedAt: new Date() },
+      emails: SIDES.map((side) => ({
+        ...sessionTomorrow({
+          ...addressed(row, side),
+          freeUntil: freeUntil(row.scheduledAt),
+          location: row.location,
+          studentNote: row.studentNote,
+        }),
+        idempotencyKey: `session-reminder/${row.sessionId}/${side}`,
+      })),
+    });
   }
 
   return sent;
@@ -567,7 +591,7 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
         .update(demandSignal)
         .set({ notifiedAt: null })
         .where(and(eq(demandSignal.id, row.id), eq(demandSignal.notifiedAt, claimedAt)));
-      console.error(`[notifications] section-covered ${row.id} not sent`, error);
+      console.error(`[notifications] notifiedAt ${row.id} not sent (${failureStatus(error)})`);
     }
   }
 
@@ -642,7 +666,7 @@ export async function notifyVerificationDecisions(institutionId: string): Promis
         .update(tutorCourse)
         .set({ decisionNotifiedAt: null })
         .where(and(eq(tutorCourse.id, row.id), eq(tutorCourse.decisionNotifiedAt, claimedAt)));
-      console.error(`[notifications] verification-decision ${row.id} not sent`, error);
+      console.error(`[notifications] decisionNotifiedAt ${row.id} not sent (${failureStatus(error)})`);
     }
   }
 
@@ -661,32 +685,36 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
       gt(sessionBooking.scheduledAt, new Date()),
       isNotNull(sessionBooking.bookedNotifiedAt),
       sql`${sessionBooking.location} is distinct from ${sessionBooking.notifiedLocation}`,
-      eq(tutorProfile.institutionId, institutionId),
-      eq(studentProfile.institutionId, institutionId),
+      campus(institutionId),
     ),
   );
 
   let sent = 0;
   for (const row of rows) {
-    if (!row.location) continue;
-
-    await sendEmail(
-      sessionMoved({
-        to: row.studentEmail,
-        name: displayName(row.studentName, "student"),
-        otherPartyName: displayName(row.tutorName, "tutor"),
-        courseLabel: row.code ?? row.title,
-        scheduledAt: row.scheduledAt,
-        location: row.location,
-        firstSpot: row.notifiedLocation === null,
-        sessionId: row.sessionId,
-      }),
-    );
-    await db
-      .update(sessionBooking)
-      .set({ notifiedLocation: row.location })
-      .where(eq(sessionBooking.id, row.sessionId));
-    sent += 1;
+    const location = row.location;
+    if (!location) continue;
+    const move = createHash("sha256").update(`${row.notifiedLocation}\0${location}`).digest("hex");
+    sent += await claimAndSend({
+      table: sessionBooking,
+      id: row.sessionId,
+      marker: "notifiedLocation",
+      pending: and(
+        eq(sessionBooking.status, "scheduled"),
+        eq(sessionBooking.location, location),
+        sql`${sessionBooking.notifiedLocation} is not distinct from ${row.notifiedLocation}`,
+      ),
+      done: { notifiedLocation: location },
+      emails: [
+        {
+          ...sessionMoved({
+            ...addressed(row, "student"),
+            location,
+            firstSpot: row.notifiedLocation === null,
+          }),
+          idempotencyKey: `session-moved/${row.sessionId}/${move.slice(0, 32)}`,
+        },
+      ],
+    });
   }
 
   return sent;
