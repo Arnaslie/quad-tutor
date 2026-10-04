@@ -256,3 +256,111 @@ export function claimNeedsNewProof(params: {
     ].join("\n"),
   };
 }
+
+type SessionEmail = {
+  to: string;
+  name: string;
+  otherPartyName: string;
+  courseLabel: string;
+  scheduledAt: Date;
+  recipient: "student" | "tutor";
+  sessionId: string;
+};
+
+function sessionUrl(params: Pick<SessionEmail, "recipient" | "sessionId">): string {
+  return params.recipient === "tutor"
+    ? url("/tutor/sessions")
+    : url(`/sessions/${params.sessionId}`);
+}
+
+export function sessionCancelled(params: SessionEmail): Email {
+  return {
+    to: params.to,
+    subject: `Cancelled: ${params.courseLabel} with ${params.otherPartyName}`,
+    text: [
+      `${params.name},`,
+      "",
+      `${params.otherPartyName} cancelled ${params.courseLabel} on ${formatDayTime(params.scheduledAt)}.`,
+      "",
+      params.recipient === "student"
+        ? "The session is back in your package. Book another time whenever suits you."
+        : `That time is open again, and the session is back in ${params.otherPartyName}'s package.`,
+      "",
+      sessionUrl(params),
+      ...SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+export function answerDue(params: SessionEmail & { answerBy: Date }): Email {
+  return {
+    to: params.to,
+    subject: `Did ${params.courseLabel} with ${params.otherPartyName} happen?`,
+    text: [
+      `${params.name},`,
+      "",
+      `${params.courseLabel} with ${params.otherPartyName} on ${formatDayTime(params.scheduledAt)} has finished.`,
+      `You both answer whether it happened. Answer by ${formatDayTime(params.answerBy)}.`,
+      "",
+      "If neither of you answers by then, it settles as attended.",
+      "",
+      sessionUrl(params),
+      ...SIGN_OFF,
+    ].join("\n"),
+  };
+}
+
+export type SettledResolution =
+  | "both_confirmed"
+  | "auto_released"
+  | "disputed"
+  | "resolved_attended"
+  | "resolved_not_attended";
+
+function settledCopy(
+  resolution: SettledResolution,
+  params: SessionEmail,
+): { label: string; line: string } {
+  switch (resolution) {
+    case "both_confirmed":
+      return {
+        label: "Confirmed",
+        line: `You and ${params.otherPartyName} both confirmed it happened. It is settled.`,
+      };
+    case "auto_released":
+      return { label: "Settled", line: "The answer window closed, so it settled as attended." };
+    case "disputed":
+      return {
+        label: "Under review",
+        line: `You and ${params.otherPartyName} answered differently. A person settles it, and no money moves until then.`,
+      };
+    case "resolved_attended":
+      return { label: "Settled", line: "It settled as attended." };
+    case "resolved_not_attended":
+      return {
+        label: "Settled",
+        line: `It settled as not happening. The session went back into ${
+          params.recipient === "student" ? "your" : `${params.otherPartyName}'s`
+        } package.`,
+      };
+  }
+}
+
+export function sessionSettled(
+  params: SessionEmail & { resolution: SettledResolution },
+): Email {
+  const { label, line } = settledCopy(params.resolution, params);
+  return {
+    to: params.to,
+    subject: `${label}: ${params.courseLabel} with ${params.otherPartyName}`,
+    text: [
+      `${params.name},`,
+      "",
+      `${params.courseLabel} with ${params.otherPartyName} on ${formatDayTime(params.scheduledAt)}:`,
+      line,
+      "",
+      sessionUrl(params),
+      ...SIGN_OFF,
+    ].join("\n"),
+  };
+}

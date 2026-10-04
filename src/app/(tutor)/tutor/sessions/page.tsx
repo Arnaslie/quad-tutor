@@ -128,6 +128,11 @@ function SessionCard({ item }: { item: SessionListItem }) {
           {item.durationMinutes} min · {student}
           {item.location ? ` · ${item.location}` : upcoming ? " · no spot set" : ""}
         </p>
+        {upcoming ? (
+          <p className="text-sm text-accent">
+            Booked from your hours, so it is confirmed for you and {student}.
+          </p>
+        ) : null}
       </div>
 
       {item.studentNote ? (
@@ -187,7 +192,7 @@ function settledCopy(item: SessionListItem): string {
   }
 
   if (item.action === "awaiting_other_party") {
-    return `${youSaid} Waiting on ${student} to answer.`;
+    return `${youSaid} Waiting on ${student} to answer — we will email you when it settles.`;
   }
 
   if (item.status === "scheduled") return "Happening now.";

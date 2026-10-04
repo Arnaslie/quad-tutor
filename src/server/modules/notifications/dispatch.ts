@@ -22,15 +22,18 @@ import { notifyUnreadMessages } from "@/server/modules/messaging/alerts";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 import { REJECTION_REASON_COPY } from "@/server/modules/tutoring/proof-rules";
 
-import { sendEmail } from "./email";
+import { sendEmail, type Email } from "./email";
 import {
+  answerDue,
   claimNeedsNewProof,
   claimVerified,
   requestAccepted,
   requestWaiting,
   sectionCovered,
   sessionBooked,
+  sessionCancelled,
   sessionMoved,
+  sessionSettled,
   sessionTomorrow,
 } from "./messages";
 
@@ -44,6 +47,15 @@ const sessionParties = {
   location: sessionBooking.location,
   studentNote: sessionBooking.studentNote,
   notifiedLocation: sessionBooking.notifiedLocation,
+  cancelledByUserId: sessionBooking.cancelledByUserId,
+  bookedNotifiedAt: sessionBooking.bookedNotifiedAt,
+  confirmationWindowEndsAt: sessionBooking.confirmationWindowEndsAt,
+  resolution: sessionBooking.resolution,
+  studentConfirmedAt: sessionBooking.studentConfirmedAt,
+  studentDeniedAt: sessionBooking.studentDeniedAt,
+  tutorConfirmedAt: sessionBooking.tutorConfirmedAt,
+  tutorDeniedAt: sessionBooking.tutorDeniedAt,
+  studentUserId: user.id,
   studentEmail: user.email,
   studentName: user.name,
   tutorEmail: tutorUser.email,
@@ -51,6 +63,63 @@ const sessionParties = {
   code: courseCodeAlias.code,
   title: course.title,
 };
+
+type SessionRow = Awaited<ReturnType<typeof sessionQuery>>[number];
+
+type Side = "student" | "tutor";
+
+const SIDES: Side[] = ["student", "tutor"];
+
+function campus(institutionId: string) {
+  return and(
+    eq(tutorProfile.institutionId, institutionId),
+    eq(studentProfile.institutionId, institutionId),
+  );
+}
+
+function addressed(row: SessionRow, side: Side) {
+  const student = displayName(row.studentName, "student");
+  const tutor = displayName(row.tutorName, "tutor");
+  return {
+    to: side === "student" ? row.studentEmail : row.tutorEmail,
+    name: side === "student" ? student : tutor,
+    otherPartyName: side === "student" ? tutor : student,
+    recipient: side,
+    courseLabel: row.code ?? row.title,
+    scheduledAt: row.scheduledAt,
+    sessionId: row.sessionId,
+  };
+}
+
+type Marker = "bookedNotifiedAt" | "cancelNotifiedAt" | "answerPromptedAt" | "settledNotifiedAt";
+
+async function claimAndSend(params: {
+  sessionId: string;
+  marker: Marker;
+  also?: Partial<typeof sessionBooking.$inferInsert>;
+  emails: Email[];
+}): Promise<number> {
+  const column = sessionBooking[params.marker];
+  const claimedAt = new Date();
+  const claimed = await db
+    .update(sessionBooking)
+    .set({ ...params.also, [params.marker]: claimedAt })
+    .where(and(eq(sessionBooking.id, params.sessionId), isNull(column)))
+    .returning({ id: sessionBooking.id });
+  if (claimed.length === 0) return 0;
+
+  try {
+    for (const email of params.emails) await sendEmail(email);
+    return params.emails.length;
+  } catch (error) {
+    await db
+      .update(sessionBooking)
+      .set({ [params.marker]: null })
+      .where(and(eq(sessionBooking.id, params.sessionId), eq(column, claimedAt)));
+    console.error(`[notifications] ${params.marker} ${params.sessionId} not sent`, error);
+    return 0;
+  }
+}
 
 function sessionQuery() {
   return db
@@ -175,52 +244,141 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
     and(
       eq(sessionBooking.status, "scheduled"),
       isNull(sessionBooking.bookedNotifiedAt),
-      eq(tutorProfile.institutionId, institutionId),
-      eq(studentProfile.institutionId, institutionId),
+      campus(institutionId),
     ),
   );
 
   let sent = 0;
   for (const row of rows) {
-    const shared = {
-      courseLabel: row.code ?? row.title,
-      scheduledAt: row.scheduledAt,
-      freeUntil: freeUntil(row.scheduledAt),
-      location: row.location,
-      studentNote: row.studentNote,
-    };
-    const studentName = displayName(row.studentName, "student");
-    const tutorName = displayName(row.tutorName, "tutor");
-
-    await sendEmail(
-      sessionBooked({
-        ...shared,
-        recipient: "student",
-        to: row.studentEmail,
-        name: studentName,
-        otherPartyName: tutorName,
-      }),
-    );
-    await sendEmail(
-      sessionBooked({
-        ...shared,
-        recipient: "tutor",
-        to: row.tutorEmail,
-        name: tutorName,
-        otherPartyName: studentName,
-      }),
-    );
-    await db
-      .update(sessionBooking)
-      .set({
-        bookedNotifiedAt: new Date(),
-        notifiedLocation: row.location,
-      })
-      .where(eq(sessionBooking.id, row.sessionId));
-    sent += 2;
+    sent += await claimAndSend({
+      sessionId: row.sessionId,
+      marker: "bookedNotifiedAt",
+      also: { notifiedLocation: row.location },
+      emails: SIDES.map((side) => ({
+        ...sessionBooked({
+          ...addressed(row, side),
+          freeUntil: freeUntil(row.scheduledAt),
+          location: row.location,
+          studentNote: row.studentNote,
+        }),
+        idempotencyKey: `session-booked/${row.sessionId}/${side}`,
+      })),
+    });
   }
 
   return sent;
+}
+
+export async function notifyCancelledSessions(institutionId: string): Promise<number> {
+  const rows = await sessionQuery().where(
+    and(
+      eq(sessionBooking.status, "cancelled"),
+      isNotNull(sessionBooking.cancelledByUserId),
+      isNull(sessionBooking.cancelNotifiedAt),
+      campus(institutionId),
+    ),
+  );
+
+  let sent = 0;
+  for (const row of rows) {
+    const side: Side = row.cancelledByUserId === row.studentUserId ? "tutor" : "student";
+    sent += await claimAndSend({
+      sessionId: row.sessionId,
+      marker: "cancelNotifiedAt",
+      emails: row.bookedNotifiedAt
+        ? [
+            {
+              ...sessionCancelled(addressed(row, side)),
+              idempotencyKey: `session-cancelled/${row.sessionId}`,
+            },
+          ]
+        : [],
+    });
+  }
+
+  return sent;
+}
+
+function answeredAt(row: SessionRow, side: Side): Date | null {
+  return side === "student"
+    ? (row.studentConfirmedAt ?? row.studentDeniedAt)
+    : (row.tutorConfirmedAt ?? row.tutorDeniedAt);
+}
+
+export async function notifyAnswersDue(institutionId: string): Promise<number> {
+  const rows = await sessionQuery().where(
+    and(
+      eq(sessionBooking.status, "scheduled"),
+      isNull(sessionBooking.answerPromptedAt),
+      sql`${sessionBooking.scheduledAt} + make_interval(mins => ${sessionBooking.durationMinutes}) <= now()`,
+      sql`${sessionBooking.confirmationWindowEndsAt} > now()`,
+      campus(institutionId),
+    ),
+  );
+
+  let sent = 0;
+  for (const row of rows) {
+    const answerBy = row.confirmationWindowEndsAt;
+    if (!answerBy) continue;
+    sent += await claimAndSend({
+      sessionId: row.sessionId,
+      marker: "answerPromptedAt",
+      emails: SIDES.filter((side) => !answeredAt(row, side)).map((side) => ({
+        ...answerDue({ ...addressed(row, side), answerBy }),
+        idempotencyKey: `session-answer-due/${row.sessionId}/${side}`,
+      })),
+    });
+  }
+
+  return sent;
+}
+
+function settledRecipients(row: SessionRow): Side[] {
+  const student = answeredAt(row, "student");
+  const tutor = answeredAt(row, "tutor");
+  const settledByLastAnswer =
+    row.resolution === "both_confirmed" ||
+    row.resolution === "disputed" ||
+    (row.resolution === "resolved_not_attended" &&
+      row.studentDeniedAt !== null &&
+      row.tutorDeniedAt !== null);
+
+  if (!settledByLastAnswer || !student || !tutor) return SIDES;
+  return [student > tutor ? "tutor" : "student"];
+}
+
+export async function notifySettledSessions(institutionId: string): Promise<number> {
+  const rows = await sessionQuery().where(
+    and(
+      isNotNull(sessionBooking.resolution),
+      isNull(sessionBooking.settledNotifiedAt),
+      campus(institutionId),
+    ),
+  );
+
+  let sent = 0;
+  for (const row of rows) {
+    const resolution = row.resolution;
+    if (!resolution) continue;
+    sent += await claimAndSend({
+      sessionId: row.sessionId,
+      marker: "settledNotifiedAt",
+      emails: settledRecipients(row).map((side) => ({
+        ...sessionSettled({ ...addressed(row, side), resolution }),
+        idempotencyKey: `session-settled/${row.sessionId}/${resolution}/${side}`,
+      })),
+    });
+  }
+
+  return sent;
+}
+
+export async function notifySessionChanges(institutionId: string): Promise<number> {
+  return (
+    (await notifyBookedSessions(institutionId)) +
+    (await notifyCancelledSessions(institutionId)) +
+    (await notifySettledSessions(institutionId))
+  );
 }
 
 export async function notifyUpcomingSessions(institutionId: string): Promise<number> {
@@ -477,7 +635,8 @@ export async function runNotifications(institutionId: string): Promise<number> {
   return (
     (await notifyPendingRequests(institutionId)) +
     (await notifyAcceptedRequests(institutionId)) +
-    (await notifyBookedSessions(institutionId)) +
+    (await notifySessionChanges(institutionId)) +
+    (await notifyAnswersDue(institutionId)) +
     (await notifyMovedSessions(institutionId)) +
     (await notifyUpcomingSessions(institutionId)) +
     (await notifyCoveredSections(institutionId)) +

@@ -26,9 +26,15 @@ import { bookSession, cancelSession } from "@/server/modules/engagements/schedul
 import { requestTutorsInput } from "@/server/modules/matching/input";
 import { RequestError, requestTutors } from "@/server/modules/matching/requests";
 import { requireActor } from "@/server/modules/identity/actor";
+import { outcomeOf, type AnswerOutcome } from "@/server/modules/engagements/answer-outcome";
+import { notifySessionChangesSoon } from "@/server/modules/notifications/soon";
 
 export type ActionResult =
-  | { ok: true; message?: string }
+  | {
+      ok: true;
+      message?: string;
+      answered?: { answer: "confirmed" | "denied"; outcome: AnswerOutcome };
+    }
   | { ok: false; error: string };
 
 function toResult(error: unknown): ActionResult {
@@ -157,6 +163,7 @@ export async function purchase(
     return toResult(error);
   }
 
+  notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/requests");
   revalidatePath("/sessions");
   redirect(`/sessions?package=${engagementId}`);
@@ -189,6 +196,7 @@ export async function topUp(
     return toResult(error);
   }
 
+  notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   redirect(`/sessions?package=${engagementId}`);
 }
@@ -218,6 +226,7 @@ export async function book(
     return toResult(error);
   }
 
+  notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   return { ok: true, message: "Booked." };
 }
@@ -239,6 +248,7 @@ export async function cancel(
     return toResult(error);
   }
 
+  notifySessionChangesSoon(actor.institutionId);
   revalidateStanding();
   revalidatePath("/sessions");
   revalidatePath(`/sessions/${parsed.data.sessionId}`);
@@ -262,16 +272,19 @@ export async function confirm(
   });
   if (!parsed.success) return { ok: false, error: "That session no longer exists." };
 
+  let outcome: AnswerOutcome;
   try {
-    await confirmAttendance({ actor, sessionId: parsed.data.sessionId });
+    const result = await confirmAttendance({ actor, sessionId: parsed.data.sessionId });
+    outcome = outcomeOf(result.status);
   } catch (error) {
     return toResult(error);
   }
 
+  notifySessionChangesSoon(actor.institutionId);
   revalidateStanding();
   revalidatePath("/sessions");
   revalidatePath(`/sessions/${parsed.data.sessionId}`);
-  return { ok: true, message: "Thanks — that is settled." };
+  return { ok: true, answered: { answer: "confirmed", outcome } };
 }
 
 export async function deny(
@@ -289,18 +302,21 @@ export async function deny(
     return { ok: false, error: "Keep the note under 500 characters." };
   }
 
+  let outcome: AnswerOutcome;
   try {
-    await denyAttendance({
+    const result = await denyAttendance({
       actor,
       sessionId: parsed.data.sessionId,
       note: parsed.data.note ?? null,
     });
+    outcome = outcomeOf(result.status);
   } catch (error) {
     return toResult(error);
   }
 
+  notifySessionChangesSoon(actor.institutionId);
   revalidateStanding();
   revalidatePath("/sessions");
   revalidatePath(`/sessions/${parsed.data.sessionId}`);
-  return { ok: true, message: "Recorded. Nothing is charged while this is open." };
+  return { ok: true, answered: { answer: "denied", outcome } };
 }
