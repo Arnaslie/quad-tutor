@@ -4,6 +4,7 @@ import { useActionState, useId, useState } from "react";
 
 import { Button } from "@/components/button";
 import { Field, Textarea } from "@/components/field";
+import { answerCopy } from "@/server/modules/engagements/answer-outcome";
 
 import {
   answerSession,
@@ -192,25 +193,13 @@ function copy(state: SessionActionState, studentName: string): string | null {
 
     case "cancelled":
       return state.late
-        ? `Cancelled, and recorded as a late cancel. ${studentName} can book another time.`
-        : `Cancelled. ${studentName} can book another time.`;
+        ? `Cancelled, and recorded as a late cancel. ${studentName} gets an email and can book another time.`
+        : `Cancelled. ${studentName} gets an email and can book another time.`;
 
     case "error":
       return state.message;
 
     case "answered":
-      switch (state.outcome) {
-        case "attended":
-
-          return "Confirmed by both of you. This session is delivered and earned.";
-        case "not_attended":
-          return `You both said it did not happen. The session goes back to ${studentName}'s package.`;
-        case "disputed":
-          return `You and ${studentName} gave different answers. Nothing moves until someone reviews it.`;
-        case "awaiting_other":
-          return state.answer === "confirmed"
-            ? `Confirmed. Waiting on ${studentName} to answer.`
-            : `Reported. Waiting on ${studentName} to answer.`;
-      }
+      return answerCopy({ ...state, viewer: "tutor", otherPartyName: studentName });
   }
 }

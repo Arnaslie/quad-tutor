@@ -99,6 +99,13 @@
       "when": 1790723237576,
       "tag": "0013_messaging",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791113681875,
+      "tag": "0014_session_lifecycle_notifications",
+      "breakpoints": true
     }
   ]
 }

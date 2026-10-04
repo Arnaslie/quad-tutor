@@ -13,6 +13,7 @@ import {
   type SessionListItem,
 } from "@/server/modules/engagements/reads";
 import { LATE_CANCEL_HOURS } from "@/server/modules/engagements/attendance";
+import { deliveredIfUnanswered, lapseCopy } from "@/server/modules/engagements/answer-outcome";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 import { defaultLocationFor } from "@/server/modules/tutoring/location";
 
@@ -128,6 +129,11 @@ function SessionCard({ item }: { item: SessionListItem }) {
           {item.durationMinutes} min · {student}
           {item.location ? ` · ${item.location}` : upcoming ? " · no spot set" : ""}
         </p>
+        {upcoming ? (
+          <p className="text-sm text-accent">
+            Booked from your hours, so it is confirmed for you and {student}.
+          </p>
+        ) : null}
       </div>
 
       {item.studentNote ? (
@@ -187,7 +193,11 @@ function settledCopy(item: SessionListItem): string {
   }
 
   if (item.action === "awaiting_other_party") {
-    return `${youSaid} Waiting on ${student} to answer.`;
+    const lapse = lapseCopy(
+      deliveredIfUnanswered({ student: null, tutor: item.yourAnswer }),
+      `${student}'s`,
+    );
+    return `${youSaid} Waiting on ${student} to answer. If they say nothing within a day, ${lapse}. We will email you when it settles.`;
   }
 
   if (item.status === "scheduled") return "Happening now.";
@@ -195,7 +205,7 @@ function settledCopy(item: SessionListItem): string {
   if (item.status === "completed") {
     switch (item.resolution) {
       case "auto_released":
-        return "Delivered. Nobody answered inside 24 hours, so it released.";
+        return "Delivered. The 24-hour answer window closed before both of you answered.";
       case "resolved_attended":
         return "Delivered, after review.";
       default:

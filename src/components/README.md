@@ -24,8 +24,9 @@ and one must not be added.
 - Positive-only badges do **not** solve this. The *absence* of a badge is itself a
   signal. See `docs/decisions.md` → "Rejected, and why".
 
-The `Tutor` pill in the header is a **surface label** (which side of the app you
-are on), not a status. That is the only pill-shaped thing in the system.
+The `Student | Tutor` toggle and the `Ops` pill in the header are **surface
+labels** (which side of the app you are on), not a status. Nothing else in the
+system is pill-shaped.
 
 ---
 

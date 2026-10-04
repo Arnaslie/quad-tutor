@@ -270,7 +270,7 @@ export async function resolveDispute(params: {
 
     await tx
       .update(sessionBooking)
-      .set({ status, resolution })
+      .set({ status, resolution, settledNotifiedAt: null })
       .where(
         and(eq(sessionBooking.id, params.sessionId), eq(sessionBooking.status, "disputed")),
       );
