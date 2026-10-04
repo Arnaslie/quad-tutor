@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne, not, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -11,6 +11,7 @@ import {
   tutorProfile,
   user,
 } from "@/server/db/schema";
+import { blockedBetween } from "@/server/modules/messaging/blocks";
 
 import { rankCandidates, type Candidate, type ScoredCandidate } from "./score";
 
@@ -91,6 +92,7 @@ export async function buildDeck(params: {
 
         eq(tutorProfile.institutionId, params.institutionId),
         ne(tutorProfile.userId, params.viewerUserId),
+        not(blockedBetween(tutorProfile.userId, params.viewerUserId)),
       ),
     );
 

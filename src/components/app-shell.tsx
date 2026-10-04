@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type { Actor } from "@/server/modules/identity/actor";
+import { MessagesLink } from "./messages-link";
 import { NAV, type Surface } from "./nav-items";
 import { NavLink } from "./nav-link";
 import { SignOutButton } from "./sign-out-button";
@@ -19,12 +20,14 @@ export function AppShell({
   surface,
   actor,
   nav = true,
+  unread,
   children,
 }: {
   surface: Surface;
   actor: Actor;
 
   nav?: boolean;
+  unread?: number;
   children: ReactNode;
 }) {
   const items = nav ? NAV[surface] : [];
@@ -62,6 +65,7 @@ export function AppShell({
             <span className="hidden max-w-[16rem] truncate text-sm text-muted lg:block">
               {actor.email}
             </span>
+            {unread === undefined ? null : <MessagesLink unread={unread} />}
             <SurfaceSwitch surface={surface} isTutor={actor.tutorProfileId !== null} />
             <SignOutButton />
           </div>

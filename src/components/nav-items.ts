@@ -22,5 +22,8 @@ export const NAV: Record<Surface, NavItem[]> = {
     { href: "/tutor/availability", label: "Hours", icon: "clock" },
     { href: "/tutor/sessions", label: "Sessions", icon: "calendar" },
   ],
-  ops: [{ href: "/ops/verifications", label: "Verifications", icon: "check" }],
+  ops: [
+    { href: "/ops/verifications", label: "Verifications", icon: "check" },
+    { href: "/ops/reports", label: "Reports", icon: "flag" },
+  ],
 };

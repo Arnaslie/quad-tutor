@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { MessageLink } from "@/app/messages/message-link";
 import { ButtonLink } from "@/components/button";
 import { Card } from "@/components/card";
 import { EmptyState } from "@/components/empty-state";
@@ -163,6 +164,8 @@ function SessionCard({ item }: { item: SessionListItem }) {
       ) : (
         <p className="text-sm text-muted">{settledCopy(item)}</p>
       )}
+
+      <MessageLink threadId={item.threadId} className="self-start" />
     </Card>
   );
 }
