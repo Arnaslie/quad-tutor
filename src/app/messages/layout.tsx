@@ -8,7 +8,7 @@ export default async function MessagesLayout({ children }: { children: ReactNode
   const actor = await requireActor();
 
   return (
-    <AppShell surface="student" actor={actor} nav={false} unread={await unreadTotal(actor)}>
+    <AppShell surface="student" view={null} actor={actor} nav={false} unread={await unreadTotal(actor)}>
       {children}
     </AppShell>
   );

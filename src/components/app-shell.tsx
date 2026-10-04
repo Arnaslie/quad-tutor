@@ -18,12 +18,14 @@ const BADGE: Partial<Record<Surface, string>> = { ops: "Ops" };
 
 export function AppShell({
   surface,
+  view = surface,
   actor,
   nav = true,
   unread,
   children,
 }: {
   surface: Surface;
+  view?: Surface | null;
   actor: Actor;
 
   nav?: boolean;
@@ -66,7 +68,7 @@ export function AppShell({
               {actor.email}
             </span>
             {unread === undefined ? null : <MessagesLink unread={unread} />}
-            <SurfaceSwitch surface={surface} isTutor={actor.tutorProfileId !== null} />
+            <SurfaceSwitch view={view} isTutor={actor.tutorProfileId !== null} />
             <SignOutButton />
           </div>
         </div>

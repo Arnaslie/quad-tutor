@@ -10,17 +10,19 @@ function Segment({
   href,
   icon,
   label,
+  hint,
   active,
 }: {
   href: string;
   icon: IconName;
   label: string;
+  hint?: string;
   active: boolean;
 }) {
   return (
     <Link
       href={href}
-      aria-current={active ? "page" : undefined}
+      aria-current={active ? "true" : undefined}
       className={`${SEGMENT} ${
         active
           ? "bg-surface text-foreground shadow-sm"
@@ -29,15 +31,16 @@ function Segment({
     >
       <Icon name={icon} className="hidden size-4 sm:block" />
       {label}
+      {hint ? <span className="sr-only">{hint}</span> : null}
     </Link>
   );
 }
 
 export function SurfaceSwitch({
-  surface,
+  view,
   isTutor,
 }: {
-  surface: Surface;
+  view: Surface | null;
   isTutor: boolean;
 }) {
   return (
@@ -49,13 +52,14 @@ export function SurfaceSwitch({
         href="/courses"
         icon="book"
         label="Student"
-        active={surface === "student"}
+        active={view === "student"}
       />
       <Segment
         href={isTutor ? "/tutor" : "/tutor/start"}
         icon="cap"
         label="Tutor"
-        active={surface === "tutor"}
+        hint={isTutor ? undefined : ", become a tutor"}
+        active={view === "tutor"}
       />
     </nav>
   );
