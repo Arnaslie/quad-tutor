@@ -1,0 +1,39 @@
+# Vercel Deployment Checks hold the production deploy until this `migrate` job passes.
+# Not in the Vercel build: it has no .git, so migrate-guard.mjs can't verify HEAD == origin/main.
+name: migrate
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_UNPOOLED }}
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "DATABASE_URL_UNPOOLED must be set in the production environment."
+            exit 1
+          fi
+          npm run db:migrate
