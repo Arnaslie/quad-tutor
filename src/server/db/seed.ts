@@ -660,9 +660,15 @@ async function seedCourses(
     await db.update(course).set({ collegeId }).where(eq(course.id, courseId));
     courses.set(key, courseId);
 
-    await seedAlias(courseId, fixture.code, terms.get(fixture.codeSince)!, null);
+    await seedAlias(institutionId, courseId, fixture.code, terms.get(fixture.codeSince)!, null);
     for (const former of fixture.formerCodes) {
-      await seedAlias(courseId, former.code, terms.get(former.from)!, terms.get(former.to)!);
+      await seedAlias(
+        institutionId,
+        courseId,
+        former.code,
+        terms.get(former.from)!,
+        terms.get(former.to)!,
+      );
     }
 
     for (const offering of fixture.offerings) {
@@ -682,6 +688,7 @@ async function seedCourses(
           db
             .insert(courseOffering)
             .values({
+              institutionId,
               courseId,
               termId: terms.get(CURRENT_TERM)!,
               professorId: professors.get(offering.professor)!,
@@ -703,7 +710,7 @@ async function seedCourses(
           () =>
             db
               .insert(exam)
-              .values({ courseOfferingId: offeringId, ...fixtureExam })
+              .values({ institutionId, courseOfferingId: offeringId, ...fixtureExam })
               .returning({ id: exam.id }),
         );
       }
@@ -714,6 +721,7 @@ async function seedCourses(
 }
 
 async function seedAlias(
+  institutionId: string,
   courseId: string,
   code: string,
   validFromTermId: string,
@@ -728,7 +736,7 @@ async function seedAlias(
     () =>
       db
         .insert(courseCodeAlias)
-        .values({ courseId, code, validFromTermId, validToTermId })
+        .values({ institutionId, courseId, code, validFromTermId, validToTermId })
         .returning({ id: courseCodeAlias.id }),
   );
 }
@@ -836,6 +844,7 @@ async function seedTutors(
             .insert(tutorCourse)
             .values({
               tutorProfileId,
+              institutionId,
               courseId: courses.get(claim.course)!,
               gradeEarned: claim.grade,
               takenTermId: terms.get(claim.takenTerm)!,
@@ -863,7 +872,7 @@ async function seedTutors(
         () =>
           db
             .insert(tutorAvailability)
-            .values({ tutorProfileId, ...slot })
+            .values({ tutorProfileId, institutionId, ...slot })
             .returning({ id: tutorAvailability.id }),
       );
     }
@@ -873,6 +882,7 @@ async function seedTutors(
 }
 
 async function seedEnrollments(
+  institutionId: string,
   people: Map<string, Person>,
   offerings: Map<string, string>,
 ): Promise<void> {
@@ -896,7 +906,7 @@ async function seedEnrollments(
       () =>
         db
           .insert(enrollment)
-          .values({ studentProfileId: person.studentProfileId, courseOfferingId })
+          .values({ studentProfileId: person.studentProfileId, institutionId, courseOfferingId })
           .returning({ id: enrollment.id }),
     );
   }
@@ -982,7 +992,7 @@ async function seedPeople(
   for (const student of STUDENT_ONLY) {
     people.set(student.key, await seedPerson(catalog.institutionId, student));
   }
-  await seedEnrollments(people, catalog.offerings);
+  await seedEnrollments(catalog.institutionId, people, catalog.offerings);
 
   const ops = await seedPerson(catalog.institutionId, OPERATOR);
   await db

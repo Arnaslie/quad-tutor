@@ -59,6 +59,7 @@ export async function addAvailabilityWindow(params: {
       .insert(tutorAvailability)
       .values({
         tutorProfileId: params.tutor.tutorProfileId,
+        institutionId: params.tutor.institutionId,
         weekday: params.weekday,
         startMinute: params.startMinute,
         endMinute: params.endMinute,

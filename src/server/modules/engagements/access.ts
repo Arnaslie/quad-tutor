@@ -31,6 +31,7 @@ export type Participation = SessionContextRow & { role: "student" | "tutor" };
 export type SessionContextRow = {
   sessionId: string;
   engagementId: string;
+  institutionId: string;
   scheduledAt: Date;
   durationMinutes: number;
   location: string | null;
@@ -75,6 +76,7 @@ export function sessionContext(exec: Executor = db) {
     .select({
       sessionId: sessionBooking.id,
       engagementId: sessionBooking.engagementId,
+      institutionId: studentProfile.institutionId,
       scheduledAt: sessionBooking.scheduledAt,
       durationMinutes: sessionBooking.durationMinutes,
       location: sessionBooking.location,
