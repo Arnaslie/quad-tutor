@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   and,
   eq,
@@ -68,6 +66,7 @@ const sessionParties = {
   location: sessionBooking.location,
   studentNote: sessionBooking.studentNote,
   notifiedLocation: sessionBooking.notifiedLocation,
+  locationChangedAt: sessionBooking.locationChangedAt,
   cancelledByUserId: sessionBooking.cancelledByUserId,
   bookedNotifiedAt: sessionBooking.bookedNotifiedAt,
   confirmationWindowEndsAt: sessionBooking.confirmationWindowEndsAt,
@@ -155,7 +154,7 @@ async function claimAndSend<T extends typeof sessionBooking | typeof matchReques
       }
       await db.update(table).set({ notifyClaimedAt: null }).where(mine);
       console.error(`[notifications] ${params.marker} ${params.id} not sent (${failureStatus(error)})`);
-      return 0;
+      return sent;
     }
   }
   await db
@@ -591,7 +590,7 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
         .update(demandSignal)
         .set({ notifiedAt: null })
         .where(and(eq(demandSignal.id, row.id), eq(demandSignal.notifiedAt, claimedAt)));
-      console.error(`[notifications] notifiedAt ${row.id} not sent (${failureStatus(error)})`);
+      console.error(`[notifications] section-covered ${row.id} not sent (${failureStatus(error)})`);
     }
   }
 
@@ -666,7 +665,7 @@ export async function notifyVerificationDecisions(institutionId: string): Promis
         .update(tutorCourse)
         .set({ decisionNotifiedAt: null })
         .where(and(eq(tutorCourse.id, row.id), eq(tutorCourse.decisionNotifiedAt, claimedAt)));
-      console.error(`[notifications] decisionNotifiedAt ${row.id} not sent (${failureStatus(error)})`);
+      console.error(`[notifications] verification-decision ${row.id} not sent (${failureStatus(error)})`);
     }
   }
 
@@ -693,7 +692,6 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
   for (const row of rows) {
     const location = row.location;
     if (!location) continue;
-    const move = createHash("sha256").update(`${row.notifiedLocation}\0${location}`).digest("hex");
     sent += await claimAndSend({
       table: sessionBooking,
       id: row.sessionId,
@@ -701,6 +699,7 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
       pending: and(
         eq(sessionBooking.status, "scheduled"),
         eq(sessionBooking.location, location),
+        eq(sessionBooking.locationChangedAt, row.locationChangedAt),
         sql`${sessionBooking.notifiedLocation} is not distinct from ${row.notifiedLocation}`,
       ),
       done: { notifiedLocation: location },
@@ -711,7 +710,7 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
             location,
             firstSpot: row.notifiedLocation === null,
           }),
-          idempotencyKey: `session-moved/${row.sessionId}/${move.slice(0, 32)}`,
+          idempotencyKey: `session-moved/${row.sessionId}/${row.locationChangedAt.getTime()}`,
         },
       ],
     });
