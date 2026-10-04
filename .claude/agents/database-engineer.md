@@ -14,8 +14,9 @@ environments, local Postgres for development.
 - Change `src/server/db/schema.ts`, then run `npm run db:generate`. Never hand-write a
   migration. Prefer additive changes that are safe on a database with data in it; say
   so explicitly when a change is not.
-- Prod has no automatic migration step. The user applies migrations by hand before a
-  deploy, so call out any migration in your summary.
+- `.github/workflows/migrate.yml` applies migrations on every push to main, and Vercel
+  holds the prod deploy until it passes. The old deploy still serves against the new
+  schema until promotion, so keep migrations additive; call out any migration.
 - `db:seed` and `db:demo` run under `--import tsx` and wrap their body in `main()`.
   Keep `db:seed` idempotent. Fixture people are plus-aliases of `SEED_INBOX`, never
   addresses on a real campus domain.
