@@ -1,4 +1,21 @@
-export class EmailError extends Error {}
+export class EmailError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+
+  get terminal(): boolean {
+    return (
+      this.status !== undefined &&
+      this.status >= 400 &&
+      this.status < 500 &&
+      this.status !== 409 &&
+      this.status !== 429
+    );
+  }
+}
 
 export type Email = {
   to: string;
@@ -43,6 +60,9 @@ export async function sendEmail(message: Email): Promise<void> {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new EmailError(`Resend refused the message (${response.status}): ${detail}`);
+    throw new EmailError(
+      `Resend refused the message (${response.status}): ${detail}`,
+      response.status,
+    );
   }
 }

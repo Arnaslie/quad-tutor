@@ -5,7 +5,11 @@ import { useActionState, useId, useState } from "react";
 import { Button } from "@/components/button";
 import { Card } from "@/components/card";
 import { Field, Textarea } from "@/components/field";
-import { answerCopy } from "@/server/modules/engagements/answer-outcome";
+import {
+  answerCopy,
+  deliveredIfUnanswered,
+  lapseCopy,
+} from "@/server/modules/engagements/answer-outcome";
 import type { ViewerAction } from "@/server/modules/engagements/attendance";
 
 import { cancel, confirm, deny, type ActionResult } from "../../actions";
@@ -35,8 +39,12 @@ export function SessionActions({
         <Note>
           You said this{" "}
           {yourAnswer === "denied" ? "did not happen" : "happened"}. Waiting on{" "}
-          {otherPartyName}. If they say nothing within a day, it settles as
-          attended. We will email you when it settles.
+          {otherPartyName}. If they say nothing within a day,{" "}
+          {lapseCopy(
+            deliveredIfUnanswered({ student: yourAnswer, tutor: theirAnswer }),
+            "your",
+          )}
+          . We will email you when it settles.
         </Note>
       );
     case "awaiting_review":

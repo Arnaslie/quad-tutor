@@ -1,5 +1,7 @@
 import { formatDayTime } from "@/components/format";
 
+import { lapseCopy } from "@/server/modules/engagements/answer-outcome";
+
 import type { Email } from "./email";
 
 const SIGN_OFF = ["", "— Quad Tutor"];
@@ -292,7 +294,10 @@ export function sessionCancelled(params: SessionEmail): Email {
   };
 }
 
-export function answerDue(params: SessionEmail & { answerBy: Date }): Email {
+export function answerDue(
+  params: SessionEmail & { answerBy: Date; otherAnswered: boolean; deliveredIfUnanswered: boolean },
+): Email {
+  const packageOwner = params.recipient === "student" ? "your" : `${params.otherPartyName}'s`;
   return {
     to: params.to,
     subject: `Did ${params.courseLabel} with ${params.otherPartyName} happen?`,
@@ -300,9 +305,9 @@ export function answerDue(params: SessionEmail & { answerBy: Date }): Email {
       `${params.name},`,
       "",
       `${params.courseLabel} with ${params.otherPartyName} on ${formatDayTime(params.scheduledAt)} has finished.`,
-      `You both answer whether it happened. Answer by ${formatDayTime(params.answerBy)}.`,
+      `${params.otherAnswered ? "Tell us" : "You both answer"} whether it happened. Answer by ${formatDayTime(params.answerBy)}.`,
       "",
-      "If neither of you answers by then, it settles as attended.",
+      `If you don't answer by then, ${lapseCopy(params.deliveredIfUnanswered, packageOwner)}.`,
       "",
       sessionUrl(params),
       ...SIGN_OFF,
@@ -328,7 +333,7 @@ function settledCopy(
         line: `You and ${params.otherPartyName} both confirmed it happened. It is settled.`,
       };
     case "auto_released":
-      return { label: "Settled", line: "The answer window closed, so it settled as attended." };
+      return { label: "Settled", line: "The answer window closed, so it counts as delivered." };
     case "disputed":
       return {
         label: "Under review",

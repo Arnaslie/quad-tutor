@@ -1,4 +1,19 @@
-import { and, eq, exists, gt, gte, inArray, isNotNull, isNull, lte, ne, not, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  exists,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  ne,
+  not,
+  sql,
+  type Column,
+  type SQL,
+} from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -16,13 +31,14 @@ import {
   user,
 } from "@/server/db/schema";
 import { tutorUser } from "@/server/modules/engagements/access";
+import { deliveredIfUnanswered } from "@/server/modules/engagements/answer-outcome";
 import { LATE_CANCEL_HOURS, reminderDueAt } from "@/server/modules/engagements/attendance";
 import { displayName } from "@/server/modules/identity/display-name";
 import { notifyUnreadMessages } from "@/server/modules/messaging/alerts";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 import { REJECTION_REASON_COPY } from "@/server/modules/tutoring/proof-rules";
 
-import { sendEmail, type Email } from "./email";
+import { EmailError, sendEmail, type Email } from "./email";
 import {
   answerDue,
   claimNeedsNewProof,
@@ -96,6 +112,7 @@ type Marker = "bookedNotifiedAt" | "cancelNotifiedAt" | "answerPromptedAt" | "se
 async function claimAndSend(params: {
   sessionId: string;
   marker: Marker;
+  unchanged: SQL | undefined;
   also?: Partial<typeof sessionBooking.$inferInsert>;
   emails: Email[];
 }): Promise<number> {
@@ -104,21 +121,50 @@ async function claimAndSend(params: {
   const claimed = await db
     .update(sessionBooking)
     .set({ ...params.also, [params.marker]: claimedAt })
-    .where(and(eq(sessionBooking.id, params.sessionId), isNull(column)))
+    .where(and(eq(sessionBooking.id, params.sessionId), isNull(column), params.unchanged))
     .returning({ id: sessionBooking.id });
   if (claimed.length === 0) return 0;
 
-  try {
-    for (const email of params.emails) await sendEmail(email);
-    return params.emails.length;
-  } catch (error) {
-    await db
-      .update(sessionBooking)
-      .set({ [params.marker]: null })
-      .where(and(eq(sessionBooking.id, params.sessionId), eq(column, claimedAt)));
-    console.error(`[notifications] ${params.marker} ${params.sessionId} not sent`, error);
-    return 0;
+  let sent = 0;
+  for (const email of params.emails) {
+    try {
+      await sendEmail(email);
+      sent += 1;
+    } catch (error) {
+      if (error instanceof EmailError && error.terminal) {
+        console.error(
+          `[notifications] ${params.marker} ${params.sessionId} refused (${error.status}), not retrying`,
+        );
+        continue;
+      }
+      await db
+        .update(sessionBooking)
+        .set({ [params.marker]: null })
+        .where(and(eq(sessionBooking.id, params.sessionId), eq(column, claimedAt)));
+      console.error(`[notifications] ${params.marker} ${params.sessionId} not sent`, error);
+      return 0;
+    }
   }
+  return sent;
+}
+
+function answersUnchanged(row: SessionRow): SQL | undefined {
+  const same = (column: Column, value: Date | null) =>
+    value ? isNotNull(column) : isNull(column);
+  return and(
+    same(sessionBooking.studentConfirmedAt, row.studentConfirmedAt),
+    same(sessionBooking.studentDeniedAt, row.studentDeniedAt),
+    same(sessionBooking.tutorConfirmedAt, row.tutorConfirmedAt),
+    same(sessionBooking.tutorDeniedAt, row.tutorDeniedAt),
+  );
+}
+
+function answerOf(row: SessionRow, side: Side): "confirmed" | "denied" | null {
+  const [confirmed, denied] =
+    side === "student"
+      ? [row.studentConfirmedAt, row.studentDeniedAt]
+      : [row.tutorConfirmedAt, row.tutorDeniedAt];
+  return confirmed ? "confirmed" : denied ? "denied" : null;
 }
 
 function sessionQuery() {
@@ -253,6 +299,7 @@ export async function notifyBookedSessions(institutionId: string): Promise<numbe
     sent += await claimAndSend({
       sessionId: row.sessionId,
       marker: "bookedNotifiedAt",
+      unchanged: eq(sessionBooking.status, "scheduled"),
       also: { notifiedLocation: row.location },
       emails: SIDES.map((side) => ({
         ...sessionBooked({
@@ -285,6 +332,12 @@ export async function notifyCancelledSessions(institutionId: string): Promise<nu
     sent += await claimAndSend({
       sessionId: row.sessionId,
       marker: "cancelNotifiedAt",
+      unchanged: and(
+        eq(sessionBooking.status, "cancelled"),
+        row.bookedNotifiedAt
+          ? isNotNull(sessionBooking.bookedNotifiedAt)
+          : isNull(sessionBooking.bookedNotifiedAt),
+      ),
       emails: row.bookedNotifiedAt
         ? [
             {
@@ -320,11 +373,18 @@ export async function notifyAnswersDue(institutionId: string): Promise<number> {
   for (const row of rows) {
     const answerBy = row.confirmationWindowEndsAt;
     if (!answerBy) continue;
+    const answers = { student: answerOf(row, "student"), tutor: answerOf(row, "tutor") };
     sent += await claimAndSend({
       sessionId: row.sessionId,
       marker: "answerPromptedAt",
-      emails: SIDES.filter((side) => !answeredAt(row, side)).map((side) => ({
-        ...answerDue({ ...addressed(row, side), answerBy }),
+      unchanged: and(eq(sessionBooking.status, "scheduled"), answersUnchanged(row)),
+      emails: SIDES.filter((side) => !answers[side]).map((side) => ({
+        ...answerDue({
+          ...addressed(row, side),
+          answerBy,
+          otherAnswered: answers[side === "student" ? "tutor" : "student"] !== null,
+          deliveredIfUnanswered: deliveredIfUnanswered(answers),
+        }),
         idempotencyKey: `session-answer-due/${row.sessionId}/${side}`,
       })),
     });
@@ -363,6 +423,7 @@ export async function notifySettledSessions(institutionId: string): Promise<numb
     sent += await claimAndSend({
       sessionId: row.sessionId,
       marker: "settledNotifiedAt",
+      unchanged: eq(sessionBooking.resolution, resolution),
       emails: settledRecipients(row).map((side) => ({
         ...sessionSettled({ ...addressed(row, side), resolution }),
         idempotencyKey: `session-settled/${row.sessionId}/${resolution}/${side}`,
