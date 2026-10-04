@@ -5,7 +5,7 @@ import type { Actor } from "@/server/modules/identity/actor";
 import { MessagesLink } from "./messages-link";
 import { NAV, type Surface } from "./nav-items";
 import { NavLink } from "./nav-link";
-import { SignOutButton } from "./sign-out-button";
+import { ProfileMenu } from "./profile-menu";
 import { SurfaceSwitch } from "./surface-switch";
 
 const HOME: Record<Surface, string> = {
@@ -62,12 +62,9 @@ export function AppShell({
           ) : null}
 
           <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
-            <span className="hidden max-w-[16rem] truncate text-sm text-muted lg:block">
-              {actor.email}
-            </span>
             {unread === undefined ? null : <MessagesLink unread={unread} />}
             <SurfaceSwitch surface={surface} isTutor={actor.tutorProfileId !== null} />
-            <SignOutButton />
+            <ProfileMenu name={actor.name} email={actor.email} />
           </div>
         </div>
       </header>
