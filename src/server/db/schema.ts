@@ -454,7 +454,7 @@ export const sessionBooking = pgTable(
     notifiedLocation: text("notified_location"),
     locationChangedAt: timestamp("location_changed_at", { withTimezone: true })
       .notNull()
-      .defaultNow(),
+      .default(sql`date_trunc('milliseconds', now())`),
 
     status: sessionStatus("status").notNull().default("scheduled"),
 

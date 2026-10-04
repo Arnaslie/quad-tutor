@@ -120,6 +120,13 @@
       "when": 1791129057906,
       "tag": "0016_notify_lease",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791129926685,
+      "tag": "0017_location_stamp_ms",
+      "breakpoints": true
     }
   ]
 }

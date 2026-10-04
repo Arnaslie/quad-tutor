@@ -80,14 +80,14 @@ export async function sendEmail(message: Email): Promise<void> {
   });
 
   if (response.ok) return;
-  if (response.status !== 409) {
-    await response.body?.cancel();
-    throw new EmailError(`Resend refused the message (${response.status})`, response.status);
-  }
   const name = await errorName(response);
-  if (name === "invalid_idempotent_request") {
+  if (response.status === 409 && name === "invalid_idempotent_request") {
     console.warn(`[email] ${message.idempotencyKey} already delivered`);
     return;
   }
-  throw new EmailError(`Resend refused the message (409 ${name ?? "unnamed"})`, 409, name);
+  throw new EmailError(
+    `Resend refused the message (${response.status} ${name ?? "unnamed"})`,
+    response.status,
+    name,
+  );
 }

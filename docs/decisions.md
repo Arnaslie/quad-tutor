@@ -145,8 +145,9 @@ and only then stamps its timestamp, so the sweep and the `after()` call from the
 that caused it send once between them, and a send cut off mid-flight is retried once the
 lease lapses (Resend dedupes the key for ~24h). Request emails work the same way on
 `match_request`. One lease per row means a second kind of email for the same row can
-wait for the next sweep. A reused key whose body has since changed (Resend's
-`invalid_idempotent_request`) counts as delivered. The copy
+wait for the next sweep. The booked and moved keys carry `location_changed_at` and a
+hash of the spot, so a reused key whose body has since changed (Resend's
+`invalid_idempotent_request`) can only mean the wording changed, and counts as delivered. The copy
 never mentions late cancels or no-shows: those are reliability facts and stay unseen.
 These are not filtered by blocks — a block stops messages, not word of a session that
 was paid for.
