@@ -1,0 +1,43 @@
+# Applies merged migrations to production on every push to main.
+#
+# Vercel builds main in parallel, so on its own this would race the deploy. The
+# gate is Vercel's Deployment Checks: with this `migrate` job selected there, a
+# production deployment is not promoted until migrations succeed, and a failed
+# migration leaves the previous deployment serving.
+#
+# It runs here rather than in the Vercel build because a Vercel build has no
+# .git, so migrate-guard.mjs could not prove HEAD == origin/main. On a full
+# checkout the guard runs unchanged.
+#
+# No paths filter: Vercel waits for this check on every main commit.
+name: migrate
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_UNPOOLED }}
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "DATABASE_URL_UNPOOLED must be set as a repository secret."
+            exit 1
+          fi
+          npm run db:migrate

@@ -46,6 +46,11 @@ npm run db:seed      # idempotent local campus: courses, professors, exams, tuto
 npm run db:demo      # re-runnable: drives the real functions to a populated session board
 ```
 
+Production migrations are automatic: `.github/workflows/migrate.yml` runs `db:migrate` on
+every push to main using the `DATABASE_URL_UNPOOLED` repo secret (Neon's direct URL;
+pgbouncer breaks the migrator). Vercel Deployment Checks must list its `migrate` job, or
+new code can go live before its tables exist.
+
 The deadlines in the product (12h request expiry, 24h confirmation window, term-end
 refunds) are only as accurate as the sweep that enforces them. `GET /api/cron` runs it,
 guarded by `CRON_SECRET` and scheduled by `.github/workflows/cron.yml`
