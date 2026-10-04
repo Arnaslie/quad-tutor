@@ -22,7 +22,9 @@ try {
 }
 if (isLocalHost(host)) process.exit(0);
 
-console.log(`Migrating ${host} — checking this checkout matches origin/main…`);
+console.log(
+  `Migrating ${process.env.CI ? "the remote database" : host} — checking this checkout matches origin/main…`,
+);
 
 try {
   git("fetch", "--quiet", "origin", "main");

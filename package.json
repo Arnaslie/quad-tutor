@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --env-file-if-exists=.env.local --import tsx --test \"src/**/*.test.ts\"",
     "db:generate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs generate",
+    "db:check-journal": "node ./src/server/db/check-journal.mjs",
     "db:migrate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs migrate",
     "db:seed": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/seed.ts",
     "db:catalog": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/seed.ts --catalog",
