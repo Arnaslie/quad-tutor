@@ -112,7 +112,7 @@ Beyond the conflicts, public reviews would not work here even if they were allow
 |---|---|
 | **Paid renewals feed the hidden ranker** | **Recommended (MVP).** Detailed below. |
 | Tell tutors the rule | **Recommended (MVP).** The incentive only works if tutors know about it. They see the rule, never their score or rank. |
-| Lower take on same-pair renewals | Strong lever, but it is a money choice. It narrows the $7.70 gap exactly where leakage happens. Question 4. |
+| Lower take on same-pair renewals | **Superseded.** The take is now 10% capped at $100 per tutor per term (`docs/decisions.md`, Product). Question 4. |
 | Through-final as the default renewal offer | Turns 3–4 leakage moments per term into one (`decisions.md:284-288`). Product choice. Question 5. |
 | Direct "renew with this tutor" mid-term, skipping the deck and a new request | Removes friction at the leakage moment. The top-up reasoning applies: matching cost is sunk. It is a bigger build, so post-MVP. Question 6. |
 | Detect or redact contact details in messages | Reject. Message content never feeds anything (`decisions.md:174-177`). It is trivially bypassed, and the pair meets in person at session one anyway. |
@@ -202,10 +202,12 @@ bandit.
 3. **Tell tutors that on-app renewals raise their ranking?** Recommend yes, rule only.
    Alternative: say nothing. That avoids gaming talk, but then the incentive does not
    exist for anyone who does not already know.
-4. **Money: lower the take on same-pair renewals (for example 22% to 15%)?** Recommend
-   not yet. Revisit once renewal rates exist to compare against. Alternative: ship it
-   now, because renewal is exactly where leakage concentrates and the reduced take is
-   cheaper than the lost package.
+4. ~~**Money: lower the take on same-pair renewals (for example 22% to 15%)?**~~
+   **Answered 2026-10-05, by a different lever:** the flat 22% becomes 10% of every
+   session, capped at $100 per tutor per term, after which the tutor keeps 100%. The
+   cash gap falls from $7.70 to $3.50 a session, and to zero for the busy tutors with
+   the most reason to leave. No separate renewal rate. Recorded in `docs/decisions.md`
+   (Product). The 22% figures above are as written on 2026-10-04.
 5. **Product: offer "through the final" first when an existing pair renews mid-term?**
    Recommend yes. It collapses several leakage moments into one. Alternative: keep
    exam-anchored as the default everywhere, for consistency and a smaller ask.
