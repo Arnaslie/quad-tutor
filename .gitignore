@@ -49,3 +49,10 @@ next-env.d.ts
 
 # local stand-in for the private Blob store (dev only)
 /.proof-store/
+
+# caveman rule files for other AI tools; Claude Code uses the global CLAUDE.md
+/.cursor/
+/.windsurf/
+/.clinerules/
+/.opencode/
+/.github/copilot-instructions.md
