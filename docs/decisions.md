@@ -262,7 +262,8 @@ the user without a cascade.
 
 **Tutor side: hidden per-course quality score.** Bayesian shrinkage toward the mean at
 low sample counts, plus bandit-style exploration so new tutors get real shots instead
-of starving at the bottom. Never publicly visible.
+of starving at the bottom. The score is never publicly visible; since 2026-10-05 its
+input is the course star rating, which has a public face past a threshold (see Ratings).
 
 **At launch n=0 for everyone, so MVP ranking is a deterministic sort.** Ship the
 schema and the stats job now; the Bayesian ranker lands in V1. A learned ranker is
@@ -273,6 +274,125 @@ failed. Timestamped facts, nothing subjective. Surfaced as platform mechanics
 (deposit required, fewer parallel asks), never as a badge or number, always
 recoverable in ~3 clean sessions. Prevention (T-12h confirm, auto-release, check-in)
 comes before any penalty.
+
+### Ratings
+
+Decided 2026-10-05. This reverses the rejection of public star ratings (see Reversed)
+and answers question 1 of `docs/proposals/off-platform-payment.md` ("Public rankings
+and reviews stay rejected?"): **no.** The proposal recommended a hidden ranker only;
+the user chose public, payment-gated ratings instead, as the incentive to stay
+on-app. Build brief: `docs/proposals/public-ratings.md`.
+
+**Only a student who paid rates, once per session, 1–5 stars, with an optional short
+note.** A paid session is a delivered, recognised one: it has a `session_earned`
+ledger row. Ratings go one way. Tutors never rate students; rating students by ability
+stays rejected.
+
+**Two public ratings, an overall one and one per course.** A tutor can be strong in
+Calc I and weak in Organic, so the course rating is the one that matters on a course's
+deck, and the overall rating sits beside it.
+
+- **Overall** shows once the tutor has 10 delivered paid sessions, in any course or
+  courses. It averages every rating the tutor has, across all their courses.
+- **Course** shows once that `tutor_course` has 5 ratings. *To confirm with the user:*
+  the brief read "course rating appears after 5" as five ratings, not five paid
+  sessions in that course. Five sessions can carry one rating, and "5.0 · 1 rating" is
+  the number this threshold exists to prevent.
+- **Shown as average and count**, e.g. "4.7 · 12 ratings", the average to one decimal.
+  Below its threshold a rating reads "New tutor" (overall) or "New in this course",
+  and its average and count never leave the server.
+
+**Which sessions can be rated.**
+
+- **Only sessions settled as attended**: `session_booking.status = 'completed'`, which
+  covers both confirmations, auto-release, and a dispute resolved as attended. A
+  disputed session can be rated only once it resolves as attended. Cancelled sessions
+  and disputes resolved as not attended never can.
+- **An auto-released session can be rated.** The money moved and the session is
+  recognised. A rating writes no reliability fact either, so it cannot launder a
+  silence into an `attended` row.
+- **The session a guarantee refunded can be rated.** It was delivered and recognised,
+  and the platform paid the tutor for it. Excluding it would drop exactly the ratings
+  that explain why someone asked for their money back.
+
+**The window is 14 days from recognition**, the `session_earned` row's `occurred_at`.
+That is long enough to answer after the exam and short enough that the rating is still
+about the session. Nobody is nagged: there is one prompt, on the session page, and no
+email.
+
+**A student can edit their rating, stars and note, until the window closes.** After
+that it is fixed. Changing your mind a day later is ordinary. Being lobbied by a
+classmate a month later is what the lock prevents.
+
+**Notes are tutor-only and anonymous.** They are never public. The tutor sees each
+note, without the student's name or the session date, once its window has closed. The
+delay is what makes it anonymous: a tutor with one session last Tuesday can tell who
+wrote it, and the window cannot be lobbied once it has shut. The tutor sees the same
+two public numbers students see, and never the stars on any single rating.
+Public notes, meaning reviews, were the alternative. They are more useful to a student
+deciding, but they put a peer's written account in front of the whole campus, and
+every one becomes a moderation case.
+
+**Moderation reuses the `message_report` flow.** A tutor can report a note from where
+they read it. It lands in the same `/ops/reports` queue, scoped to the operator's
+campuses, with the same reasons. A new outcome, `removed`, takes the whole rating out
+of every aggregate. It is for ratings that are not about the session, or that are
+harassment, or retaliation in either direction. A low score on its own is never
+grounds for removal.
+
+**The ranker smooths the course rating toward the course mean.** The stats job writes
+two fields on every active `tutor_course`, including those with no ratings:
+
+- `score_sample_count` is the number of ratings.
+- `score_posterior_mean`, in basis points of the 1–5 scale (1★ = 0, 5★ = 10 000), is
+  the Bayesian average `(m·C + Σ stars) / (m + n)`, where:
+  - `m = 5`, the same as the display threshold;
+  - `C` is the mean of every rating in that course on that campus;
+  - if the course has fewer than 20 ratings, `C` is the campus mean, and below 20 on
+    the campus, it is 4.0★.
+
+With n = 0 the posterior is the prior, so an unrated tutor ranks as an average one,
+not a bad one. That means the `scoreSampleCount > 0` guard in `score.ts` goes. The
+weight stays 30.
+
+Campus inflation compresses real averages into roughly 4.5–5.0★. That is a few points
+of score against 40 for a professor match, so stars nudge the deck rather than rule
+it. Revisit the weight with real data. The rest of the formula stays hidden: professor
+match, grade, recency, the silent-expiry penalty, and the weights. Exploration for new
+tutors is still the V1 bandit.
+
+**Ratings never feed reliability**, on either side. They are subjective, and
+reliability is timestamped facts only. A rating never writes a `reliability_event`,
+never reaches the student's standing, and is never written from one.
+
+**A rating can be a reason for a student not to book a tutor. It is never a gate on
+the tutor.** No average delists, hides, caps, deposits, delays a payout, or limits the
+parallel requests of anyone. Its only effects are the number on the card and the
+posterior term in the ranker. A tutor leaves the platform for conduct, through
+reports and a human, never for an average.
+
+**The old objections, answered honestly:**
+
+- *The absence of a rating is itself a signal.* Accepted, because of the threshold.
+  "New tutor" means fewer than 10 sessions and "New in this course" means fewer than
+  five ratings. Both are volume facts, not quality judgements, and the ranker scores
+  them at the prior, so on the deck "new" is not "bad". A student may still prefer the
+  rated tutor. That is the price of the decision, and the bandit is what spends
+  exposure on new tutors deliberately.
+- *Rating inflation.* Expected. On a campus nearly everything will be 4.5 or above,
+  and the public average will carry little information. Its count, and the line
+  between "new" and "rated", carry more. The ranker is relative to the course mean,
+  so inflation compresses the term rather than swamping the other inputs. Payment
+  gating and one rating per session stop the cheapest inflation, friends rating
+  friends for free.
+- *Rating a peer.* The rater and the rated may share a class on Thursday. The tutor
+  never sees who gave which stars. Notes arrive anonymous and only after the window
+  closes, the window shuts lobbying out, and there is no rating in the other direction
+  to trade against.
+- *New: tutors avoiding struggling students.* With double opt-in, a tutor protecting
+  an average can decline the students most likely to rate them low on a bad exam.
+  That is the inversion the ability-rating rejection exists to prevent, arriving by
+  another route. It is not solved here. Watch the decline rates once there is data.
 
 ### Technical
 
@@ -329,10 +449,6 @@ the purpose of the product.
 and proxies for ability — the student who didn't attempt the problem set often
 *couldn't*. It reintroduces the ability rating through the back door.
 
-**Public star ratings.** Nothing to compare against under a ranked deck, and it
-imports every marketplace pathology. Note that positive-only badges do not solve this:
-the *absence* of a badge is itself a signal.
-
 **Lifetime pricing.** Real marginal cost per session — it would be a liability that
 grows with usage, and "lifetime" is meaningless to someone who graduates in four years.
 
@@ -348,6 +464,18 @@ verification plus per-course grade proof replaces them.
 **Nullable `user_id` / a dormant `guardianship` table "kept cheap for later."** A
 nullable FK is `string | null` in every inferred type and every join, forever — paid
 daily for a ruled-out scenario.
+
+---
+
+## Reversed
+
+**Public star ratings — rejected at design, reversed 2026-10-05.** The original
+rejection: *"Nothing to compare against under a ranked deck, and it imports every
+marketplace pathology. Note that positive-only badges do not solve this: the absence
+of a badge is itself a signal."* The user reversed it: a tutor with 10 paid sessions
+has had enough reps to be judged on them, and a public rating that only paid sessions
+can earn is the reason to keep sessions on the app. The objections are answered, or
+accepted with their cost stated, under Ratings.
 
 ---
 
