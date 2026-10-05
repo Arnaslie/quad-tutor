@@ -68,17 +68,17 @@ export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings
   };
 }
 
-export type FeeCapProgress = { chargedMinor: number; capMinor: number };
+export type FeeCapProgress = { chargedMinor: number; capMinor: number; termName: string };
 
-export async function feeCapProgressForTutor(tutor: TutorActor): Promise<FeeCapProgress> {
+export async function feeCapProgressForTutor(tutor: TutorActor): Promise<FeeCapProgress | null> {
   const current = await currentTerm(tutor.institutionId);
-  const chargedMinor = current
-    ? await feeChargedThisTermMinor(db, {
-        tutorProfileId: tutor.tutorProfileId,
-        termId: current.id,
-        institutionId: tutor.institutionId,
-      })
-    : 0;
+  if (!current) return null;
 
-  return { chargedMinor, capMinor: TERM_FEE_CAP_MINOR };
+  const chargedMinor = await feeChargedThisTermMinor(db, {
+    tutorProfileId: tutor.tutorProfileId,
+    termId: current.id,
+    institutionId: tutor.institutionId,
+  });
+
+  return { chargedMinor, capMinor: TERM_FEE_CAP_MINOR, termName: current.name };
 }

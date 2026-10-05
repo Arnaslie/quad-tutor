@@ -14,7 +14,12 @@ import {
 } from "@/server/modules/engagements/reads";
 import { LATE_CANCEL_HOURS } from "@/server/modules/engagements/attendance";
 import { deliveredIfUnanswered, lapseCopy } from "@/server/modules/engagements/answer-outcome";
-import { earningsForTutor } from "@/server/modules/tutoring/earnings";
+import { formatMinor, TAKE_RATE_BP } from "@/server/modules/billing/pricing";
+import {
+  earningsForTutor,
+  feeCapProgressForTutor,
+  type FeeCapProgress,
+} from "@/server/modules/tutoring/earnings";
 import { defaultLocationFor } from "@/server/modules/tutoring/location";
 
 import { displayName } from "@/server/modules/identity/display-name";
@@ -27,9 +32,10 @@ export const metadata: Metadata = { title: "Sessions" };
 
 export default async function TutorSessionsPage() {
   const tutor = await requireTutor();
-  const [board, earnings, location] = await Promise.all([
+  const [board, earnings, feeCap, location] = await Promise.all([
     sessionBoardForTutor(tutor),
     earningsForTutor(tutor),
+    feeCapProgressForTutor(tutor),
     defaultLocationFor(tutor),
   ]);
 
@@ -62,6 +68,8 @@ export default async function TutorSessionsPage() {
         </p>
       </Card>
 
+      {feeCap ? <FeeCapCard progress={feeCap} /> : null}
+
       {total === 0 ? (
         <EmptyState
           icon="calendar"
@@ -82,6 +90,43 @@ export default async function TutorSessionsPage() {
         </>
       )}
     </div>
+  );
+}
+
+function FeeCapCard({ progress }: { progress: FeeCapProgress }) {
+  const { chargedMinor, capMinor, termName } = progress;
+  const capped = chargedMinor >= capMinor;
+  const percent = Math.min(100, Math.round((chargedMinor / capMinor) * 100));
+  const cap = formatMinor(capMinor);
+
+  return (
+    <Card className="flex flex-col gap-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="fee-cap-label" className="text-sm font-medium text-foreground">
+          Platform share
+        </h2>
+        <p className="text-sm text-muted">
+          <span className="font-semibold text-foreground">{formatMinor(chargedMinor)}</span> of{" "}
+          {cap} this term
+        </p>
+      </div>
+      <div
+        role="progressbar"
+        aria-labelledby="fee-cap-label"
+        aria-valuemin={0}
+        aria-valuemax={capMinor / 100}
+        aria-valuenow={Math.min(chargedMinor, capMinor) / 100}
+        aria-valuetext={`${formatMinor(chargedMinor)} of ${cap}`}
+        className="h-2 overflow-hidden rounded-full bg-surface-sunken"
+      >
+        <div className="h-full rounded-full bg-accent" style={{ width: `${percent}%` }} />
+      </div>
+      <p className="text-sm text-muted">
+        {capped
+          ? `You've hit the cap — you keep 100% for the rest of ${termName}.`
+          : `We take ${TAKE_RATE_BP / 100}% of each session until we've taken ${cap} this term. After that, you keep 100%.`}
+      </p>
+    </Card>
   );
 }
 
