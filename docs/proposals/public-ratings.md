@@ -1,7 +1,8 @@
-# Brief: public ratings
+# Brief: public ratings and the renewal signal
 
 Status: **build brief, not started.** The rules are settled in `docs/decisions.md`
-(Ratings). This file is how to build them. Written 2026-10-05 against `origin/main` at
+(Ratings, Renewals). This file is how to build them. Written 2026-10-05 against
+`origin/docs/take-rate-cap` at `36ffa09`. Code refs are the same on `origin/main` at
 `11fa99e`.
 
 ## What exists today
@@ -10,8 +11,8 @@ Status: **build brief, not started.** The rules are settled in `docs/decisions.m
   `score_posterior_mean` (`src/server/db/schema.ts:323-324`) are read in
   `src/server/modules/matching/candidates.ts:74-75,106-107`. Nothing writes them.
 - **`score.ts:55`** only adds the posterior when `scoreSampleCount > 0`. Once a job
-  writes the prior for unrated tutors, that guard would make every rated tutor outrank
-  every unrated one by about 28 points, so it has to go.
+  writes the prior for unrated tutors, that guard would put every unrated tutor below
+  every rated one, by nearly the term's full weight, so it has to go.
 - **Recognition.** `recognise()` (`engagements/confirmation.ts:21-54`) writes
   `session_earned` for every delivered session. It is called from `applySettlement`
   (`:79-82`) and from dispute resolution (`resolveDispute`, `:253`). That ledger row is
@@ -25,6 +26,28 @@ Status: **build brief, not started.** The rules are settled in `docs/decisions.m
   (`src/server/modules/messaging/rules.ts:21`). The queue is `/ops/reports`
   (`src/app/ops/reports/`), and the logic is in `messaging/reports.ts`.
 - **Cron.** The per-campus loop is `src/app/api/cron/route.ts:45-53`.
+- **Renewal data already exists.** `engagement` has `student_profile_id`,
+  `tutor_course_id`, `status` and `completed_at` (`schema.ts:401-434`), indexed on
+  `tutor_course_id`. A trial and a success are both derivable from it with no new
+  writes.
+
+## How stars and renewals share the ranker
+
+`score.ts` has one slot, `posteriorWeight` at 30. It becomes two hidden terms, each
+centred on its own course prior:
+
+```
+score += (ratingPosteriorBp  / 10_000) * ratingWeight     // 15
+score += (renewalPosteriorBp / 10_000) * renewalWeight    // 15
+```
+
+- `RankingWeights.posteriorWeight` splits into `ratingWeight` and `renewalWeight`.
+- `Candidate` gains `renewalPosteriorMeanBp`.
+- Neither term is gated on its sample count, because the job writes the prior at
+  `n = 0`.
+- They are not blended: different scales, different priors, and each weight can be
+  tuned on its own. The 15/15 split is pending the user's confirmation (see
+  `decisions.md`, Renewals).
 
 ## Build
 
@@ -47,6 +70,10 @@ Status: **build brief, not started.** The rules are settled in `docs/decisions.m
 Indexes: `(institution_id, tutor_course_id) where removed_at is null`, and
 `(student_profile_id)`.
 
+On `tutor_course`, add `renewal_trial_count` (integer, not null, default 0) and
+`renewal_posterior_mean` (integer, basis points). The existing
+`score_sample_count` / `score_posterior_mean` carry the star term.
+
 `message_report` becomes the report table for both threads and ratings:
 
 - `thread_id` becomes nullable.
@@ -66,9 +93,14 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   `publicRating(sum, count, unlocked)`, which returns `{ average: "4.7", count }` or
   `null`. The client form imports these, so this file must stay import-free (see the
   CLAUDE.md conventions).
-- **`posterior.ts`** is pure and unit-tested. Given `(Σ stars, n, C, m = 5)` it returns
-  basis points. It also holds the prior fallback: course mean at 20 or more ratings,
-  else the campus mean at 20 or more, else 4.0★.
+- **`src/server/modules/scoring/posterior.ts`** is pure and unit-tested. It holds two
+  functions, both returning basis points:
+  - stars: `(m·C + Σ stars) / (m + n)` with `m = 5`;
+  - renewals: `(successes + 5·C) / (trials + 5)`.
+
+  It also holds the shared prior fallback: the course mean at 20 or more samples, else
+  the campus mean at 20 or more, else a constant (4.0★ for stars, 0.4 for renewals).
+  It lives outside `matching/` so `score.ts` stays the ranker alone.
 - **`capture.ts`** has `rateSession({ actor, sessionId, stars, note })`, with Zod at
   the boundary. It checks four things:
   - the actor is the engagement's student;
@@ -78,10 +110,16 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 
   It upserts on `session_id`, so an edit inside the window is the same call. It writes
   nothing else: no `reliability_event`, and no ledger row.
-- **`aggregate.ts`** has `refreshRatingScores(institutionId)`. It is one
-  `UPDATE tutor_course … FROM (aggregate)`, scoped by `institution_id`, and it writes
-  both fields on every active claim, including `n = 0`, which gets the prior. It is a
-  full recompute, so it is idempotent.
+- **`src/server/modules/scoring/stats.ts`** has `refreshScores(institutionId)`. It
+  is one `UPDATE tutor_course … FROM (ratings aggregate) JOIN (renewal aggregate)`,
+  scoped by `institution_id`, and it writes all four fields on every active claim,
+  including `n = 0`, which gets the prior. It is a full recompute, so it is
+  idempotent. The renewal aggregate works as follows:
+  - a trial is a distinct `(student_profile_id, tutor_course_id)` whose earliest
+    engagement is `completed` or `refunded`;
+  - a success is that pair having any later engagement;
+  - a guarantee-refunded first engagement is a trial with no success unless the pair
+    bought again.
 - **`reads.ts`**:
   - `cardRatings(institutionId, tutorCourseIds)` returns, per card, the course
     `publicRating` and the overall one. Overall is unlocked by counting the tutor's
@@ -89,8 +127,12 @@ Review the plans for the aggregate and for the card read. Neither may read acros
     returns `null`, never the numbers.
   - `notesForTutor(actor)` returns note text and course only, for ratings whose window
     has closed, with no student or date.
-- **`matching/score.ts:55`**: drop the `scoreSampleCount > 0` guard and keep the
-  `null` check. `score.ts` stays pure.
+- **`matching/score.ts`**:
+  - split the weight as above;
+  - drop the `scoreSampleCount > 0` guard at `:55` and keep the `null` checks;
+  - `candidates.ts:74-75,106-107` reads the new column.
+
+  `score.ts` stays pure.
 - **`messaging/reports.ts`**:
   - add `reportRating`, which only the rated tutor can call;
   - teach `reportsForOperator` and `reviewReport` the rating case;
@@ -98,7 +140,7 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 
 ### Sweep (Distributed-systems engineer)
 
-- Call `refreshRatingScores(campus.id)` in the cron loop (`route.ts:45`), wrapped in
+- Call `refreshScores(campus.id)` in the cron loop (`route.ts:45`), wrapped in
   `.catch` like the proof purge, so a failure here never blocks refunds.
 - A rating written between runs reaches the ranker on the next run. The card reads
   live, so the student sees it at once. That lag is fine.
@@ -122,6 +164,10 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 - **Tutor.** Add a "What students wrote" list on `src/app/(tutor)/tutor/courses/page.tsx`,
   with a report button on each note. The tutor's own two public numbers sit beside it.
   Nothing else: no position, no per-rating stars.
+- **Rule copy.** Add one line on the tutor home (`src/app/(tutor)/tutor/page.tsx`):
+  *"Students who book you again through Quad Tutor move you up for that course."*
+  Ship it in the same PR as the renewal term, never before: until then the line would
+  be false.
 - **Ops.** `/ops/reports` lists rating reports beside thread reports, and the review
   form offers `removed`.
 
@@ -134,10 +180,15 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   `reliability/` reads `session_rating`.
 - No rating value gates a tutor anywhere: no `where` on stars outside the aggregate.
 - Every query carries `institution_id`.
+- No surface shows a renewal rate, a trial count or a posterior, to anyone.
 
 ## Order
 
-One PR: schema, capture, card. It is useful on its own, because the display reads
-live. A second PR adds the aggregate, the cron hook and the `score.ts` guard fix,
-which is the ranking change. Moderation can ride with either, but it has to be in
-before ratings ship to students.
+1. **Ratings.** Schema, capture, card and moderation. It is useful on its own,
+   because the display reads live, and moderation has to be in before ratings reach
+   students.
+2. **Ranker.** The renewal columns, `scoring/`, the cron hook, the `score.ts` split
+   and guard fix, and the tutor rule line. This PR is the whole ranking change.
+
+The next item after both is direct mid-term renewal. Its proposal comes before it is
+built.

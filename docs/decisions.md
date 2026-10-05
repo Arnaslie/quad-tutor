@@ -262,8 +262,9 @@ the user without a cascade.
 
 **Tutor side: hidden per-course quality score.** Bayesian shrinkage toward the mean at
 low sample counts, plus bandit-style exploration so new tutors get real shots instead
-of starving at the bottom. The score is never publicly visible; since 2026-10-05 its
-input is the course star rating, which has a public face past a threshold (see Ratings).
+of starving at the bottom. The score is never publicly visible. Since 2026-10-05 it has
+two inputs: the course star rating, which has a public face past a threshold (see
+Ratings), and the on-app renewal rate, which never does (see Renewals).
 
 **At launch n=0 for everyone, so MVP ranking is a deterministic sort.** Ship the
 schema and the stats job now; the Bayesian ranker lands in V1. A learned ranker is
@@ -353,13 +354,13 @@ two fields on every active `tutor_course`, including those with no ratings:
 
 With n = 0 the posterior is the prior, so an unrated tutor ranks as an average one,
 not a bad one. That means the `scoreSampleCount > 0` guard in `score.ts` goes. The
-weight stays 30.
+term gets 15 of the slot's 30 points; renewals get the other 15 (see Renewals).
 
-Campus inflation compresses real averages into roughly 4.5–5.0★. That is a few points
-of score against 40 for a professor match, so stars nudge the deck rather than rule
-it. Revisit the weight with real data. The rest of the formula stays hidden: professor
-match, grade, recency, the silent-expiry penalty, and the weights. Exploration for new
-tutors is still the V1 bandit.
+Campus inflation compresses real averages into roughly 4.5–5.0★. At weight 15 that is
+about two points of score against 40 for a professor match, so stars nudge the deck
+rather than rule it. Revisit the weight with real data. The rest of the formula stays
+hidden: professor match, grade, recency, the silent-expiry penalty, the renewal term,
+and the weights. Exploration for new tutors is still the V1 bandit.
 
 **Ratings never feed reliability**, on either side. They are subjective, and
 reliability is timestamped facts only. A rating never writes a `reliability_event`,
@@ -393,6 +394,59 @@ reports and a human, never for an average.
   an average can decline the students most likely to rate them low on a bad exam.
   That is the inversion the ability-rating rejection exists to prevent, arriving by
   another route. It is not solved here. Watch the decline rates once there is data.
+
+### Renewals
+
+Decided 2026-10-05. These are the answers to questions 3, 5 and 6 of
+`docs/proposals/off-platform-payment.md`. Question 2 is under Rejected. Question 4 is
+the take cap under Product.
+
+**Renewing through the app raises a tutor's ranking, and tutors are told so.** The
+proposal's signal is the on-app renewal rate per (tutor, course):
+
+- **A trial** is a distinct student whose first engagement with that `tutor_course`
+  has ended, `completed` or `refunded`. It counts per pair, so a student counts once.
+- **A success** is that student buying another engagement from the same
+  `tutor_course`. A top-up counts.
+- **A guarantee refund counts as a failed trial.**
+
+Renewal is the event that cash removes, and it costs two paid packages to fake.
+
+**Stars and renewals are two separate hidden terms, 15 points each.** They split the
+30 that the posterior slot had, so earned signals carry the same weight against
+professor match and grade as before. Both are smoothed toward the course mean with
+prior strength 5, and both fall back from course to campus once there are fewer than
+20 samples:
+
+- **Stars:** see Ratings.
+- **Renewals:** a Beta-binomial `(successes + 5·C) / (trials + 5)`. The last-resort
+  prior is 0.4, a placeholder until there is data.
+
+They are not blended into one number. They have different scales, different priors
+and different failure modes: stars inflate, and renewals read a student who passed and
+stopped as a loss. Keeping them apart lets either weight be tuned without re-deriving
+the other. *To confirm with the user:* 15/15 is the recommendation. The alternative is
+to keep stars at 30 and add renewals at 30 on top, which makes earned signals rival a
+professor match.
+
+**Tutors get the rule, never the number.** One line on the tutor home: *"Students who
+book you again through Quad Tutor move you up for that course."* The tutor sees no
+renewal rate, no trial count and no position. The renewal term never reaches a student
+in any form, and like ratings it never feeds reliability or gates anyone.
+
+**A mid-term renewal offers "through the final" first.** When an existing pair books
+again with exam-anchored sessions still possible, "through the final" is the default
+and the exam-anchored package is the second option. Each renewal is a leakage moment,
+and this turns three or four of them a term into one. The end-of-term top-up rule is
+unchanged. This settles the renewal half of the open question *Package length vs.
+disintermediation*. The first-purchase default is still exam-anchored.
+
+**Direct mid-term renewal is the next item after public ratings.** A pair renews with
+the same tutor from their thread or the session page, without going back through the
+deck or making a new request. The matching cost is sunk, which is the same reasoning
+as the top-up. The tutor still has to have open slots, and booking from posted hours is
+already their consent. *To confirm when it is proposed:* whether a direct renewal
+skips the tutor's accept step entirely, or keeps a lighter one.
 
 ### Technical
 
@@ -464,6 +518,13 @@ verification plus per-course grade proof replaces them.
 **Nullable `user_id` / a dormant `guardianship` table "kept cheap for later."** A
 nullable FK is `string | null` in every inferred type and every join, forever — paid
 daily for a ruled-out scenario.
+
+**Course locks until a tutor has X sessions or courses (2026-10-05, question 2 of
+`docs/proposals/off-platform-payment.md`).** They cut supply in the weed-out courses,
+which are the whole seeded catalog, so a locked tutor has nowhere to earn X. Session
+count is the credential of the generalist marketplace, the one the wedge exists to
+beat, and a locked-out tutor has more reason to tutor for cash, not less. A verified
+grade and a professor match are the credibility gate.
 
 ---
 
