@@ -95,7 +95,10 @@ drift:
   the fee row too and the room returns.
 - **Concurrency.** `recognise()` locks the `tutor_profile` row before reading the
   meter, so two sessions for one tutor recognised at the same moment serialise and the
-  second sees the first's fee. Every path locks the session first and the tutor second.
+  second sees the first's fee. `recognise()` takes the tutor lock after the session
+  lock. `purchasePackage` (`engagements/purchase.ts`) and `setDefaultLocation`
+  (`tutoring/location.ts`) take the tutor first, but never wait on a session being
+  settled; keep it that way.
 - **Rounding.** Integer minor units only:
   `fee = min(floor(session × 1000 / 10000), max(0, 10000 − meter))`. Floor rounds in the
   tutor's favour, and the session that crosses the line takes a partial fee (the 29th

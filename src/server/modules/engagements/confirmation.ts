@@ -41,7 +41,7 @@ async function recognise(
     .select({ id: tutorProfile.id })
     .from(tutorProfile)
     .where(eq(tutorProfile.id, session.tutorProfileId))
-    .for("update");
+    .for("no key update");
 
   const sessionMinor = perSessionMinor(session);
   const charged = await feeChargedThisTermMinor(tx, {
