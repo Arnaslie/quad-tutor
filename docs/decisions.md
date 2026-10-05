@@ -101,8 +101,18 @@ drift:
   tutor's favour, and the session that crosses the line takes a partial fee (the 29th
   at $35 pays $2.00), so the meter lands on exactly $100.00 and never over. A
   through-final session ($31.50) pays $3.15 and caps on the 32nd.
-- **The meter is the tutor's, never the student's.** Whether a tutor is capped says how
-  busy they are, which is an ordering. It never reaches a student-facing shape or
+- **The platform absorbs card processing, before and after the cap.** "Keep 100%" is
+  literally true. At Stripe's standard US card rate a $140 four-pack costs about $4.36
+  to collect, roughly $1.10 a session: a third of the $3.50 fee before the cap and a
+  straight loss after it, plus Connect's per-payout charge. Passing processing through
+  to capped tutors was the alternative, and was rejected to keep the promise simple.
+- **The guarantee's cost is accepted as is.** A guarantee refund now costs the platform
+  the tutor's $31.50 plus processing, about nine sessions of fee where it used to be
+  four. The guarantee terms are unchanged.
+- **The tutor sees their own meter; no student ever does.** The earnings page shows
+  progress toward the cap ("$64 of $100 this term"), because the incentive only works
+  if a busy tutor knows how close they are. Whether a tutor is capped says how busy
+  they are, which is an ordering, so it never reaches a student-facing shape or
   `score.ts`.
 
 **Seed ~10–30 weed-out courses. Not the full catalog.** Concentration buys patience;
@@ -367,14 +377,6 @@ real cancellation data, deliberately — this is currently a default, not a deci
 engineering. Two adults on one campus with no safeguarding reason to stay on-platform.
 Price it in rather than trying to build against it. The take cap (see Product) is the
 pricing half of that.
-
-**Who pays card processing past the cap.** At Stripe's standard US card rate, a $140
-four-pack costs about $4.36 to collect, roughly $1.10 a session — a third of the $3.50
-fee before the cap and a straight loss after it, plus Connect's per-payout charge. A
-guarantee refund now costs the platform the tutor's $31.50 plus processing, about nine
-sessions of fee where it used to be four. Absorbing both keeps "100% past the cap"
-literally true; the alternative is passing processing through to the tutor once
-capped. Not decided.
 
 **Course catalog ingestion.** UA reportedly runs Banner 9, whose
 `StudentRegistrationSsb` JSON endpoints are said to be reachable across 750+
