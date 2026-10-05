@@ -1,9 +1,14 @@
 import { and, eq, lte, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { engagement, reliabilityEvent, sessionBooking } from "@/server/db/schema";
+import {
+  engagement,
+  reliabilityEvent,
+  sessionBooking,
+  tutorProfile,
+} from "@/server/db/schema";
 import type { Actor } from "@/server/modules/identity/actor";
-import { record } from "@/server/modules/billing/ledger";
+import { feeChargedThisTermMinor, record } from "@/server/modules/billing/ledger";
 import { perSessionMinor, splitMinor } from "@/server/modules/billing/pricing";
 
 import {
@@ -28,10 +33,23 @@ async function recognise(
     | "pricePaidMinor"
     | "sessionsPurchased"
     | "currency"
+    | "tutorProfileId"
+    | "termId"
   >,
 ): Promise<void> {
+  await tx
+    .select({ id: tutorProfile.id })
+    .from(tutorProfile)
+    .where(eq(tutorProfile.id, session.tutorProfileId))
+    .for("update");
+
   const sessionMinor = perSessionMinor(session);
-  const { tutorMinor } = splitMinor(sessionMinor);
+  const charged = await feeChargedThisTermMinor(tx, {
+    tutorProfileId: session.tutorProfileId,
+    termId: session.termId,
+    institutionId: session.institutionId,
+  });
+  const { tutorMinor, platformMinor } = splitMinor(sessionMinor, charged);
 
   await record(tx, [
     {
@@ -48,6 +66,14 @@ async function recognise(
       sessionId: session.sessionId,
       type: "tutor_payout",
       amountMinor: tutorMinor,
+      currency: session.currency,
+    },
+    {
+      engagementId: session.engagementId,
+      institutionId: session.institutionId,
+      sessionId: session.sessionId,
+      type: "platform_fee",
+      amountMinor: platformMinor,
       currency: session.currency,
     },
   ]);
