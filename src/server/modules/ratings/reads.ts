@@ -172,6 +172,7 @@ export function studentRating(actor: Actor, sessionId: string) {
 
 export type SessionRatingState = {
   open: boolean;
+  removed: boolean;
   closesAt: Date;
   rating: { stars: number; note: string | null } | null;
 };
@@ -186,6 +187,7 @@ export async function sessionRatingState(
   const removed = row.removedAt !== null;
   return {
     open: row.open && !removed,
+    removed,
     closesAt: row.closesAt,
     rating: row.stars !== null && !removed ? { stars: row.stars, note: row.note } : null,
   };

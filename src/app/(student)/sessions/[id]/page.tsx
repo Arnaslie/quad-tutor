@@ -127,9 +127,11 @@ function RatingCard({
       <Card className="flex flex-col gap-1 text-sm">
         <h2 className="text-base font-medium">Rating closed</h2>
         <p className="text-muted">
-          {state.rating
-            ? `You gave this session ${state.rating.stars} of 5. It can't be changed now.`
-            : "The window to rate this session has passed."}
+          {state.removed
+            ? "Your rating for this session was removed after a review."
+            : state.rating
+              ? `You gave this session ${state.rating.stars} of 5. It can't be changed now.`
+              : "The window to rate this session has passed."}
         </p>
       </Card>
     );

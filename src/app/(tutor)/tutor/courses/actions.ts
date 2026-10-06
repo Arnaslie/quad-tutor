@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import type { MessageActionState } from "@/app/messages/actions";
+import { failure } from "@/app/messages/action-state";
+import type { ReportState } from "@/components/report-form";
 import { requireTutor } from "@/server/modules/identity/actor";
 import { ratingReportInput } from "@/server/modules/messaging/input";
 import { reportRating } from "@/server/modules/messaging/reports";
-import { MessagingError } from "@/server/modules/messaging/threads";
 import { TutoringError, claimCourse } from "@/server/modules/tutoring/courses";
 import { claimCourseInput, submitProofInput } from "@/server/modules/tutoring/input";
 import { VerificationError, submitProof } from "@/server/modules/tutoring/verification";
@@ -77,9 +77,9 @@ export async function submitProofAction(
 }
 
 export async function reportRatingAction(
-  _previous: MessageActionState,
+  _previous: ReportState,
   formData: FormData,
-): Promise<MessageActionState> {
+): Promise<ReportState> {
   const tutor = await requireTutor();
   const parsed = ratingReportInput.safeParse({
     sessionRatingId: formData.get("sessionRatingId"),
@@ -93,10 +93,7 @@ export async function reportRatingAction(
   try {
     await reportRating({ actor: tutor, ...parsed.data });
   } catch (error) {
-    if (error instanceof MessagingError) return { status: "error", message: error.message };
-    throw error;
+    return failure(error);
   }
-
-  revalidatePath("/tutor/courses");
   return { status: "sent" };
 }

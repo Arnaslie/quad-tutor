@@ -6,7 +6,8 @@ import { Button } from "@/components/button";
 import { Field, Textarea } from "@/components/field";
 import { MESSAGE_MAX_LENGTH } from "@/server/modules/messaging/rules";
 
-import { sendAction, type MessageActionState } from "../actions";
+import type { MessageActionState } from "../action-state";
+import { sendAction } from "../actions";
 
 const INITIAL: MessageActionState = { status: "idle" };
 

@@ -6,13 +6,14 @@ import { EmptyState } from "@/components/empty-state";
 import { Field, Select } from "@/components/field";
 import { PageHeader } from "@/components/page-header";
 import { RatingLine } from "@/components/rating";
-import { ReportForm } from "@/app/messages/[threadId]/report-form";
-import { requireTutor } from "@/server/modules/identity/actor";
+import { ReportForm } from "@/components/report-form";
 import {
   professorsForCourse,
   searchSeededCourses,
   termsForInstitution,
 } from "@/server/modules/catalog/courses";
+import { requireTutor } from "@/server/modules/identity/actor";
+import { cardRatings, notesForTutor, type CardRatings, type TutorNote } from "@/server/modules/ratings/reads";
 import {
   coursesForTutor,
   type TutorCourseClaim,
@@ -21,7 +22,6 @@ import {
   PROOF_KIND_LABEL,
   REJECTION_REASON_COPY,
 } from "@/server/modules/tutoring/proof-rules";
-import { cardRatings, notesForTutor, type CardRatings, type TutorNote } from "@/server/modules/ratings/reads";
 
 import { reportRatingAction } from "./actions";
 import { ClaimForm } from "./claim-form";
@@ -156,7 +156,6 @@ export default async function TutorCoursesPage({
           </form>
         </Card>
       )}
-
     </div>
   );
 }
@@ -232,15 +231,17 @@ function ClaimCard({ claim, ratings }: { claim: TutorCourseClaim; ratings?: Card
         <p className="text-sm text-muted">Proof: {PROOF_KIND_LABEL[claim.proofKind]}</p>
       ) : null}
       <p className="text-sm text-foreground">{statusCopy(claim)}</p>
-      <div className="flex flex-col gap-1 text-sm">
-        <RatingLine rating={ratings?.courseRating ?? null} empty="New in this course" />
-        <RatingLine
-          rating={ratings?.overallRating ?? null}
-          empty="New tutor"
-          label="Overall"
-          secondary
-        />
-      </div>
+      {claim.status === "active" ? (
+        <div className="flex flex-col gap-1 text-sm">
+          <RatingLine rating={ratings?.courseRating ?? null} empty="New in this course" />
+          <RatingLine
+            rating={ratings?.overallRating ?? null}
+            empty="New tutor"
+            label="Overall"
+            secondary
+          />
+        </div>
+      ) : null}
       {claim.status === "rejected" && claim.rejectionReason ? (
         <RejectionNote reason={claim.rejectionReason} />
       ) : null}

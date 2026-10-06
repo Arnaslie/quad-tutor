@@ -83,6 +83,9 @@ const id = useId();          // client components only
 | `Select` | every `<select>` prop, plus `invalid?: boolean` |
 | `Textarea` | every `<textarea>` prop, plus `invalid?: boolean` |
 
+`Field` points its one child control at the hint or error with `aria-describedby`, so
+pass the control directly, not wrapped.
+
 `Field` does **not** generate the id — `useId` would drag every form across the
 server boundary. Pass the same id to both. `error` replaces `hint` and renders
 with `role="alert"`.

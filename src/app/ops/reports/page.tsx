@@ -8,6 +8,8 @@ import { requireOperator } from "@/server/modules/identity/actor";
 import { reportsForOperator } from "@/server/modules/messaging/reports";
 import { REPORT_OUTCOME_LABEL, REPORT_REASON_LABEL } from "@/server/modules/messaging/rules";
 
+import { reportTitle } from "./report-title";
+
 export const metadata: Metadata = { title: "Reports" };
 
 export default async function ReportsPage() {
@@ -33,10 +35,7 @@ export default async function ReportsPage() {
                   {formatDayTime(report.createdAt)}
                 </p>
                 <p className="font-medium">
-                  {report.subject === "rating"
-                    ? `${report.studentName} rated ${report.tutorName}`
-                    : `${report.studentName} and ${report.tutorName}`}{" "}
-                  · {report.courseLabel}
+                  {reportTitle(report)} · {report.courseLabel}
                 </p>
                 <p className="text-sm text-muted">
                   Reported by {report.reporterName}

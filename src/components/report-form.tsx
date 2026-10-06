@@ -10,9 +10,9 @@ import {
   REPORT_REASON_LABEL,
 } from "@/server/modules/messaging/rules";
 
-import type { MessageActionState } from "../actions";
+export type ReportState = { status: "idle" } | { status: "sent" } | { status: "error"; message: string };
 
-const INITIAL: MessageActionState = { status: "idle" };
+const INITIAL: ReportState = { status: "idle" };
 
 export function ReportForm({
   action,
@@ -22,7 +22,7 @@ export function ReportForm({
   hint,
   sent,
 }: {
-  action: (previous: MessageActionState, formData: FormData) => Promise<MessageActionState>;
+  action: (previous: ReportState, formData: FormData) => Promise<ReportState>;
   field: string;
   value: string;
   label: string;
@@ -35,7 +35,7 @@ export function ReportForm({
 
   if (state.status === "sent") {
     return (
-      <p role="status" className="text-sm text-accent">
+      <p role="status" tabIndex={-1} ref={(node) => node?.focus()} className="text-sm text-accent outline-none">
         {sent}
       </p>
     );

@@ -1,7 +1,7 @@
 import { Button } from "@/components/button";
+import { ReportForm } from "@/components/report-form";
 
 import { blockAction, reportAction } from "../actions";
-import { ReportForm } from "./report-form";
 
 export function ThreadTools({
   threadId,

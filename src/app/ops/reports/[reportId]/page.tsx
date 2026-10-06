@@ -17,6 +17,7 @@ import {
 import { REPORT_OUTCOME_LABEL, REPORT_REASON_LABEL } from "@/server/modules/messaging/rules";
 import { MessagingError } from "@/server/modules/messaging/threads";
 
+import { reportTitle } from "../report-title";
 import { ReviewForm } from "../review-form";
 
 export const metadata: Metadata = { title: "Report" };
@@ -45,9 +46,6 @@ export default async function ReportPage(props: PageProps<"/ops/reports/[reportI
   return (
     <ReportShell
       report={report}
-      title={
-        messages ? `${report.studentName} and ${report.tutorName}` : `${report.studentName} rated ${report.tutorName}`
-      }
       logged={messages !== null}
     >
       {messages ? (
@@ -61,12 +59,10 @@ export default async function ReportPage(props: PageProps<"/ops/reports/[reportI
 
 function ReportShell({
   report,
-  title,
   logged,
   children,
 }: {
   report: ReportItem;
-  title: string;
   logged: boolean;
   children: ReactNode;
 }) {
@@ -74,7 +70,7 @@ function ReportShell({
     <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow={`${report.courseLabel} · ${REPORT_REASON_LABEL[report.reason]}`}
-        title={title}
+        title={reportTitle(report)}
         description={`Reported by ${report.reporterName} on ${formatDayTime(report.createdAt)}.${
           logged ? " This view was logged." : ""
         }`}

@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import { cloneElement, isValidElement, type ComponentProps, type ReactElement, type ReactNode } from "react";
 
 export function Field({
   id,
@@ -13,15 +13,27 @@ export function Field({
   error?: ReactNode;
   children: ReactNode;
 }) {
+  const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
+  const control =
+    describedBy && isValidElement(children)
+      ? cloneElement(children as ReactElement<{ "aria-describedby"?: string }>, {
+          "aria-describedby": describedBy,
+        })
+      : children;
+
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-sm font-medium text-foreground">
         {label}
       </label>
-      {children}
-      {hint && !error ? <p className="text-sm text-muted">{hint}</p> : null}
+      {control}
+      {hint && !error ? (
+        <p id={`${id}-hint`} className="text-sm text-muted">
+          {hint}
+        </p>
+      ) : null}
       {error ? (
-        <p role="alert" className="text-sm text-danger">
+        <p id={`${id}-error`} role="alert" className="text-sm text-danger">
           {error}
         </p>
       ) : null}
