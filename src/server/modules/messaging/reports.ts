@@ -9,6 +9,7 @@ import {
   messageThread,
   messageThreadAccess,
   sessionRating,
+  sessionRatingAccess,
   studentProfile,
   tutorCourse,
   tutorProfile,
@@ -208,19 +209,28 @@ export async function openReportedRating(params: {
   operator: OperatorActor;
   reportId: string;
 }): Promise<ReportItem> {
-  const row = (
-    await reportRows()
-      .where(
-        and(
-          eq(messageReport.id, params.reportId),
-          onOperatorCampus(params.operator),
-          isNotNull(messageReport.sessionRatingId),
-        ),
-      )
-      .limit(1)
-  ).at(0);
-  if (!row) throw new MessagingError("That report does not exist.");
-  return named(row);
+  return db.transaction(async (tx) => {
+    const row = (
+      await reportRows(tx)
+        .where(
+          and(
+            eq(messageReport.id, params.reportId),
+            onOperatorCampus(params.operator),
+            isNotNull(messageReport.sessionRatingId),
+          ),
+        )
+        .limit(1)
+    ).at(0);
+    if (!row?.sessionRatingId) throw new MessagingError("That report does not exist.");
+
+    await tx.insert(sessionRatingAccess).values({
+      institutionId: row.institutionId,
+      sessionRatingId: row.sessionRatingId,
+      reportId: row.id,
+      operatorUserId: params.operator.userId,
+    });
+    return named(row);
+  });
 }
 
 export async function reviewReport(params: {

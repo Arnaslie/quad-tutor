@@ -134,6 +134,13 @@
       "when": 1791254253488,
       "tag": "0018_session_rating",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791325791263,
+      "tag": "0019_session_rating_access",
+      "breakpoints": true
     }
   ]
 }

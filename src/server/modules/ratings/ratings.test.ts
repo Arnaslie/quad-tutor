@@ -22,6 +22,7 @@ import {
   reliabilityEvent,
   sessionBooking,
   sessionRating,
+  sessionRatingAccess,
   studentProfile,
   term,
   tutorCourse,
@@ -131,7 +132,12 @@ async function operatorFor(key: string, institutionId: string): Promise<Operator
   return { ...base, operatorInstitutionIds: [institutionId] };
 }
 
-async function delivered(params: { engagementId: string; count: number; rate?: { tutorCourseId: string; stars: number[] } }) {
+async function delivered(params: {
+  engagementId: string;
+  count: number;
+  rate?: { tutorCourseId: string; stars: number[] };
+  recognisedDaysAgo?: number;
+}) {
   for (let index = 0; index < params.count; index += 1) {
     const [session] = await db
       .insert(sessionBooking)
@@ -149,6 +155,7 @@ async function delivered(params: { engagementId: string; count: number; rate?: {
       sessionId: session.id,
       type: "session_earned",
       amountMinor: 2500,
+      occurredAt: new Date(Date.now() - (params.recognisedDaysAgo ?? 20) * 86_400_000),
     });
     const stars = params.rate?.stars[index];
     if (params.rate && stars) {
@@ -215,6 +222,7 @@ after(async () => {
   const courseIds = (await db.select({ id: course.id }).from(course).where(inArray(course.institutionId, institutions))).map((row) => row.id);
 
   await db.delete(messageThreadAccess).where(inArray(messageThreadAccess.institutionId, institutions));
+  await db.delete(sessionRatingAccess).where(inArray(sessionRatingAccess.institutionId, institutions));
   await db.delete(messageReport).where(inArray(messageReport.institutionId, institutions));
   if (ratings.length) await db.delete(sessionRating).where(inArray(sessionRating.id, ratings));
   if (threads.length) {
@@ -323,15 +331,18 @@ test("card ratings stay null below each threshold and are numbers above it", asy
 
   await delivered({ engagementId: b.id, count: 1 });
   const ten = await cardRatings(home.institutionId, [tutorCourseId, tcB]);
-  assert.deepEqual(ten.get(tutorCourseId), { courseRating: null, overallRating: { average: "4.0", count: 5 } }, "4 course ratings");
-  assert.deepEqual(ten.get(tcB), { courseRating: null, overallRating: { average: "4.0", count: 5 } });
+  assert.deepEqual(ten.get(tutorCourseId), { courseRating: null, overallRating: null }, "4 and 1 course ratings");
+  assert.deepEqual(ten.get(tcB), { courseRating: null, overallRating: null });
 
   await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [3] } });
-  const rated = await cardRatings(home.institutionId, [tutorCourseId]);
-  assert.deepEqual(rated.get(tutorCourseId), {
-    courseRating: { average: "4.2", count: 5 },
-    overallRating: { average: "3.8", count: 6 },
-  });
+  const rated = await cardRatings(home.institutionId, [tutorCourseId, tcB]);
+  const publicA = { average: "4.2", count: 5 };
+  assert.deepEqual(rated.get(tutorCourseId), { courseRating: publicA, overallRating: publicA }, "B's lone rating stays out of overall");
+  assert.deepEqual(rated.get(tcB), { courseRating: null, overallRating: publicA });
+
+  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [1] }, recognisedDaysAgo: 3 });
+  const inWindow = await cardRatings(home.institutionId, [tutorCourseId]);
+  assert.deepEqual(inWindow.get(tutorCourseId), { courseRating: publicA, overallRating: publicA }, "an open-window rating is not counted");
 
   assert.equal((await cardRatings(away.institutionId, [tutorCourseId])).size, 0, "no read across campuses");
 });
@@ -358,14 +369,22 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
 
   await assert.rejects(openReportedThread({ operator: ops, reportId: ratingReport.id }), MessagingError);
   await assert.rejects(openReportedRating({ operator: awayOps, reportId: ratingReport.id }), MessagingError);
+  const audits = async () =>
+    (await db.select({ n: sql<number>`count(*)::int` }).from(sessionRatingAccess).where(eq(sessionRatingAccess.reportId, ratingReport.id)))[0].n;
+  assert.equal(await audits(), 0, "a refused open writes no audit row");
   assert.equal((await openReportedRating({ operator: ops, reportId: ratingReport.id })).sessionRatingId, note.ratingId);
+  const [audit] = await db.select().from(sessionRatingAccess).where(eq(sessionRatingAccess.reportId, ratingReport.id));
+  assert.equal(audit.operatorUserId, ops.userId);
+  assert.equal(audit.sessionRatingId, note.ratingId);
+  assert.equal(audit.institutionId, home.institutionId);
+  assert.equal(await audits(), 1);
   assert.equal((await openReportedThread({ operator: ops, reportId: threadReport.id })).report.id, threadReport.id);
 
   await assert.rejects(reviewReport({ operator: ops, reportId: threadReport.id, outcome: "removed" }), /Only a rating/);
   await reviewReport({ operator: ops, reportId: threadReport.id, outcome: "warned" });
 
   const beforeRemoval = (await cardRatings(home.institutionId, [tutorCourseId])).get(tutorCourseId);
-  assert.equal(beforeRemoval?.overallRating?.count, 6);
+  assert.equal(beforeRemoval?.overallRating?.count, 5);
 
   await assert.rejects(reviewReport({ operator: awayOps, reportId: ratingReport.id, outcome: "removed" }), MessagingError);
   await reviewReport({ operator: ops, reportId: ratingReport.id, outcome: "removed" });
@@ -380,7 +399,7 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
   assert.equal(open.length, 0);
 
   const afterRemoval = (await cardRatings(home.institutionId, [tutorCourseId])).get(tutorCourseId);
-  assert.deepEqual(afterRemoval, { courseRating: null, overallRating: { average: "3.6", count: 5 } });
+  assert.deepEqual(afterRemoval, { courseRating: null, overallRating: null });
   assert.deepEqual(await notesForTutor(tutor), []);
   assert.equal((await sessionRatingState(student, sessionId))?.rating, null);
   await assert.rejects(rateSession({ actor: student, sessionId, stars: 5, note: null }), /removed/);

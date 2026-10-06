@@ -722,3 +722,24 @@ export const messageThreadAccess = pgTable(
   },
   (t) => [index("message_thread_access_thread_idx").on(t.threadId, t.accessedAt)],
 );
+
+export const sessionRatingAccess = pgTable(
+  "session_rating_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    sessionRatingId: uuid("session_rating_id")
+      .notNull()
+      .references(() => sessionRating.id),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => messageReport.id),
+    operatorUserId: text("operator_user_id")
+      .notNull()
+      .references(() => user.id),
+    accessedAt: timestamp("accessed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("session_rating_access_rating_idx").on(t.sessionRatingId, t.accessedAt)],
+);

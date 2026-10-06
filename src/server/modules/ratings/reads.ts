@@ -14,8 +14,11 @@ import {
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { courseLabel } from "@/server/modules/messaging/threads";
 
-import { publicRating, type PublicRating } from "./rules";
+import { MIN_RATINGS, publicRating, type PublicRating } from "./rules";
 import { closesAt, earnedAt } from "./window";
+
+const ratingEarnedAt = earnedAt(sessionRating.sessionId, sessionRating.institutionId);
+const ratingWindowClosed = sql`${closesAt(ratingEarnedAt)} <= now()`;
 
 export type CardRatings = {
   courseRating: PublicRating | null;
@@ -51,6 +54,7 @@ export async function cardRatings(
           eq(sessionRating.institutionId, institutionId),
           isNull(sessionRating.removedAt),
           inArray(tutorCourse.tutorProfileId, tutors),
+          ratingWindowClosed,
         ),
       )
       .groupBy(tutorCourse.tutorProfileId, sessionRating.tutorCourseId),
@@ -72,6 +76,7 @@ export async function cardRatings(
   const sessions = new Map(delivered.map((row) => [row.tutorProfileId, row.sessions]));
   const overall = new Map<string, { sum: number; count: number }>();
   for (const row of perCourse) {
+    if (row.count < MIN_RATINGS) continue;
     const total = overall.get(row.tutorProfileId) ?? { sum: 0, count: 0 };
     overall.set(row.tutorProfileId, { sum: total.sum + row.sum, count: total.count + row.count });
   }
@@ -95,8 +100,6 @@ export type TutorNote = {
   courseLabel: string;
   reported: boolean;
 };
-
-const ratingEarnedAt = earnedAt(sessionRating.sessionId, sessionRating.institutionId);
 
 export async function notesForTutor(actor: TutorActor): Promise<TutorNote[]> {
   const rows = await db
@@ -130,7 +133,7 @@ export async function notesForTutor(actor: TutorActor): Promise<TutorNote[]> {
         eq(tutorCourse.tutorProfileId, actor.tutorProfileId),
         isNull(sessionRating.removedAt),
         isNotNull(sessionRating.note),
-        sql`${closesAt(ratingEarnedAt)} <= now()`,
+        ratingWindowClosed,
       ),
     )
     .orderBy(desc(ratingEarnedAt))
