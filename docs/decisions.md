@@ -299,7 +299,8 @@ deck, and the overall rating sits beside it.
 - **No rating is public until the tutor has 10 delivered paid sessions**, in any
   course or courses. That holds for both the overall rating and every course rating.
 - **Overall** shows when the tutor has at least 10 sessions *and* at least 5 ratings.
-  It averages every rating the tutor has, across all their courses.
+  It averages the ratings in those of the tutor's courses whose own rating is public
+  (see the aggregates rules below).
 - **Course** shows when the tutor has at least 10 sessions *and* that `tutor_course`
   has at least 5 ratings. The threshold counts ratings, not sessions in the course:
   five sessions can carry one rating, and "5.0 · 1 rating" is the number this
@@ -348,6 +349,29 @@ campuses, with the same reasons. A new outcome, `removed`, takes the whole ratin
 of every aggregate. It is for ratings that are not about the session, or that are
 harassment, or retaliation in either direction. A low score on its own is never
 grounds for removal.
+
+**What the aggregates count.** Settled 2026-10-06, from the ratings code review.
+
+- **The gate, restated.** No rating, overall or course, is public until the tutor has
+  10 delivered paid sessions. After that, a course rating needs at least 5 ratings in
+  that course, and the overall rating needs at least one course whose rating is
+  public. The 10 sessions are confirmed by the user. The gate is independent of the
+  take cap: 10 sessions at $35 is about $35 of platform fee, and the $100 cap is
+  reached at about 29 sessions. Neither threshold reads the other.
+- **Only ratings whose 14-day window has closed are counted.** That applies to the
+  course average and count, the overall average and count, and both thresholds. An
+  open rating can still be edited, and a total that moves the day after one session
+  tells the tutor that student's stars. Displayed numbers therefore lag by up to 14
+  days. That is the price, and it is accepted.
+- **The overall rating counts only courses whose own rating is public.** If it
+  averaged every course, a tutor with one public course and one below its threshold
+  could subtract the public course from the overall and recover the hidden one. With
+  this rule the overall rating is built only from numbers that are already public,
+  and it stays "New tutor" until at least one course rating is public.
+- **Opening a rating report is audited, like a thread report.** Each time an operator
+  opens a rating report, an append-only access row records the operator, the report
+  and the time, the same way `message_thread_access` does for threads. Staff see a
+  rating's note only through a report.
 
 **The ranker smooths the course rating toward the course mean.** The stats job writes
 two fields on every active `tutor_course`, including those with no ratings:
