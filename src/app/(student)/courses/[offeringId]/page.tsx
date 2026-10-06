@@ -9,6 +9,7 @@ import { offeringById, upcomingExams } from "@/server/modules/catalog/courses";
 import { requireActor } from "@/server/modules/identity/actor";
 import { buildDeck } from "@/server/modules/matching/candidates";
 import { requestsForStudent, standingFor } from "@/server/modules/matching/requests";
+import { cardRatings } from "@/server/modules/ratings/reads";
 import { MAX_PARALLEL_ASKS } from "@/server/modules/reliability/standing";
 
 import { DemandCapture } from "./demand-capture";
@@ -41,6 +42,11 @@ export default async function TutorDeckPage(props: PageProps<"/courses/[offering
   const pending = requests.filter((request) => request.status === "pending");
   const room = Math.max(0, standing.parallelAskLimit - pending.length);
 
+  const ratings = await cardRatings(
+    actor.institutionId,
+    deck.candidates.map((candidate) => candidate.tutorCourseId),
+  );
+
   const tutors: TutorCard[] = deck.candidates.map((candidate) => ({
     tutorCourseId: candidate.tutorCourseId,
     tutorName: displayName(candidate.tutorName, "tutor"),
@@ -50,6 +56,8 @@ export default async function TutorDeckPage(props: PageProps<"/courses/[offering
     takenUnderProfessorName: candidate.takenUnderProfessorName,
     takenTermName: candidate.takenTermName,
     matchesProfessor: candidate.matchesProfessor,
+    courseRating: ratings.get(candidate.tutorCourseId)?.courseRating ?? null,
+    overallRating: ratings.get(candidate.tutorCourseId)?.overallRating ?? null,
   }));
 
   const nextExam = exams.at(0);

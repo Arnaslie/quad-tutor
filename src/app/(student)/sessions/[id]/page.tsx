@@ -10,9 +10,11 @@ import { PageHeader } from "@/components/page-header";
 import { SessionError } from "@/server/modules/engagements/access";
 import { sessionDetail, type SessionDetail } from "@/server/modules/engagements/reads";
 import { requireActor } from "@/server/modules/identity/actor";
-
-import { SessionActions } from "./session-actions";
 import { displayName } from "@/server/modules/identity/display-name";
+import { sessionRatingState, type SessionRatingState } from "@/server/modules/ratings/reads";
+
+import { RatingForm } from "./rating-form";
+import { SessionActions } from "./session-actions";
 
 export const metadata: Metadata = { title: "Session" };
 
@@ -46,6 +48,7 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
   }
 
   const otherParty = displayName(session.otherPartyName, "tutor");
+  const rating = await sessionRatingState(actor, session.sessionId);
 
   const eyebrow = [
     session.courseCode,
@@ -102,7 +105,52 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
           Answer by {formatDayTime(session.confirmationWindowEndsAt)}.
         </p>
       ) : null}
+
+      {rating ? (
+        <RatingCard sessionId={session.sessionId} state={rating} otherParty={otherParty} />
+      ) : null}
     </div>
+  );
+}
+
+function RatingCard({
+  sessionId,
+  state,
+  otherParty,
+}: {
+  sessionId: string;
+  state: SessionRatingState;
+  otherParty: string;
+}) {
+  if (!state.open) {
+    return (
+      <Card className="flex flex-col gap-1 text-sm">
+        <h2 className="text-base font-medium">Rating closed</h2>
+        <p className="text-muted">
+          {state.removed
+            ? "Your rating for this session was removed after a review."
+            : state.rating
+              ? `You gave this session ${state.rating.stars} of 5. It can't be changed now.`
+              : "The window to rate this session has passed."}
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-base font-medium">Rate this session</h2>
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <Icon name="clock" className="size-4 shrink-0" />
+          You can change it until {formatDayTime(state.closesAt)}.
+        </p>
+      </div>
+      <RatingForm sessionId={sessionId} rating={state.rating} />
+      <p className="text-xs text-muted">
+        {otherParty} sees the average once enough students have rated, never your stars.
+      </p>
+    </Card>
   );
 }
 

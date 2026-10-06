@@ -28,6 +28,9 @@ import { RequestError, requestTutors } from "@/server/modules/matching/requests"
 import { requireActor } from "@/server/modules/identity/actor";
 import { outcomeOf, type AnswerOutcome } from "@/server/modules/engagements/answer-outcome";
 import { notifySessionChangesSoon } from "@/server/modules/notifications/soon";
+import { rateSession } from "@/server/modules/ratings/capture";
+import { rateInput } from "@/server/modules/ratings/input";
+import { RatingError } from "@/server/modules/ratings/window";
 
 export type ActionResult =
   | {
@@ -41,7 +44,8 @@ function toResult(error: unknown): ActionResult {
   if (
     error instanceof RequestError ||
     error instanceof PurchaseError ||
-    error instanceof SessionError
+    error instanceof SessionError ||
+    error instanceof RatingError
   ) {
     return { ok: false, error: error.message };
   }
@@ -320,4 +324,27 @@ export async function deny(
   revalidatePath("/sessions");
   revalidatePath(`/sessions/${parsed.data.sessionId}`);
   return { ok: true, answered: { answer: "denied", outcome } };
+}
+
+export async function rate(
+  _previous: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const actor = await requireActor();
+
+  const parsed = rateInput.safeParse({
+    sessionId: formData.get("sessionId"),
+    stars: formData.get("stars"),
+    note: formData.get("note"),
+  });
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+
+  try {
+    await rateSession({ actor, ...parsed.data });
+  } catch (error) {
+    return toResult(error);
+  }
+
+  revalidatePath(`/sessions/${parsed.data.sessionId}`);
+  return { ok: true, message: "Saved. Thanks for rating it." };
 }

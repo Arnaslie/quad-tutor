@@ -11,7 +11,8 @@ export type IconName =
   | "chevron-down"
   | "pin"
   | "chat"
-  | "flag";
+  | "flag"
+  | "star";
 
 const PATHS: Record<IconName, string> = {
   book: "M4 5.5A2.5 2.5 0 0 1 6.5 3H20v14H6.5A2.5 2.5 0 0 0 4 19.5zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5",
@@ -26,6 +27,7 @@ const PATHS: Record<IconName, string> = {
   "chevron-down": "m6 9 6 6 6-6",
   chat: "M20 11.5a7.5 7.5 0 0 1-11 6.6L4 19.5l1.4-4.4A7.5 7.5 0 1 1 20 11.5z",
   flag: "M5 21V4.5M5 4.5h11l-2 4 2 4H5",
+  star: "m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z",
   pin: "M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z",
 };
 
