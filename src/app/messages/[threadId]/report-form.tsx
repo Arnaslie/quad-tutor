@@ -10,30 +10,44 @@ import {
   REPORT_REASON_LABEL,
 } from "@/server/modules/messaging/rules";
 
-import { reportAction, type MessageActionState } from "../actions";
+import type { MessageActionState } from "../actions";
 
 const INITIAL: MessageActionState = { status: "idle" };
 
-export function ReportForm({ threadId }: { threadId: string }) {
-  const [state, submit, pending] = useActionState(reportAction, INITIAL);
+export function ReportForm({
+  action,
+  field,
+  value,
+  label,
+  hint,
+  sent,
+}: {
+  action: (previous: MessageActionState, formData: FormData) => Promise<MessageActionState>;
+  field: string;
+  value: string;
+  label: string;
+  hint: string;
+  sent: string;
+}) {
+  const [state, submit, pending] = useActionState(action, INITIAL);
   const reasonId = useId();
   const noteId = useId();
 
   if (state.status === "sent") {
     return (
       <p role="status" className="text-sm text-accent">
-        Reported. Someone on the Quad Tutor team will read this conversation.
+        {sent}
       </p>
     );
   }
 
   return (
     <form action={submit} className="flex flex-col gap-3">
-      <input type="hidden" name="threadId" value={threadId} />
+      <input type="hidden" name={field} value={value} />
       <Field
         id={reasonId}
-        label="Report this conversation"
-        hint="Staff can read a conversation only once it is reported."
+        label={label}
+        hint={hint}
         error={state.status === "error" ? state.message : undefined}
       >
         <Select id={reasonId} name="reason" defaultValue="" required>

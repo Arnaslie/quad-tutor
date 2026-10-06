@@ -5,6 +5,8 @@ import { Card } from "@/components/card";
 import { EmptyState } from "@/components/empty-state";
 import { Field, Select } from "@/components/field";
 import { PageHeader } from "@/components/page-header";
+import { RatingLine } from "@/components/rating";
+import { ReportForm } from "@/app/messages/[threadId]/report-form";
 import { requireTutor } from "@/server/modules/identity/actor";
 import {
   professorsForCourse,
@@ -19,7 +21,9 @@ import {
   PROOF_KIND_LABEL,
   REJECTION_REASON_COPY,
 } from "@/server/modules/tutoring/proof-rules";
+import { cardRatings, notesForTutor, type CardRatings, type TutorNote } from "@/server/modules/ratings/reads";
 
+import { reportRatingAction } from "./actions";
 import { ClaimForm } from "./claim-form";
 import { ProofForm } from "./proof-form";
 
@@ -93,6 +97,13 @@ export default async function TutorCoursesPage({
   }
 
   const unclaimed = catalog.filter((entry) => !claimed.has(entry.courseId));
+  const [ratings, notes] = await Promise.all([
+    cardRatings(
+      tutor.institutionId,
+      claims.map((claim) => claim.id),
+    ),
+    notesForTutor(tutor),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -111,11 +122,13 @@ export default async function TutorCoursesPage({
         <ul className="flex flex-col gap-4">
           {claims.map((claim) => (
             <li key={claim.id}>
-              <ClaimCard claim={claim} />
+              <ClaimCard claim={claim} ratings={ratings.get(claim.id)} />
             </li>
           ))}
         </ul>
       )}
+
+      {claims.length === 0 ? null : <StudentNotes notes={notes} />}
 
       {unclaimed.length === 0 ? null : (
         <Card>
@@ -143,11 +156,58 @@ export default async function TutorCoursesPage({
           </form>
         </Card>
       )}
+
     </div>
   );
 }
 
-function ClaimCard({ claim }: { claim: TutorCourseClaim }) {
+function StudentNotes({ notes }: { notes: TutorNote[] }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-lg font-semibold tracking-tight">What students wrote</h2>
+        <p className="text-sm text-muted">
+          Notes show up here once a session&apos;s rating window has closed, without a name or a date.
+        </p>
+      </div>
+      {notes.length === 0 ? (
+        <Card className="text-sm text-muted">No notes yet.</Card>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {notes.map((note) => (
+            <li key={note.ratingId}>
+              <Card className="flex flex-col gap-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted">{note.courseLabel}</p>
+                <p className="whitespace-pre-wrap text-sm">{note.note}</p>
+                {note.reported ? (
+                  <p className="text-sm text-muted">Reported. Waiting for review.</p>
+                ) : (
+                  <details className="rounded-xl border border-border">
+                    <summary className="flex min-h-11 cursor-pointer items-center px-3 text-sm font-medium text-muted marker:content-none">
+                      Report this note
+                    </summary>
+                    <div className="border-t border-border p-3">
+                      <ReportForm
+                        action={reportRatingAction}
+                        field="sessionRatingId"
+                        value={note.ratingId}
+                        label="Why are you reporting it?"
+                        hint="Someone on the Quad Tutor team reads it and can remove the rating."
+                        sent="Reported. Someone on the Quad Tutor team will read it."
+                      />
+                    </div>
+                  </details>
+                )}
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ClaimCard({ claim, ratings }: { claim: TutorCourseClaim; ratings?: CardRatings }) {
   const history = [
     `Took it ${claim.takenTermName}`,
     claim.professorName ? `with Prof. ${claim.professorName}` : null,
@@ -172,6 +232,15 @@ function ClaimCard({ claim }: { claim: TutorCourseClaim }) {
         <p className="text-sm text-muted">Proof: {PROOF_KIND_LABEL[claim.proofKind]}</p>
       ) : null}
       <p className="text-sm text-foreground">{statusCopy(claim)}</p>
+      <div className="flex flex-col gap-1 text-sm">
+        <RatingLine rating={ratings?.courseRating ?? null} empty="New in this course" />
+        <RatingLine
+          rating={ratings?.overallRating ?? null}
+          empty="New tutor"
+          label="Overall"
+          secondary
+        />
+      </div>
       {claim.status === "rejected" && claim.rejectionReason ? (
         <RejectionNote reason={claim.rejectionReason} />
       ) : null}

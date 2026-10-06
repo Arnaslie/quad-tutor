@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import type { MessageActionState } from "@/app/messages/actions";
 import { requireTutor } from "@/server/modules/identity/actor";
+import { ratingReportInput } from "@/server/modules/messaging/input";
+import { reportRating } from "@/server/modules/messaging/reports";
+import { MessagingError } from "@/server/modules/messaging/threads";
 import { TutoringError, claimCourse } from "@/server/modules/tutoring/courses";
 import { claimCourseInput, submitProofInput } from "@/server/modules/tutoring/input";
 import { VerificationError, submitProof } from "@/server/modules/tutoring/verification";
@@ -70,4 +74,29 @@ export async function submitProofAction(
 
   revalidatePath("/tutor/courses");
   redirect("/tutor/courses");
+}
+
+export async function reportRatingAction(
+  _previous: MessageActionState,
+  formData: FormData,
+): Promise<MessageActionState> {
+  const tutor = await requireTutor();
+  const parsed = ratingReportInput.safeParse({
+    sessionRatingId: formData.get("sessionRatingId"),
+    reason: formData.get("reason"),
+    note: formData.get("note") ?? "",
+  });
+  if (!parsed.success) {
+    return { status: "error", message: parsed.error.issues[0]?.message ?? "Pick a reason." };
+  }
+
+  try {
+    await reportRating({ actor: tutor, ...parsed.data });
+  } catch (error) {
+    if (error instanceof MessagingError) return { status: "error", message: error.message };
+    throw error;
+  }
+
+  revalidatePath("/tutor/courses");
+  return { status: "sent" };
 }

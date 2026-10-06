@@ -17,22 +17,26 @@ export default async function ReportsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Reported conversations"
-        description="Opening a conversation is logged against your name. Only reported ones can be opened."
+        title="Reports"
+        description="Conversations and rating notes people reported. Opening a conversation is logged against your name, and only reported ones can be opened."
       />
 
       {reports.length === 0 ? (
-        <EmptyState icon="flag" title="Nothing reported" description="No one on your campuses has reported a conversation." />
+        <EmptyState icon="flag" title="Nothing reported" description="No one on your campuses has reported a conversation or a rating." />
       ) : (
         <ul className="flex flex-col gap-2">
           {reports.map((report) => (
             <li key={report.id}>
               <CardLink href={`/ops/reports/${report.id}`} prefetch={false} className="flex flex-col gap-1">
                 <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                  {REPORT_REASON_LABEL[report.reason]} · {formatDayTime(report.createdAt)}
+                  {report.subject === "rating" ? "Rating" : "Conversation"} · {REPORT_REASON_LABEL[report.reason]} ·{" "}
+                  {formatDayTime(report.createdAt)}
                 </p>
                 <p className="font-medium">
-                  {report.studentName} and {report.tutorName} · {report.courseLabel}
+                  {report.subject === "rating"
+                    ? `${report.studentName} rated ${report.tutorName}`
+                    : `${report.studentName} and ${report.tutorName}`}{" "}
+                  · {report.courseLabel}
                 </p>
                 <p className="text-sm text-muted">
                   Reported by {report.reporterName}
