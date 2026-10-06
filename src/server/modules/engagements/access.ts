@@ -67,6 +67,7 @@ export type SessionContextRow = {
   courseTitle: string;
   section: string | null;
   professorName: string | null;
+  termId: string;
   termName: string;
   threadId: string | null;
 };
@@ -104,6 +105,7 @@ export function sessionContext(exec: Executor = db) {
       courseTitle: course.title,
       section: courseOffering.section,
       professorName: professor.name,
+      termId: term.id,
       termName: term.name,
       threadId: messageThread.id,
     })

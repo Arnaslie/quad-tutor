@@ -7,6 +7,9 @@ import {
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
+import { feeChargedThisTermMinor } from "@/server/modules/billing/ledger";
+import { TERM_FEE_CAP_MINOR } from "@/server/modules/billing/pricing";
+import { currentTerm } from "@/server/modules/catalog/courses";
 import type { TutorActor } from "@/server/modules/identity/actor";
 
 export type TutorEarnings = {
@@ -63,4 +66,19 @@ export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings
     currency: totals.currency,
     sessionsDelivered: totals.sessionsDelivered,
   };
+}
+
+export type FeeCapProgress = { chargedMinor: number; capMinor: number };
+
+export async function feeCapProgressForTutor(tutor: TutorActor): Promise<FeeCapProgress> {
+  const current = await currentTerm(tutor.institutionId);
+  const chargedMinor = current
+    ? await feeChargedThisTermMinor(db, {
+        tutorProfileId: tutor.tutorProfileId,
+        termId: current.id,
+        institutionId: tutor.institutionId,
+      })
+    : 0;
+
+  return { chargedMinor, capMinor: TERM_FEE_CAP_MINOR };
 }

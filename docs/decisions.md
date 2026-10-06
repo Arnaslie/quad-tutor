@@ -5,7 +5,7 @@ Full source analysis in `docs/research/`. Where a decision came from independent
 agreement between reviewers who could not see each other's work, that is noted — it
 is the strongest signal in here.
 
-Last updated: 2026-09-29.
+Last updated: 2026-10-05.
 
 ---
 
@@ -42,8 +42,8 @@ where everyone talks.
 **A single session exists, but only as an end-of-term top-up.** One session, full
 price, offered to a student who has finished a package with that tutor when fewer
 weeks remain in the term than a package has sessions. It is not a cheaper door into
-the product: a cold one-off has no dosage, a 22% take on $35 does not pay for
-course-level matching, and a pair who met once has no reason to come back through the
+the product: a cold one-off has no dosage, a $3.50 take on a $35 session does not pay
+for course-level matching, and a pair who met once has no reason to come back through the
 platform. A renewal shares none of that — the matching cost is sunk, the tutor is
 known, the dosage already happened, and the pair could already have left and did not.
 
@@ -54,6 +54,69 @@ directly. The second is free and easier, so the package rule was producing leaka
 the exact moment the relationship is worth most. Top-ups chain: a booked-but-unheld
 session leaves nothing to book, so a second can be bought before the first happens,
 which is what finals week actually looks like.
+
+**The take is 10% of each session, capped at $100 per tutor per term.** The session
+price stays $35 and the student pays nothing on top: a student booking fee was
+rejected because the student is already paying for the tutor. Once a tutor's platform
+share for a term reaches $100, they keep 100% for the rest of that term. This replaces
+the flat 22%, which was too high. At $35 a session the cap is reached on the 29th
+session — $1,000 of sessions, about $900 of it to the tutor. The ceiling is 100
+tutors × $100 × 3 terms ≈ $30k a year, before processing.
+
+The cap is the disintermediation lever, not just a discount. The tutor with the most
+to gain from cash is the busy one, and past the cap that tutor's on-app sessions cost
+them nothing. It supersedes a lower take on renewals only (question 4 in
+`docs/proposals/off-platform-payment.md`).
+
+Each rule below keeps the cap a sum over the ledger rather than a counter that can
+drift:
+
+- **Scope.** One meter per `tutor_profile` per `term`, across all of that tutor's
+  courses and students. The term is the engagement's (`course_offering.term_id`), not
+  the date the session settles, so a dispute resolved after term end counts against
+  the term it was taught in.
+- **Charged at recognition, never at purchase.** A package is deferred revenue, and its
+  split is unknown until each session is delivered. The fee is fixed in `recognise()`
+  (`engagements/confirmation.ts`), the one place a session becomes revenue — two
+  confirmations, auto-release, or a dispute resolved as attended. It is written as a
+  `platform_fee` row beside `session_earned` and `tutor_payout`, so every delivered
+  session satisfies `session_earned = tutor_payout + platform_fee`, and the meter is
+  the sum of `platform_fee` for that tutor and term.
+- **Fixed once written.** A session's fee never changes after recognition. Nothing is
+  re-priced retroactively, in either direction.
+- **Reversals follow the tutor's pay.** A term-end refund returns only undelivered
+  sessions, which never charged a fee, so it does not touch the meter. A guarantee
+  refund does not give room back: the platform eats that refund rather than clawing
+  back from the tutor, and returning cap room would make the tutor's next session pay
+  for it — the same clawback by another route. A disputed session charges nothing while
+  it holds; resolved as attended, it is charged at resolution against the meter as it
+  stands then; resolved as not attended, never. Nothing today reverses a recognised
+  session. If something ever does, and takes the tutor's pay back with it, it reverses
+  the fee row too and the room returns.
+- **Concurrency.** `recognise()` locks the `tutor_profile` row before reading the
+  meter, so two sessions for one tutor recognised at the same moment serialise and the
+  second sees the first's fee. `recognise()` takes the tutor lock after the session
+  lock. `purchasePackage` (`engagements/purchase.ts`) and `setDefaultLocation`
+  (`tutoring/location.ts`) take the tutor first, but never wait on a session being
+  settled; keep it that way.
+- **Rounding.** Integer minor units only:
+  `fee = min(floor(session × 1000 / 10000), max(0, 10000 − meter))`. Floor rounds in the
+  tutor's favour, and the session that crosses the line takes a partial fee (the 29th
+  at $35 pays $2.00), so the meter lands on exactly $100.00 and never over. A
+  through-final session ($31.50) pays $3.15 and caps on the 32nd.
+- **The platform absorbs card processing, before and after the cap.** "Keep 100%" is
+  literally true. At Stripe's standard US card rate a $140 four-pack costs about $4.36
+  to collect, roughly $1.10 a session: a third of the $3.50 fee before the cap and a
+  straight loss after it, plus Connect's per-payout charge. Passing processing through
+  to capped tutors was the alternative, and was rejected to keep the promise simple.
+- **The guarantee's cost is accepted as is.** A guarantee refund now costs the platform
+  the tutor's $31.50 plus processing, about nine sessions of fee where it used to be
+  four. The guarantee terms are unchanged.
+- **The tutor sees their own meter; no student ever does.** The earnings page shows
+  progress toward the cap ("$64 of $100 this term"), because the incentive only works
+  if a busy tutor knows how close they are. Whether a tutor is capped says how busy
+  they are, which is an ordering, so it never reaches a student-facing shape or
+  `score.ts`.
 
 **Seed ~10–30 weed-out courses. Not the full catalog.** Concentration buys patience;
 a full catalog is vanity work.
@@ -315,7 +378,8 @@ real cancellation data, deliberately — this is currently a default, not a deci
 
 **Disintermediation generally** — now the top business risk, and not solvable by
 engineering. Two adults on one campus with no safeguarding reason to stay on-platform.
-Price it in rather than trying to build against it.
+Price it in rather than trying to build against it. The take cap (see Product) is the
+pricing half of that.
 
 **Course catalog ingestion.** UA reportedly runs Banner 9, whose
 `StudentRegistrationSsb` JSON endpoints are said to be reachable across 750+
@@ -352,8 +416,9 @@ paying, not non-consumers.**
 
 **3. Get the real course codes and the CAS peer-tutor pay rate** from the UA contact.
 Known wage floor: UA on-campus ~$10/hr, America Reads/Counts $12/hr, athletics
-tutoring $10–17.50. Target roughly 2×: **$25–30/hr to the tutor, $30–40 session price,
-20–25% take** — beating Wyzant (~34%) and Preply (~33%).
+tutoring $10–17.50. Target roughly 2×: **$25–30/hr to the tutor, $30–40 session price.**
+The 20–25% take this originally targeted is superseded by 10% capped at $100 per tutor
+per term (see Product) — well under Wyzant (~34%) and Preply (~33%).
 
 ---
 
