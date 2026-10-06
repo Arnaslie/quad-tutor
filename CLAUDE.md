@@ -100,14 +100,20 @@ code string — or a renumbering forks a tutor's record.
 invalidates the entire value proposition, so the system has to know about it.
 
 **`(tutor, course)` is the core relationship, not `tutor`.** Someone can be excellent
-at Calc I and mediocre at Organic. Quality scores are per-course. They are hidden, and
+at Calc I and mediocre at Organic. Ratings and ranking are per-course, and they are two
+different things. The **public rating** — star average and count, per course and
+overall, once past its threshold (`docs/decisions.md`, Ratings) — may cross to the
+client. The **ranking score** and every input to it — smoothed posteriors, the renewal
+term, sample counts, weights, and any rating below its threshold — are hidden, and
 hidden means **stripped server-side before anything crosses into a client component** —
-a server component serialises its props into the RSC payload, so a score that is merely
-never rendered is still one "view source" away from being a public rating. Map the
-scored row down to the narrow shape the card displays. The test for any field added to
-that shape: *could a student reconstruct an ordering from it?* A professor name, a term
-and a grade are facts about the pair and are the student's to see; a decayed recency
-weight or a sample count is the arithmetic performed on them, and is not.
+a server component serialises its props into the RSC payload, so a value that is merely
+never rendered is still one "view source" away from being public. Map the scored row
+down to the narrow shape the card displays, and apply rating thresholds before that
+mapping. The test for any field added to that shape: *is it a fact about the pair or a
+public rating past its threshold, or is it the ranker's arithmetic?* A professor name, a
+term, a grade and "4.7 · 12 ratings" are the student's to see; a smoothed posterior, a
+decayed recency weight, a renewal rate or a below-threshold count is how the deck was
+ordered, and is not.
 
 **A user can be both tutor and student.** On a peer campus this is routine, not an
 edge case. Keep the user/profile split and keep the score histories separate.
