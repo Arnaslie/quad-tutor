@@ -35,6 +35,10 @@ export default async function TutorInboxPage() {
         description="Accept or pass. Passing costs you nothing — letting one expire does."
       />
 
+      <p className="text-sm text-muted">
+        Students who book you again through Quad Tutor move you up for that course.
+      </p>
+
       {requests.length === 0 ? (
         <NothingWaiting tutor={tutor} location={location} />
       ) : (

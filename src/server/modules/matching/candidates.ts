@@ -71,8 +71,8 @@ export async function buildDeck(params: {
       takenUnderProfessorId: tutorCourse.takenUnderProfessorId,
       takenTermStartsOn: term.startsOn,
       takenTermName: term.name,
-      scoreSampleCount: tutorCourse.scoreSampleCount,
       scorePosteriorMeanBp: tutorCourse.scorePosteriorMean,
+      renewalPosteriorMeanBp: tutorCourse.renewalPosteriorMean,
       recentSilentExpiries: silentExpiries,
       tutorProfileId: tutorProfile.id,
       tutorName: user.name,
@@ -103,8 +103,8 @@ export async function buildDeck(params: {
     matchesProfessor:
       target.professorId !== null &&
       row.takenUnderProfessorId === target.professorId,
-    scoreSampleCount: row.scoreSampleCount,
     scorePosteriorMeanBp: row.scorePosteriorMeanBp,
+    renewalPosteriorMeanBp: row.renewalPosteriorMeanBp,
     recentSilentExpiries: row.recentSilentExpiries,
   }));
 

@@ -324,6 +324,8 @@ export const tutorCourse = pgTable(
 
     scoreSampleCount: integer("score_sample_count").notNull().default(0),
     scorePosteriorMean: integer("score_posterior_mean"),
+    renewalTrialCount: integer("renewal_trial_count").notNull().default(0),
+    renewalPosteriorMean: integer("renewal_posterior_mean"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

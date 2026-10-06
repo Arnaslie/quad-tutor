@@ -5,7 +5,8 @@ export type RankingWeights = {
 
   recencyDecayPerTerm: number;
 
-  posteriorWeight: number;
+  ratingWeight: number;
+  renewalWeight: number;
 
   silentExpiryPenalty: number;
 };
@@ -15,7 +16,8 @@ export const DEFAULT_WEIGHTS: RankingWeights = {
   gradeA: 20,
   gradeAMinus: 12,
   recencyDecayPerTerm: 5,
-  posteriorWeight: 30,
+  ratingWeight: 15,
+  renewalWeight: 15,
   silentExpiryPenalty: 15,
 };
 
@@ -25,9 +27,9 @@ export type Candidate = {
 
   termsSinceTaken: number;
   matchesProfessor: boolean;
-  scoreSampleCount: number;
 
   scorePosteriorMeanBp: number | null;
+  renewalPosteriorMeanBp: number | null;
 
   recentSilentExpiries: number;
 };
@@ -52,8 +54,11 @@ export function scoreCandidate(
   score -= candidate.termsSinceTaken * weights.recencyDecayPerTerm;
   score -= candidate.recentSilentExpiries * weights.silentExpiryPenalty;
 
-  if (candidate.scoreSampleCount > 0 && candidate.scorePosteriorMeanBp !== null) {
-    score += (candidate.scorePosteriorMeanBp / 10_000) * weights.posteriorWeight;
+  if (candidate.scorePosteriorMeanBp !== null) {
+    score += (candidate.scorePosteriorMeanBp / 10_000) * weights.ratingWeight;
+  }
+  if (candidate.renewalPosteriorMeanBp !== null) {
+    score += (candidate.renewalPosteriorMeanBp / 10_000) * weights.renewalWeight;
   }
 
   return score;
