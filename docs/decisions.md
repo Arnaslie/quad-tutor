@@ -377,8 +377,19 @@ grounds for removal.
   ratings into every change.
 
   The cost is accepted. Public numbers can lag until a batch fills, and a course with
-  few sessions may wait a long time. Ratings in a pool that never reaches 3 are never
-  published.
+  few sessions may wait until term end.
+
+  **Leftovers are released at term end** (user, 2026-10-06). A course's waiting pool is
+  also released once the term of every rating in it has ended, if it holds at least 2
+  ratings (`TERM_END_MIN`). The term is the engagement's (`course_offering.term_id`).
+  The normal 5/3 rule is unchanged, so a term-end release is only ever a pool that
+  rule would not release. A pool of 1 is never released, at term end or after; it
+  waits for later ratings in the same course to join it. Released ratings still have
+  to reach 5 before the course rating is public, so a term-end batch can show the
+  tutor its notes without the course going public.
+
+  Accepted risk: a term-end batch of 2 lets a tutor narrow down which of two students
+  gave which stars and note. The user chose that over losing the feedback.
 
   Not covered, and accepted: when an operator removes a rating, the totals change
   immediately. That only happens when an operator acts.

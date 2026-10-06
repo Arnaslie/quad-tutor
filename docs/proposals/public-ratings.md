@@ -99,7 +99,8 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 ### Server: `src/server/modules/ratings/` (Backend engineer)
 
 - **`rules.ts`** imports nothing. It holds `STARS = [1..5]`, `NOTE_MAX = 280`,
-  `WINDOW_DAYS = 7`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, `RELEASE_BATCH = 3`, and
+  `WINDOW_DAYS = 7`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, `RELEASE_BATCH = 3`,
+  `TERM_END_MIN = 2`, and
   `publicRating(sum, count, sessions)`, which returns `{ average: "4.7", count }` when
   `sessions >= MIN_SESSIONS && count >= MIN_RATINGS`, and `null` otherwise. The same
   gate applies to both ratings, always with the tutor's total sessions:
@@ -168,11 +169,17 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   - `removed_at` is null;
   - `released_at` is null.
 
-  If the course has no released rating yet, the pool needs at least `MIN_RATINGS`.
-  Otherwise it needs at least `RELEASE_BATCH`. When the pool is big enough, every
-  rating in it gets the same `released_at`. A pool too small is left alone, with no
-  partial release and no term-end flush. The closed-window predicate lives only here
-  now.
+  A pool is released when any of these holds:
+  - it is the course's first release and the pool has at least `MIN_RATINGS`;
+  - the course has released before and the pool has at least `RELEASE_BATCH`;
+  - every rating in it belongs to an engagement whose term
+    (`course_offering.term_id` → `term.ends_on`) has ended, and the pool has at least
+    `TERM_END_MIN`.
+
+  A released pool gets one shared `released_at` for all its ratings. Otherwise the
+  pool is left alone; there are no partial releases. A pool of 1 is never released and
+  waits for a later rating in the same course. The closed-window predicate lives only
+  here now.
 - **`matching/score.ts`**:
   - split the weight as above;
   - drop the `scoreSampleCount > 0` guard at `:55` and keep the `null` checks;
@@ -234,8 +241,12 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 - An unreleased rating, whether its window is open or closed, changes no public
   number: not a course average, an overall average, a count, or a threshold crossing.
   It also shows no note and changes no `tutor_course` score field.
-- A release never moves fewer than 3 ratings, and the first release for a course
-  never moves fewer than 5. Test the 2-pending case and the 4-pending-first case.
+- During a term, a release never moves fewer than 3 ratings, and a course's first
+  release never moves fewer than 5.
+- At term end, a pool of 2 or more is released, a pool of 1 is not, and a pool with
+  any rating from a term still running is not.
+- Test these cases: 2 pending mid-term, 4 pending as a first release mid-term, 2
+  pending after term end, and 1 pending after term end.
 - Two concurrent `releaseRatings` runs on the same pool release it once, as one
   batch.
 - `stats.ts`, `cardRatings` and `notesForTutor` share one counted predicate. The
