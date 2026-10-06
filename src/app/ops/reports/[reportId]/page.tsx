@@ -58,7 +58,7 @@ export default async function ReportedThreadPage(props: PageProps<"/ops/reports/
             Reviewed {formatDayTime(report.reviewedAt)}: {REPORT_OUTCOME_LABEL[report.outcome]}.
           </p>
         ) : (
-          <ReviewForm reportId={report.id} />
+          <ReviewForm reportId={report.id} subject={report.subject} />
         )}
       </Card>
     </div>

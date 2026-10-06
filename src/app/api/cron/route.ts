@@ -6,6 +6,7 @@ import { releaseLapsedConfirmations } from "@/server/modules/engagements/confirm
 import { runTermEndRefunds } from "@/server/modules/engagements/termEnd";
 import { runNotifications } from "@/server/modules/notifications/dispatch";
 import { expireStaleRequests } from "@/server/modules/matching/requests";
+import { releaseRatings } from "@/server/modules/ratings/release";
 import { purgeProofFiles } from "@/server/modules/tutoring/verification";
 
 export const maxDuration = 60;
@@ -41,16 +42,21 @@ export async function GET(request: Request) {
     let refundedMinor = 0;
     let notified = 0;
     let purgedProofs = 0;
+    let releasedRatings = 0;
 
     for (const campus of campuses) {
-      const refunds = await runTermEndRefunds(campus.id);
-      refunded += refunds.length;
-      refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
-      notified += await runNotifications(campus.id);
+      releasedRatings += await releaseRatings(campus.id).catch((error) => {
+        console.error(`[cron] rating release for ${campus.slug} failed`, error);
+        return 0;
+      });
       purgedProofs += await purgeProofFiles(campus.id).catch((error) => {
         console.error(`[cron] proof purge for ${campus.slug} failed`, error);
         return 0;
       });
+      const refunds = await runTermEndRefunds(campus.id);
+      refunded += refunds.length;
+      refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
+      notified += await runNotifications(campus.id);
     }
 
     return Response.json({
@@ -60,6 +66,7 @@ export async function GET(request: Request) {
       refundedMinor,
       notified,
       purgedProofs,
+      releasedRatings,
       campuses: campuses.length,
       tookMs: Date.now() - startedAt,
     });

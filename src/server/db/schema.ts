@@ -4,6 +4,7 @@ import {
   uuid,
   text,
   integer,
+  smallint,
   boolean,
   timestamp,
   date,
@@ -20,6 +21,7 @@ import {
   REPORT_REASONS,
   THREAD_SIDES,
 } from "../modules/messaging/rules";
+import { NOTE_MAX } from "../modules/ratings/rules";
 
 import { user, session, account, verification } from "./auth-schema";
 
@@ -521,7 +523,12 @@ export const ledgerEntry = pgTable(
     stripeReference: text("stripe_reference"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("ledger_entry_engagement_idx").on(t.engagementId, t.occurredAt)],
+  (t) => [
+    index("ledger_entry_engagement_idx").on(t.engagementId, t.occurredAt),
+    index("ledger_entry_session_earned_idx")
+      .on(t.sessionId)
+      .where(sql`${t.type} = 'session_earned'`),
+  ],
 );
 
 export const tutorAvailability = pgTable(
@@ -630,6 +637,45 @@ export const userBlock = pgTable(
   ],
 );
 
+export const sessionRating = pgTable(
+  "session_rating",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessionBooking.id),
+    tutorCourseId: uuid("tutor_course_id")
+      .notNull()
+      .references(() => tutorCourse.id),
+    studentProfileId: uuid("student_profile_id")
+      .notNull()
+      .references(() => studentProfile.id),
+    stars: smallint("stars").notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedByUserId: text("removed_by_user_id").references(() => user.id),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("session_rating_session_idx").on(t.sessionId),
+    index("session_rating_counted_idx")
+      .on(t.institutionId, t.tutorCourseId)
+      .where(sql`${t.removedAt} is null and ${t.releasedAt} is not null`),
+    index("session_rating_pending_idx")
+      .on(t.institutionId, t.tutorCourseId)
+      .where(sql`${t.releasedAt} is null and ${t.removedAt} is null`),
+    index("session_rating_student_idx").on(t.studentProfileId),
+    check("session_rating_stars", sql`${t.stars} between 1 and 5`),
+    check("session_rating_note_length", sql`char_length(${t.note}) <= ${sql.raw(String(NOTE_MAX))}`),
+  ],
+);
+
 export const messageReport = pgTable(
   "message_report",
   {
@@ -637,9 +683,8 @@ export const messageReport = pgTable(
     institutionId: uuid("institution_id")
       .notNull()
       .references(() => institution.id),
-    threadId: uuid("thread_id")
-      .notNull()
-      .references(() => messageThread.id),
+    threadId: uuid("thread_id").references(() => messageThread.id),
+    sessionRatingId: uuid("session_rating_id").references(() => sessionRating.id),
     reporterUserId: text("reporter_user_id")
       .notNull()
       .references(() => user.id),
@@ -654,6 +699,10 @@ export const messageReport = pgTable(
   (t) => [
     index("message_report_institution_idx").on(t.institutionId, t.reviewedAt),
     index("message_report_thread_idx").on(t.threadId),
+    uniqueIndex("message_report_open_rating_idx")
+      .on(t.sessionRatingId)
+      .where(sql`${t.reviewedAt} is null`),
+    check("message_report_subject", sql`num_nonnulls(${t.threadId}, ${t.sessionRatingId}) = 1`),
   ],
 );
 
@@ -676,4 +725,25 @@ export const messageThreadAccess = pgTable(
     accessedAt: timestamp("accessed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("message_thread_access_thread_idx").on(t.threadId, t.accessedAt)],
+);
+
+export const sessionRatingAccess = pgTable(
+  "session_rating_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    sessionRatingId: uuid("session_rating_id")
+      .notNull()
+      .references(() => sessionRating.id),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => messageReport.id),
+    operatorUserId: text("operator_user_id")
+      .notNull()
+      .references(() => user.id),
+    accessedAt: timestamp("accessed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("session_rating_access_rating_idx").on(t.sessionRatingId, t.accessedAt)],
 );
