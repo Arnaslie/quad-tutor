@@ -325,17 +325,17 @@ deck, and the overall rating sits beside it.
   and the platform paid the tutor for it. Excluding it would drop exactly the ratings
   that explain why someone asked for their money back.
 
-**The window is 14 days from recognition**, the `session_earned` row's `occurred_at`.
-That is long enough to answer after the exam and short enough that the rating is still
-about the session. Nobody is nagged: there is one prompt, on the session page, and no
-email.
+**The window is 7 days from recognition**, the `session_earned` row's `occurred_at`.
+It was shortened from 14 days on 2026-10-06. That is long enough to answer once the
+session has sunk in, and short enough that the rating is still about the session.
+Nobody is nagged: there is one prompt, on the session page, and no email.
 
 **A student can edit their rating, stars and note, until the window closes.** After
 that it is fixed. Changing your mind a day later is ordinary. Being lobbied by a
 classmate a month later is what the lock prevents.
 
 **Notes are tutor-only and anonymous.** They are never public. The tutor sees each
-note, without the student's name or the session date, once its window has closed. The
+note, without the student's name or the session date, once it is released (below). The
 delay is what makes it anonymous: a tutor with one session last Tuesday can tell who
 wrote it, and the window cannot be lobbied once it has shut. The tutor sees the same
 two public numbers students see, and never the stars on any single rating.
@@ -358,11 +358,35 @@ grounds for removal.
   public. The 10 sessions are confirmed by the user. The gate is independent of the
   take cap: 10 sessions at $35 is about $35 of platform fee, and the $100 cap is
   reached at about 29 sessions. Neither threshold reads the other.
-- **Only ratings whose 14-day window has closed are counted.** That applies to the
-  course average and count, the overall average and count, and both thresholds. An
-  open rating can still be edited, and a total that moves the day after one session
-  tells the tutor that student's stars. Displayed numbers therefore lag by up to 14
-  days. That is the price, and it is accepted.
+- **Only released ratings are counted** (batches decided by the user, 2026-10-06).
+  This replaces "only ratings whose window has closed". A rating's 7-day window must
+  close before it can be released, and released is what counts. That applies to:
+  - the course average and count;
+  - the overall average and count;
+  - both thresholds;
+  - the tutor's notes.
+
+  A sweep releases a course's closed, unremoved, unreleased ratings together. The
+  first release for a `tutor_course` needs at least 5 (`MIN_RATINGS`), so the course
+  rating goes public with its first batch. After that, a release needs at least 3
+  (`RELEASE_BATCH`).
+
+  Why batches: counting closed ratings still added each one at a predictable moment,
+  7 days after its session. A tutor could read one student's stars off the change in
+  the totals, and the note appeared at the same moment. A batch mixes at least 3
+  ratings into every change.
+
+  The cost is accepted. Public numbers can lag until a batch fills, and a course with
+  few sessions may wait a long time. Ratings in a pool that never reaches 3 are never
+  published.
+
+  Not covered, and accepted: when an operator removes a rating, the totals change
+  immediately. That only happens when an operator acts.
+- **The hidden ranker counts released ratings only, too** (user, 2026-10-06). The
+  stats job applies the same predicate to `score_sample_count`, `score_posterior_mean`
+  and the course and campus prior means. That gives one definition of a counted
+  rating. A deck position that moved when a single rating closed would be the same
+  live signal the batches exist to remove.
 - **The overall rating counts only courses whose own rating is public.** If it
   averaged every course, a tutor with one public course and one below its threshold
   could subtract the public course from the overall and recover the hidden one. With
@@ -370,13 +394,12 @@ grounds for removal.
   and it stays "New tutor" until at least one course rating is public.
 - **Opening a rating report is audited, like a thread report.** Each time an operator
   opens a rating report, an append-only access row records the operator, the report
-  and the time, the same way `message_thread_access` does for threads. Staff see a
-  rating's note only through a report.
+  and the time, the same way `message_thread_access` does for threads.
 
 **The ranker smooths the course rating toward the course mean.** The stats job writes
 two fields on every active `tutor_course`, including those with no ratings:
 
-- `score_sample_count` is the number of ratings.
+- `score_sample_count` is the number of ratings (released ratings only; see above).
 - `score_posterior_mean`, in basis points of the 1–5 scale (1★ = 0, 5★ = 10 000), is
   the Bayesian average `(m·C + Σ stars) / (m + n)`, where:
   - `m = 5`, the same as the display threshold;
@@ -420,8 +443,8 @@ reports and a human, never for an average.
   gating and one rating per session stop the cheapest inflation, friends rating
   friends for free.
 - *Rating a peer.* The rater and the rated may share a class on Thursday. The tutor
-  never sees who gave which stars. Notes arrive anonymous and only after the window
-  closes, the window shuts lobbying out, and there is no rating in the other direction
+  never sees who gave which stars. Notes arrive anonymous and only in released
+  batches, the window shuts lobbying out, and there is no rating in the other direction
   to trade against.
 - *New: tutors avoiding struggling students.* With double opt-in, a tutor protecting
   an average can decline the students most likely to rate them low on a bad exam.
