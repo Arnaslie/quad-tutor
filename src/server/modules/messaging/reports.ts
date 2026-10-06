@@ -17,7 +17,7 @@ import {
 } from "@/server/db/schema";
 import { tutorUser, type Executor } from "@/server/modules/engagements/access";
 import type { Actor, OperatorActor, TutorActor } from "@/server/modules/identity/actor";
-import { closesAt, earnedAt } from "@/server/modules/ratings/window";
+import { ratingWindowClosed } from "@/server/modules/ratings/window";
 
 import {
   DELETED_USER,
@@ -70,7 +70,7 @@ export async function reportRating(params: {
           eq(tutorCourse.tutorProfileId, params.actor.tutorProfileId),
           isNull(sessionRating.removedAt),
           isNotNull(sessionRating.note),
-          sql`${closesAt(earnedAt(sessionRating.sessionId, sessionRating.institutionId))} <= now()`,
+          ratingWindowClosed,
         ),
       )
       .limit(1)
@@ -172,7 +172,7 @@ export async function reportsForOperator(operator: OperatorActor): Promise<Repor
     .where(onOperatorCampus(operator))
     .orderBy(sql`${messageReport.reviewedAt} is not null`, desc(messageReport.createdAt))
     .limit(100);
-  return rows.map(named);
+  return rows.map((row) => ({ ...named(row), ratingStars: null, ratingNote: null }));
 }
 
 export async function openReportedThread(params: {

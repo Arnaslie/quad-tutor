@@ -15,10 +15,7 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { courseLabel } from "@/server/modules/messaging/threads";
 
 import { MIN_RATINGS, publicRating, type PublicRating } from "./rules";
-import { closesAt, earnedAt } from "./window";
-
-const ratingEarnedAt = earnedAt(sessionRating.sessionId, sessionRating.institutionId);
-const ratingWindowClosed = sql`${closesAt(ratingEarnedAt)} <= now()`;
+import { closesAt, earnedAt, ratingEarnedAt, ratingWindowClosed } from "./window";
 
 export type CardRatings = {
   courseRating: PublicRating | null;

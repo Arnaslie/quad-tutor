@@ -1,7 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
-import { ledgerEntry } from "@/server/db/schema";
+import { ledgerEntry, sessionRating } from "@/server/db/schema";
 
 import { WINDOW_DAYS } from "./rules";
 
@@ -23,3 +23,7 @@ function toDate(value: string | Date | null): Date | null {
 export function closesAt(earned: SQL): SQL<Date | null> {
   return sql<Date | null>`(${earned} + make_interval(days => ${WINDOW_DAYS}))`.mapWith(toDate);
 }
+
+export const ratingEarnedAt = earnedAt(sessionRating.sessionId, sessionRating.institutionId);
+
+export const ratingWindowClosed = sql`${closesAt(ratingEarnedAt)} <= now()`;

@@ -178,6 +178,22 @@ async function ageRecognition(days: number) {
     .where(eq(ledgerEntry.sessionId, sessionId));
 }
 
+async function engagementFor(tutorCourseId: string, courseOfferingId: string) {
+  const [row] = await db
+    .insert(engagement)
+    .values({
+      studentProfileId: student.studentProfileId,
+      institutionId: home.institutionId,
+      tutorCourseId,
+      courseOfferingId,
+      sessionsPurchased: 8,
+      pricePaidMinor: 20_000,
+      status: "active",
+    })
+    .returning({ id: engagement.id });
+  return row;
+}
+
 const counts = async () => ({
   reliability: (await db.select({ n: sql<number>`count(*)::int` }).from(reliabilityEvent).where(inArray(reliabilityEvent.userId, made.users)))[0].n,
   ledger: (await db.select({ n: sql<number>`count(*)::int` }).from(ledgerEntry).where(eq(ledgerEntry.engagementId, engagementId)))[0].n,
@@ -315,18 +331,7 @@ test("after the window the rating is fixed and the note reaches the tutor, anony
 
 test("card ratings stay null below each threshold and are numbers above it", async () => {
   const tcB = await claim(tutor, home.b.courseId);
-  const [b] = await db
-    .insert(engagement)
-    .values({
-      studentProfileId: student.studentProfileId,
-      institutionId: home.institutionId,
-      tutorCourseId: tcB,
-      courseOfferingId: home.b.offeringId,
-      sessionsPurchased: 8,
-      pricePaidMinor: 20_000,
-      status: "active",
-    })
-    .returning({ id: engagement.id });
+  const b = await engagementFor(tcB, home.b.offeringId);
 
   await delivered({ engagementId, count: 3, rate: { tutorCourseId, stars: [4, 4, 5] } });
   await delivered({ engagementId: b.id, count: 5, rate: { tutorCourseId: tcB, stars: [2] } });
@@ -352,6 +357,29 @@ test("card ratings stay null below each threshold and are numbers above it", asy
   assert.equal((await cardRatings(away.institutionId, [tutorCourseId])).size, 0, "no read across campuses");
 });
 
+test("open-window ratings stay out of the course count but their sessions count, and overall sums every public course", async () => {
+  const edge = await tutorFor("edge-tutor", home.institutionId);
+  const tcA = await claim(edge, home.a.courseId);
+  const tcB = await claim(edge, home.b.courseId);
+  const a = await engagementFor(tcA, home.a.offeringId);
+  const b = await engagementFor(tcB, home.b.offeringId);
+
+  await delivered({ engagementId: a.id, count: 4, rate: { tutorCourseId: tcA, stars: [5, 5, 4, 4] } });
+  await delivered({ engagementId: a.id, count: 1, rate: { tutorCourseId: tcA, stars: [1] }, recognisedDaysAgo: 1 });
+  await delivered({ engagementId: b.id, count: 5, rate: { tutorCourseId: tcB, stars: [3, 3, 3, 3, 3] } });
+
+  const gated = await cardRatings(home.institutionId, [tcA, tcB]);
+  const publicB = { average: "3.0", count: 5 };
+  assert.deepEqual(gated.get(tcA), { courseRating: null, overallRating: publicB }, "4 closed and 1 open rating; 9 closed and 1 open session");
+  assert.deepEqual(gated.get(tcB), { courseRating: publicB, overallRating: publicB });
+
+  await delivered({ engagementId: a.id, count: 1, rate: { tutorCourseId: tcA, stars: [4] } });
+  const both = await cardRatings(home.institutionId, [tcA, tcB]);
+  const overall = { average: "3.7", count: 10 };
+  assert.deepEqual(both.get(tcA), { courseRating: { average: "4.4", count: 5 }, overallRating: overall });
+  assert.deepEqual(both.get(tcB), { courseRating: publicB, overallRating: overall });
+});
+
 test("a reported rating is reviewed beside thread reports, and removal takes it out of every aggregate", async () => {
   const [note] = await notesForTutor(tutor);
   await assert.rejects(reportRating({ actor: otherTutor, sessionRatingId: note.ratingId, reason: "harassment", note: null }), MessagingError);
@@ -368,7 +396,8 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
   assert.equal((await reportsForOperator(awayOps)).length, 0);
   const ratingReport = queue.find((item) => item.subject === "rating")!;
   const threadReport = queue.find((item) => item.subject === "thread")!;
-  assert.equal(ratingReport.ratingNote, "Went over the old exams.");
+  assert.equal(ratingReport.ratingNote, null, "the queue never carries rating content");
+  assert.equal(ratingReport.ratingStars, null);
   assert.equal(ratingReport.tutorName, "tutor");
   assert.equal(threadReport.threadId, threadId);
 
@@ -376,8 +405,15 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
   await assert.rejects(openReportedRating({ operator: awayOps, reportId: ratingReport.id }), MessagingError);
   const audits = async () =>
     (await db.select({ n: sql<number>`count(*)::int` }).from(sessionRatingAccess).where(eq(sessionRatingAccess.reportId, ratingReport.id)))[0].n;
-  assert.equal(await audits(), 0, "a refused open writes no audit row");
-  assert.equal((await openReportedRating({ operator: ops, reportId: ratingReport.id })).sessionRatingId, note.ratingId);
+  await assert.rejects(openReportedRating({ operator: ops, reportId: threadReport.id }), MessagingError);
+  const allAudits = async () =>
+    (await db.select({ n: sql<number>`count(*)::int` }).from(sessionRatingAccess).where(eq(sessionRatingAccess.institutionId, home.institutionId)))[0].n;
+  assert.equal(await allAudits(), 0, "a refused open writes no audit row");
+  assert.equal(await audits(), 0);
+  const opened = await openReportedRating({ operator: ops, reportId: ratingReport.id });
+  assert.equal(opened.sessionRatingId, note.ratingId);
+  assert.equal(opened.ratingNote, "Went over the old exams.");
+  assert.equal(opened.ratingStars, 5);
   const [audit] = await db.select().from(sessionRatingAccess).where(eq(sessionRatingAccess.reportId, ratingReport.id));
   assert.equal(audit.operatorUserId, ops.userId);
   assert.equal(audit.sessionRatingId, note.ratingId);
