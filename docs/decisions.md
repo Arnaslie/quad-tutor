@@ -406,6 +406,8 @@ grounds for removal.
 - **Opening a rating report is audited, like a thread report.** Each time an operator
   opens a rating report, an append-only access row records the operator, the report
   and the time, the same way `message_thread_access` does for threads.
+- **Staff see a rating's note only through a report** (user, 2026-10-06). Every such
+  view is logged in `session_rating_access`.
 
 **The ranker smooths the course rating toward the course mean.** The stats job writes
 two fields on every active `tutor_course`, including those with no ratings:

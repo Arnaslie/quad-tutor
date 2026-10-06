@@ -88,10 +88,10 @@ On `tutor_course`, add `renewal_trial_count` (integer, not null, default 0) and
 - Add `check (num_nonnulls(thread_id, session_rating_id) = 1)`.
 - Add `removed` to `report_outcome`.
 
-Opening a rating report must write an append-only access row: operator, report and
-time, the same way `message_thread_access` does for threads. That table requires a
-`thread_id` today. Whether to generalise it or add a sibling table is for the database
-and backend engineers to decide.
+Staff see a rating's note only through a report, and every view is logged in
+`session_rating_access` (decided 2026-10-06). It is an append-only row of
+institution, rating, report, operator and time, mirroring `message_thread_access`.
+The column details are for the database engineer.
 
 Review the plans for the aggregate and for the card read. Neither may read across
 `institution_id`.
