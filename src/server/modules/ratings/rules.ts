@@ -2,7 +2,7 @@ export const STARS = [1, 2, 3, 4, 5] as const;
 export type Stars = (typeof STARS)[number];
 
 export const NOTE_MAX = 280;
-export const WINDOW_DAYS = 14;
+export const WINDOW_DAYS = 7;
 export const MIN_SESSIONS = 10;
 export const MIN_RATINGS = 5;
 

@@ -45,6 +45,7 @@ import { MessagingError } from "@/server/modules/messaging/threads";
 
 import { rateSession } from "./capture";
 import { cardRatings, notesForTutor, sessionRatingState } from "./reads";
+import { WINDOW_DAYS } from "./rules";
 import { RatingError } from "./window";
 
 const databaseHost = new URL(process.env.DATABASE_URL ?? "postgres://unset").hostname;
@@ -155,7 +156,7 @@ async function delivered(params: {
       sessionId: session.id,
       type: "session_earned",
       amountMinor: 2500,
-      occurredAt: new Date(Date.now() - (params.recognisedDaysAgo ?? 20) * 86_400_000),
+      occurredAt: new Date(Date.now() - (params.recognisedDaysAgo ?? WINDOW_DAYS + 6) * 86_400_000),
     });
     const stars = params.rate?.stars[index];
     if (params.rate && stars) {
@@ -288,14 +289,18 @@ test("a non-owner can't rate, or see the rating", async () => {
   assert.equal(await sessionRatingState(stranger, sessionId), null);
 });
 
-test("after 14 days the rating is fixed and the note reaches the tutor, anonymously", async () => {
-  await ageRecognition(15);
+test("after the window the rating is fixed and the note reaches the tutor, anonymously", async () => {
+  await ageRecognition(WINDOW_DAYS - 1);
+  assert.equal((await sessionRatingState(student, sessionId))?.open, true);
+  assert.deepEqual(await notesForTutor(tutor), []);
+
+  await ageRecognition(2);
   await assert.rejects(rateSession({ actor: student, sessionId, stars: 1, note: null }), /closed/);
   const state = await sessionRatingState(student, sessionId);
   assert.equal(state?.open, false);
   assert.equal(state?.rating?.stars, 5);
   const [earned] = await db
-    .select({ at: sql<string>`(min(${ledgerEntry.occurredAt}) + interval '14 days')::text` })
+    .select({ at: sql<string>`(min(${ledgerEntry.occurredAt}) + make_interval(days => ${WINDOW_DAYS}))::text` })
     .from(ledgerEntry)
     .where(and(eq(ledgerEntry.sessionId, sessionId), eq(ledgerEntry.type, "session_earned")));
   assert.equal(state?.closesAt.getTime(), new Date(earned.at).getTime());
@@ -340,7 +345,7 @@ test("card ratings stay null below each threshold and are numbers above it", asy
   assert.deepEqual(rated.get(tutorCourseId), { courseRating: publicA, overallRating: publicA }, "B's lone rating stays out of overall");
   assert.deepEqual(rated.get(tcB), { courseRating: null, overallRating: publicA });
 
-  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [1] }, recognisedDaysAgo: 3 });
+  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [1] }, recognisedDaysAgo: WINDOW_DAYS - 4 });
   const inWindow = await cardRatings(home.institutionId, [tutorCourseId]);
   assert.deepEqual(inWindow.get(tutorCourseId), { courseRating: publicA, overallRating: publicA }, "an open-window rating is not counted");
 
