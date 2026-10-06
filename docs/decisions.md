@@ -325,10 +325,10 @@ deck, and the overall rating sits beside it.
   and the platform paid the tutor for it. Excluding it would drop exactly the ratings
   that explain why someone asked for their money back.
 
-**The window is 14 days from recognition**, the `session_earned` row's `occurred_at`.
-That is long enough to answer after the exam and short enough that the rating is still
-about the session. Nobody is nagged: there is one prompt, on the session page, and no
-email.
+**The window is 7 days from recognition**, the `session_earned` row's `occurred_at`.
+It was shortened from 14 days on 2026-10-06. That is long enough to answer once the
+session has sunk in, and short enough that the rating is still about the session.
+Nobody is nagged: there is one prompt, on the session page, and no email.
 
 **A student can edit their rating, stars and note, until the window closes.** After
 that it is fixed. Changing your mind a day later is ordinary. Being lobbied by a
@@ -358,11 +358,11 @@ grounds for removal.
   public. The 10 sessions are confirmed by the user. The gate is independent of the
   take cap: 10 sessions at $35 is about $35 of platform fee, and the $100 cap is
   reached at about 29 sessions. Neither threshold reads the other.
-- **Only ratings whose 14-day window has closed are counted.** That applies to the
+- **Only ratings whose 7-day window has closed are counted.** That applies to the
   course average and count, the overall average and count, and both thresholds. An
   open rating can still be edited, and a total that moves the day after one session
-  tells the tutor that student's stars. Displayed numbers therefore lag by up to 14
-  days. That is the price, and it is accepted.
+  tells the tutor that student's stars. Displayed numbers therefore lag by up to 7
+  days (14 before 2026-10-06). That is the price, and it is accepted.
 - **The hidden ranker counts closed ratings only, too** (user, 2026-10-06). The stats
   job applies the same predicate to `score_sample_count`, `score_posterior_mean` and
   the course and campus prior means. That gives one definition of a counted rating,

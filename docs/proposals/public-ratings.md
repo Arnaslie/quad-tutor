@@ -92,7 +92,7 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 ### Server: `src/server/modules/ratings/` (Backend engineer)
 
 - **`rules.ts`** imports nothing. It holds `STARS = [1..5]`, `NOTE_MAX = 280`,
-  `WINDOW_DAYS = 14`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, and
+  `WINDOW_DAYS = 7`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, and
   `publicRating(sum, count, sessions)`, which returns `{ average: "4.7", count }` when
   `sessions >= MIN_SESSIONS && count >= MIN_RATINGS`, and `null` otherwise. The same
   gate applies to both ratings, always with the tutor's total sessions:
@@ -173,7 +173,8 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 - Call `refreshScores(campus.id)` in the cron loop (`route.ts:45`), wrapped in
   `.catch` like the proof purge, so a failure here never blocks refunds.
 - The card reads live, but it only counts closed ratings, so a new rating appears
-  publicly once its 14-day window has closed. That lag is deliberate.
+  publicly once its 7-day window has closed, so public numbers lag by up to 7 days.
+  The window was shortened from 14 days on 2026-10-06. That lag is deliberate.
 - **The ranker counts closed ratings only** (user decision, 2026-10-06). A rating
   reaches the ranker on the first sweep after its window closes, never before.
 - The window needs no sweep: closing is computed from `session_earned.occurred_at` at
