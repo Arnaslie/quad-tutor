@@ -17,7 +17,7 @@ import {
 } from "@/server/db/schema";
 import { tutorUser, type Executor } from "@/server/modules/engagements/access";
 import type { Actor, OperatorActor, TutorActor } from "@/server/modules/identity/actor";
-import { ratingReleased } from "@/server/modules/ratings/window";
+import { ratingCounted } from "@/server/modules/ratings/window";
 
 import {
   DELETED_USER,
@@ -68,9 +68,8 @@ export async function reportRating(params: {
           eq(sessionRating.id, params.sessionRatingId),
           eq(sessionRating.institutionId, params.actor.institutionId),
           eq(tutorCourse.tutorProfileId, params.actor.tutorProfileId),
-          isNull(sessionRating.removedAt),
           isNotNull(sessionRating.note),
-          ratingReleased,
+          ratingCounted,
         ),
       )
       .limit(1)

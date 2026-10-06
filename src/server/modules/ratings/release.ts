@@ -1,15 +1,17 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { courseOffering, engagement, sessionBooking, sessionRating, term } from "@/server/db/schema";
 
 import { MIN_RATINGS, RELEASE_BATCH, TERM_END_MIN } from "./rules";
-import { ratingReleased, ratingWindowClosed } from "./window";
+import { ratingWindowClosed } from "./window";
+
+const RELEASE_LOCK = 0x5241;
 
 export async function releaseRatings(institutionId: string): Promise<number> {
   return db.transaction(async (tx) => {
     const [{ locked }] = await tx.execute<{ locked: boolean }>(
-      sql`select pg_try_advisory_xact_lock(hashtext(${`ratings-release:${institutionId}`})) as locked`,
+      sql`select pg_try_advisory_xact_lock(${RELEASE_LOCK}::int, hashtext(${institutionId})) as locked`,
     );
     if (!locked) return 0;
 
@@ -44,7 +46,7 @@ export async function releaseRatings(institutionId: string): Promise<number> {
       tx
         .selectDistinct({ primedCourseId: sessionRating.tutorCourseId })
         .from(sessionRating)
-        .where(and(eq(sessionRating.institutionId, institutionId), ratingReleased)),
+        .where(and(eq(sessionRating.institutionId, institutionId), isNotNull(sessionRating.releasedAt))),
     );
     const due = tx
       .with(closed, primed)

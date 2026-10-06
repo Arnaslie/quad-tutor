@@ -1,4 +1,4 @@
-import { isNotNull, sql, type SQL } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { ledgerEntry, sessionRating } from "@/server/db/schema";
@@ -28,4 +28,4 @@ export const ratingEarnedAt = earnedAt(sessionRating.sessionId, sessionRating.in
 
 export const ratingWindowClosed = sql`${closesAt(ratingEarnedAt)} <= now()`;
 
-export const ratingReleased = isNotNull(sessionRating.releasedAt);
+export const ratingCounted = sql`(${sessionRating.removedAt} is null and ${sessionRating.releasedAt} is not null)`;

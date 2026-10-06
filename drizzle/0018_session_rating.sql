@@ -24,7 +24,8 @@ ALTER TABLE "session_rating" ADD CONSTRAINT "session_rating_tutor_course_id_tuto
 ALTER TABLE "session_rating" ADD CONSTRAINT "session_rating_student_profile_id_student_profile_id_fk" FOREIGN KEY ("student_profile_id") REFERENCES "public"."student_profile"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session_rating" ADD CONSTRAINT "session_rating_removed_by_user_id_user_id_fk" FOREIGN KEY ("removed_by_user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "session_rating_session_idx" ON "session_rating" USING btree ("session_id");--> statement-breakpoint
-CREATE INDEX "session_rating_tutor_course_idx" ON "session_rating" USING btree ("institution_id","tutor_course_id") WHERE "session_rating"."removed_at" is null;--> statement-breakpoint
+CREATE INDEX "session_rating_counted_idx" ON "session_rating" USING btree ("institution_id","tutor_course_id") WHERE "session_rating"."removed_at" is null and "session_rating"."released_at" is not null;--> statement-breakpoint
+CREATE INDEX "session_rating_pending_idx" ON "session_rating" USING btree ("tutor_course_id") WHERE "session_rating"."released_at" is null and "session_rating"."removed_at" is null;--> statement-breakpoint
 CREATE INDEX "session_rating_student_idx" ON "session_rating" USING btree ("student_profile_id");--> statement-breakpoint
 ALTER TABLE "message_report" ADD CONSTRAINT "message_report_session_rating_id_session_rating_id_fk" FOREIGN KEY ("session_rating_id") REFERENCES "public"."session_rating"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "ledger_entry_session_earned_idx" ON "ledger_entry" USING btree ("session_id") WHERE "ledger_entry"."type" = 'session_earned';--> statement-breakpoint

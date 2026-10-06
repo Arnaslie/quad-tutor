@@ -15,7 +15,7 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { courseLabel } from "@/server/modules/messaging/threads";
 
 import { MIN_RATINGS, publicRating, type PublicRating } from "./rules";
-import { closesAt, earnedAt, ratingReleased } from "./window";
+import { closesAt, earnedAt, ratingCounted } from "./window";
 
 export type CardRatings = {
   courseRating: PublicRating | null;
@@ -49,9 +49,8 @@ export async function cardRatings(
       .where(
         and(
           eq(sessionRating.institutionId, institutionId),
-          isNull(sessionRating.removedAt),
           inArray(tutorCourse.tutorProfileId, tutors),
-          ratingReleased,
+          ratingCounted,
         ),
       )
       .groupBy(tutorCourse.tutorProfileId, sessionRating.tutorCourseId),
@@ -128,9 +127,8 @@ export async function notesForTutor(actor: TutorActor): Promise<TutorNote[]> {
       and(
         eq(sessionRating.institutionId, actor.institutionId),
         eq(tutorCourse.tutorProfileId, actor.tutorProfileId),
-        isNull(sessionRating.removedAt),
         isNotNull(sessionRating.note),
-        ratingReleased,
+        ratingCounted,
       ),
     )
     .orderBy(desc(sessionRating.releasedAt), sessionRating.id)

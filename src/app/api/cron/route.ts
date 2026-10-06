@@ -45,18 +45,18 @@ export async function GET(request: Request) {
     let releasedRatings = 0;
 
     for (const campus of campuses) {
-      const refunds = await runTermEndRefunds(campus.id);
-      refunded += refunds.length;
-      refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
-      notified += await runNotifications(campus.id);
-      purgedProofs += await purgeProofFiles(campus.id).catch((error) => {
-        console.error(`[cron] proof purge for ${campus.slug} failed`, error);
-        return 0;
-      });
       releasedRatings += await releaseRatings(campus.id).catch((error) => {
         console.error(`[cron] rating release for ${campus.slug} failed`, error);
         return 0;
       });
+      purgedProofs += await purgeProofFiles(campus.id).catch((error) => {
+        console.error(`[cron] proof purge for ${campus.slug} failed`, error);
+        return 0;
+      });
+      const refunds = await runTermEndRefunds(campus.id);
+      refunded += refunds.length;
+      refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
+      notified += await runNotifications(campus.id);
     }
 
     return Response.json({

@@ -1,4 +1,4 @@
-import { isNull, sql } from "drizzle-orm";
+import { and, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { sessionRating } from "@/server/db/schema";
@@ -6,7 +6,7 @@ import type { Actor } from "@/server/modules/identity/actor";
 
 import { rateInput } from "./input";
 import { studentRating } from "./reads";
-import { RatingError } from "./window";
+import { closesAt, RatingError, ratingEarnedAt } from "./window";
 
 export async function rateSession(params: {
   actor: Actor;
@@ -39,8 +39,12 @@ export async function rateSession(params: {
     .onConflictDoUpdate({
       target: sessionRating.sessionId,
       set: { stars, note, updatedAt: sql`now()` },
-      setWhere: isNull(sessionRating.removedAt),
+      setWhere: and(
+        isNull(sessionRating.removedAt),
+        isNull(sessionRating.releasedAt),
+        sql`${closesAt(ratingEarnedAt)} > now()`,
+      ),
     })
     .returning({ id: sessionRating.id });
-  if (saved.length === 0) throw new RatingError("This rating was removed and can't be changed.");
+  if (saved.length === 0) throw new RatingError("This rating is closed or was removed and can't be changed.");
 }

@@ -664,9 +664,12 @@ export const sessionRating = pgTable(
   },
   (t) => [
     uniqueIndex("session_rating_session_idx").on(t.sessionId),
-    index("session_rating_tutor_course_idx")
+    index("session_rating_counted_idx")
       .on(t.institutionId, t.tutorCourseId)
-      .where(sql`${t.removedAt} is null`),
+      .where(sql`${t.removedAt} is null and ${t.releasedAt} is not null`),
+    index("session_rating_pending_idx")
+      .on(t.tutorCourseId)
+      .where(sql`${t.releasedAt} is null and ${t.removedAt} is null`),
     index("session_rating_student_idx").on(t.studentProfileId),
     check("session_rating_stars", sql`${t.stars} between 1 and 5`),
     check("session_rating_note_length", sql`char_length(${t.note}) <= ${sql.raw(String(NOTE_MAX))}`),

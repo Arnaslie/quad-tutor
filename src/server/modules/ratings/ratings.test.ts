@@ -542,3 +542,34 @@ test("a pool in a running term, or mixing an ended and a running term, follows t
   assert.equal(await releaseRatings(home.institutionId), 5);
   assert.deepEqual(await releaseStamps(mixed.tc), { released: 5, stamps: 1, pending: 0 });
 });
+
+async function closedPool(key: string, count: number, recognisedDaysAgo?: number) {
+  const owner = await tutorFor(key, home.institutionId);
+  const tc = await claim(owner, home.a.courseId);
+  const e = await engagementFor(tc, home.a.offeringId);
+  await delivered({ engagementId: e.id, count, rate: { tutorCourseId: tc, stars: Array(count).fill(2) }, recognisedDaysAgo });
+  const rows = await db.select().from(sessionRating).where(eq(sessionRating.tutorCourseId, tc));
+  return { owner, tc, rows };
+}
+
+test("an edit can't overwrite a released rating, even inside its window", async () => {
+  const { rows } = await closedPool("edit-race", 1, 1);
+  await db.update(sessionRating).set({ releasedAt: sql`now()` }).where(eq(sessionRating.id, rows[0].id));
+  await assert.rejects(rateSession({ actor: student, sessionId: rows[0].sessionId, stars: 5, note: "changed" }), /closed or was removed/);
+  const [after] = await db.select().from(sessionRating).where(eq(sessionRating.id, rows[0].id));
+  assert.equal(after.stars, 2);
+  assert.equal(after.note, null);
+});
+
+test("a tutor can't report a closed note before it is released", async () => {
+  const { owner, rows } = await closedPool("report-early", 1);
+  await db.update(sessionRating).set({ note: "Too early to see" }).where(eq(sessionRating.id, rows[0].id));
+  await assert.rejects(reportRating({ actor: owner, sessionRatingId: rows[0].id, reason: "spam", note: null }), /does not exist/);
+});
+
+test("a sweep for one campus leaves another campus's ratings alone", async () => {
+  const { tc } = await closedPool("away-sweep", 5);
+  assert.equal(await releaseRatings(away.institutionId), 0);
+  assert.deepEqual(await releaseStamps(tc), { released: 0, stamps: 0, pending: 5 });
+  assert.equal(await releaseRatings(home.institutionId), 5);
+});

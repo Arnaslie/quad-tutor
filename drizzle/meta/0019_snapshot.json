@@ -2953,8 +2953,8 @@
           "method": "btree",
           "with": {}
         },
-        "session_rating_tutor_course_idx": {
-          "name": "session_rating_tutor_course_idx",
+        "session_rating_counted_idx": {
+          "name": "session_rating_counted_idx",
           "columns": [
             {
               "expression": "institution_id",
@@ -2970,7 +2970,23 @@
             }
           ],
           "isUnique": false,
-          "where": "\"session_rating\".\"removed_at\" is null",
+          "where": "\"session_rating\".\"removed_at\" is null and \"session_rating\".\"released_at\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "session_rating_pending_idx": {
+          "name": "session_rating_pending_idx",
+          "columns": [
+            {
+              "expression": "tutor_course_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"session_rating\".\"released_at\" is null and \"session_rating\".\"removed_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
