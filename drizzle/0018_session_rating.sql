@@ -26,5 +26,6 @@ CREATE UNIQUE INDEX "session_rating_session_idx" ON "session_rating" USING btree
 CREATE INDEX "session_rating_tutor_course_idx" ON "session_rating" USING btree ("institution_id","tutor_course_id") WHERE "session_rating"."removed_at" is null;--> statement-breakpoint
 CREATE INDEX "session_rating_student_idx" ON "session_rating" USING btree ("student_profile_id");--> statement-breakpoint
 ALTER TABLE "message_report" ADD CONSTRAINT "message_report_session_rating_id_session_rating_id_fk" FOREIGN KEY ("session_rating_id") REFERENCES "public"."session_rating"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "message_report_session_rating_idx" ON "message_report" USING btree ("session_rating_id");--> statement-breakpoint
+CREATE INDEX "ledger_entry_session_earned_idx" ON "ledger_entry" USING btree ("session_id") WHERE "ledger_entry"."type" = 'session_earned';--> statement-breakpoint
+CREATE UNIQUE INDEX "message_report_open_rating_idx" ON "message_report" USING btree ("session_rating_id") WHERE "message_report"."reviewed_at" is null;--> statement-breakpoint
 ALTER TABLE "message_report" ADD CONSTRAINT "message_report_subject" CHECK (num_nonnulls("message_report"."thread_id", "message_report"."session_rating_id") = 1);

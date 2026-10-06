@@ -76,13 +76,18 @@ export async function reportRating(params: {
   ).at(0);
   if (!rating) throw new MessagingError("That rating does not exist.");
 
-  await db.insert(messageReport).values({
-    institutionId: params.actor.institutionId,
-    sessionRatingId: rating.id,
-    reporterUserId: params.actor.userId,
-    reason: params.reason,
-    note: params.note,
-  });
+  const created = await db
+    .insert(messageReport)
+    .values({
+      institutionId: params.actor.institutionId,
+      sessionRatingId: rating.id,
+      reporterUserId: params.actor.userId,
+      reason: params.reason,
+      note: params.note,
+    })
+    .onConflictDoNothing()
+    .returning({ id: messageReport.id });
+  if (created.length === 0) throw new MessagingError("You already reported this rating.");
 }
 
 function reportRows(exec: Executor = db) {
@@ -258,6 +263,16 @@ export async function reviewReport(params: {
           eq(sessionRating.id, report.sessionRatingId),
           eq(sessionRating.institutionId, report.institutionId),
           isNull(sessionRating.removedAt),
+        ),
+      );
+    await tx
+      .update(messageReport)
+      .set({ reviewedAt: new Date(), reviewedByUserId: params.operator.userId, outcome: "removed" })
+      .where(
+        and(
+          eq(messageReport.sessionRatingId, report.sessionRatingId),
+          eq(messageReport.institutionId, report.institutionId),
+          isNull(messageReport.reviewedAt),
         ),
       );
   });

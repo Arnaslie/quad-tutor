@@ -1,5 +1,5 @@
 {
-  "id": "bfe5e8ec-f35b-4de9-b3ba-e71a35b19f1b",
+  "id": "a7d56225-7fa4-4329-8761-3853ded046e3",
   "prevId": "6d95ce5b-56ac-4535-9a4d-db40982a7c56",
   "version": "7",
   "dialect": "postgresql",
@@ -1350,6 +1350,22 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "ledger_entry_session_earned_idx": {
+          "name": "ledger_entry_session_earned_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"ledger_entry\".\"type\" = 'session_earned'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1857,8 +1873,8 @@
           "method": "btree",
           "with": {}
         },
-        "message_report_session_rating_idx": {
-          "name": "message_report_session_rating_idx",
+        "message_report_open_rating_idx": {
+          "name": "message_report_open_rating_idx",
           "columns": [
             {
               "expression": "session_rating_id",
@@ -1867,7 +1883,8 @@
               "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
+          "where": "\"message_report\".\"reviewed_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}

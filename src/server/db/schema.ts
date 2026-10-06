@@ -523,7 +523,12 @@ export const ledgerEntry = pgTable(
     stripeReference: text("stripe_reference"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("ledger_entry_engagement_idx").on(t.engagementId, t.occurredAt)],
+  (t) => [
+    index("ledger_entry_engagement_idx").on(t.engagementId, t.occurredAt),
+    index("ledger_entry_session_earned_idx")
+      .on(t.sessionId)
+      .where(sql`${t.type} = 'session_earned'`),
+  ],
 );
 
 export const tutorAvailability = pgTable(
@@ -690,7 +695,9 @@ export const messageReport = pgTable(
   (t) => [
     index("message_report_institution_idx").on(t.institutionId, t.reviewedAt),
     index("message_report_thread_idx").on(t.threadId),
-    index("message_report_session_rating_idx").on(t.sessionRatingId),
+    uniqueIndex("message_report_open_rating_idx")
+      .on(t.sessionRatingId)
+      .where(sql`${t.reviewedAt} is null`),
     check("message_report_subject", sql`num_nonnulls(${t.threadId}, ${t.sessionRatingId}) = 1`),
   ],
 );

@@ -286,6 +286,11 @@ test("after 14 days the rating is fixed and the note reaches the tutor, anonymou
   const state = await sessionRatingState(student, sessionId);
   assert.equal(state?.open, false);
   assert.equal(state?.rating?.stars, 5);
+  const [earned] = await db
+    .select({ at: sql<string>`(min(${ledgerEntry.occurredAt}) + interval '14 days')::text` })
+    .from(ledgerEntry)
+    .where(and(eq(ledgerEntry.sessionId, sessionId), eq(ledgerEntry.type, "session_earned")));
+  assert.equal(state?.closesAt.getTime(), new Date(earned.at).getTime());
 
   const notes = await notesForTutor(tutor);
   assert.equal(notes.length, 1);
@@ -336,6 +341,10 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
   await assert.rejects(reportRating({ actor: otherTutor, sessionRatingId: note.ratingId, reason: "harassment", note: null }), MessagingError);
   await reportRating({ actor: tutor, sessionRatingId: note.ratingId, reason: "harassment", note: "Not about the session" });
   assert.equal((await notesForTutor(tutor))[0].reported, true);
+  await assert.rejects(
+    reportRating({ actor: tutor, sessionRatingId: note.ratingId, reason: "spam", note: null }),
+    /already reported/,
+  );
 
   await reportThread({ actor: student, threadId, reason: "spam", note: null });
 
@@ -364,6 +373,11 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
   const [row] = await db.select().from(sessionRating).where(eq(sessionRating.id, note.ratingId));
   assert.ok(row.removedAt);
   assert.equal(row.removedByUserId, ops.userId);
+  const open = await db
+    .select({ id: messageReport.id })
+    .from(messageReport)
+    .where(and(eq(messageReport.sessionRatingId, note.ratingId), sql`${messageReport.reviewedAt} is null`));
+  assert.equal(open.length, 0);
 
   const afterRemoval = (await cardRatings(home.institutionId, [tutorCourseId])).get(tutorCourseId);
   assert.deepEqual(afterRemoval, { courseRating: null, overallRating: { average: "3.6", count: 5 } });

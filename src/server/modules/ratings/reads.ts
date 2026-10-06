@@ -14,7 +14,7 @@ import {
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { courseLabel } from "@/server/modules/messaging/threads";
 
-import { WINDOW_DAYS, publicRating, type PublicRating } from "./rules";
+import { publicRating, type PublicRating } from "./rules";
 import { closesAt, earnedAt } from "./window";
 
 export type CardRatings = {
@@ -108,6 +108,7 @@ export async function notesForTutor(actor: TutorActor): Promise<TutorNote[]> {
         select 1 from ${messageReport}
         where ${messageReport.sessionRatingId} = ${sessionRating.id}
           and ${messageReport.institutionId} = ${sessionRating.institutionId}
+          and ${messageReport.reviewedAt} is null
       )`,
     })
     .from(sessionRating)
@@ -145,6 +146,7 @@ export function studentRating(actor: Actor, sessionId: string) {
       status: sessionBooking.status,
       tutorCourseId: engagement.tutorCourseId,
       earnedAt: earned,
+      closesAt: closesAt(earned),
       open: sql<boolean>`coalesce(${closesAt(earned)} > now(), false)`,
       stars: sessionRating.stars,
       note: sessionRating.note,
@@ -181,12 +183,12 @@ export async function sessionRatingState(
   sessionId: string,
 ): Promise<SessionRatingState | null> {
   const row = await studentRating(actor, sessionId);
-  if (!row || row.status !== "completed" || !row.earnedAt) return null;
+  if (!row || row.status !== "completed" || !row.closesAt) return null;
 
   const removed = row.removedAt !== null;
   return {
     open: row.open && !removed,
-    closesAt: new Date(row.earnedAt.getTime() + WINDOW_DAYS * 86_400_000),
+    closesAt: row.closesAt,
     rating: row.stars !== null && !removed ? { stars: row.stars, note: row.note } : null,
   };
 }

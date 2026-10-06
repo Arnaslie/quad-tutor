@@ -13,9 +13,13 @@ export function earnedAt(sessionId: AnyPgColumn, institutionId: AnyPgColumn | st
     where ${ledgerEntry.sessionId} = ${sessionId}
       and ${ledgerEntry.institutionId} = ${institutionId}
       and ${ledgerEntry.type} = 'session_earned'
-  )`.mapWith((value) => (value === null ? null : new Date(value)));
+  )`.mapWith(toDate);
 }
 
-export function closesAt(earned: SQL): SQL {
-  return sql`(${earned} + make_interval(days => ${WINDOW_DAYS}))`;
+function toDate(value: string | Date | null): Date | null {
+  return value === null ? null : new Date(value);
+}
+
+export function closesAt(earned: SQL): SQL<Date | null> {
+  return sql<Date | null>`(${earned} + make_interval(days => ${WINDOW_DAYS}))`.mapWith(toDate);
 }
