@@ -88,10 +88,10 @@ On `tutor_course`, add `renewal_trial_count` (integer, not null, default 0) and
 - Add `check (num_nonnulls(thread_id, session_rating_id) = 1)`.
 - Add `removed` to `report_outcome`.
 
-Opening a rating report must write an append-only access row: operator, report and
-time, the same way `message_thread_access` does for threads. That table requires a
-`thread_id` today. Whether to generalise it or add a sibling table is for the database
-and backend engineers to decide.
+Staff see a rating's note only through a report, and every view is logged in
+`session_rating_access` (decided 2026-10-06). It is an append-only row of
+institution, rating, report, operator and time, mirroring `message_thread_access`.
+The column details are for the database engineer.
 
 Review the plans for the aggregate and for the card read. Neither may read across
 `institution_id`.
@@ -99,7 +99,8 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 ### Server: `src/server/modules/ratings/` (Backend engineer)
 
 - **`rules.ts`** imports nothing. It holds `STARS = [1..5]`, `NOTE_MAX = 280`,
-  `WINDOW_DAYS = 7`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, `RELEASE_BATCH = 3`, and
+  `WINDOW_DAYS = 7`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, `RELEASE_BATCH = 3`,
+  `TERM_END_MIN = 2`, and
   `publicRating(sum, count, sessions)`, which returns `{ average: "4.7", count }` when
   `sessions >= MIN_SESSIONS && count >= MIN_RATINGS`, and `null` otherwise. The same
   gate applies to both ratings, always with the tutor's total sessions:
@@ -168,11 +169,20 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   - `removed_at` is null;
   - `released_at` is null.
 
-  If the course has no released rating yet, the pool needs at least `MIN_RATINGS`.
-  Otherwise it needs at least `RELEASE_BATCH`. When the pool is big enough, every
-  rating in it gets the same `released_at`. A pool too small is left alone, with no
-  partial release and no term-end flush. The closed-window predicate lives only here
-  now.
+  A pool is released when any of these holds:
+  - it is the course's first release and the pool has at least `MIN_RATINGS`;
+  - the course has released before and the pool has at least `RELEASE_BATCH`;
+  - every rating in it belongs to an engagement whose term's rating window has passed,
+    meaning today is on or after `term.ends_on` + `WINDOW_DAYS` + 1 day (via
+    `course_offering.term_id`), and the pool has at least `TERM_END_MIN`.
+
+  Waiting the extra window means the finals-week ratings that were still open at term
+  end join the leftovers, and the term ends in one batch rather than two.
+
+  A released pool gets one shared `released_at` for all its ratings. Otherwise the
+  pool is left alone; there are no partial releases. A pool of 1 is never released and
+  waits for a later rating in the same course. The closed-window predicate lives only
+  here now.
 - **`matching/score.ts`**:
   - split the weight as above;
   - drop the `scoreSampleCount > 0` guard at `:55` and keep the `null` checks;
@@ -234,8 +244,17 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 - An unreleased rating, whether its window is open or closed, changes no public
   number: not a course average, an overall average, a count, or a threshold crossing.
   It also shows no note and changes no `tutor_course` score field.
-- A release never moves fewer than 3 ratings, and the first release for a course
-  never moves fewer than 5. Test the 2-pending case and the 4-pending-first case.
+- During a term, a release never moves fewer than 3 ratings, and a course's first
+  release never moves fewer than 5.
+- From `ends_on` + 8 days, a pool of 2 or more is released and a pool of 1 is not.
+  A pool with any rating from a term whose window has not passed is not released.
+- Test these cases:
+  - 2 pending mid-term;
+  - 4 pending as a first release mid-term;
+  - 2 pending at `ends_on` + 3 days, which is not released;
+  - a finals-week rating closing at `ends_on` + 6 days, which releases with the
+    leftovers at `ends_on` + 8, in one batch;
+  - 1 pending after the term's window has passed.
 - Two concurrent `releaseRatings` runs on the same pool release it once, as one
   batch.
 - `stats.ts`, `cardRatings` and `notesForTutor` share one counted predicate. The
