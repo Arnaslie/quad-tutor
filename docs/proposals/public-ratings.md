@@ -172,9 +172,12 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   A pool is released when any of these holds:
   - it is the course's first release and the pool has at least `MIN_RATINGS`;
   - the course has released before and the pool has at least `RELEASE_BATCH`;
-  - every rating in it belongs to an engagement whose term
-    (`course_offering.term_id` → `term.ends_on`) has ended, and the pool has at least
-    `TERM_END_MIN`.
+  - every rating in it belongs to an engagement whose term's rating window has passed,
+    meaning today is on or after `term.ends_on` + `WINDOW_DAYS` + 1 day (via
+    `course_offering.term_id`), and the pool has at least `TERM_END_MIN`.
+
+  Waiting the extra window means the finals-week ratings that were still open at term
+  end join the leftovers, and the term ends in one batch rather than two.
 
   A released pool gets one shared `released_at` for all its ratings. Otherwise the
   pool is left alone; there are no partial releases. A pool of 1 is never released and
@@ -243,10 +246,15 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   It also shows no note and changes no `tutor_course` score field.
 - During a term, a release never moves fewer than 3 ratings, and a course's first
   release never moves fewer than 5.
-- At term end, a pool of 2 or more is released, a pool of 1 is not, and a pool with
-  any rating from a term still running is not.
-- Test these cases: 2 pending mid-term, 4 pending as a first release mid-term, 2
-  pending after term end, and 1 pending after term end.
+- From `ends_on` + 8 days, a pool of 2 or more is released and a pool of 1 is not.
+  A pool with any rating from a term whose window has not passed is not released.
+- Test these cases:
+  - 2 pending mid-term;
+  - 4 pending as a first release mid-term;
+  - 2 pending at `ends_on` + 3 days, which is not released;
+  - a finals-week rating closing at `ends_on` + 6 days, which releases with the
+    leftovers at `ends_on` + 8, in one batch;
+  - 1 pending after the term's window has passed.
 - Two concurrent `releaseRatings` runs on the same pool release it once, as one
   batch.
 - `stats.ts`, `cardRatings` and `notesForTutor` share one counted predicate. The

@@ -391,6 +391,12 @@ grounds for removal.
   Accepted risk: a term-end batch of 2 lets a tutor narrow down which of two students
   gave which stars and note. The user chose that over losing the feedback.
 
+  The term-end release waits for the term's last rating window to pass too: it runs
+  from `term.ends_on` + 7 days + 1 day. Sessions held in finals week are still inside
+  their window when the term ends. Waiting lets them join the leftovers, so the term's
+  last ratings release in one batch rather than two. This is a timing clarification
+  that follows from the user's rule, not a new decision.
+
   Not covered, and accepted: when an operator removes a rating, the totals change
   immediately. That only happens when an operator acts.
 - **The hidden ranker counts released ratings only, too** (user, 2026-10-06). The
