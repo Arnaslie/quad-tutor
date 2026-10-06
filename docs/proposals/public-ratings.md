@@ -46,8 +46,7 @@ score += (renewalPosteriorBp / 10_000) * renewalWeight    // 15
 - Neither term is gated on its sample count, because the job writes the prior at
   `n = 0`.
 - They are not blended: different scales, different priors, and each weight can be
-  tuned on its own. The 15/15 split is pending the user's confirmation (see
-  `decisions.md`, Renewals).
+  tuned on its own. The 15/15 split is settled (`decisions.md`, Renewals).
 
 ## Build
 
@@ -89,9 +88,12 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 ### Server: `src/server/modules/ratings/` (Backend engineer)
 
 - **`rules.ts`** imports nothing. It holds `STARS = [1..5]`, `NOTE_MAX = 280`,
-  `WINDOW_DAYS = 14`, `OVERALL_MIN_SESSIONS = 10`, `COURSE_MIN_RATINGS = 5`, and
-  `publicRating(sum, count, unlocked)`, which returns `{ average: "4.7", count }` or
-  `null`. The client form imports these, so this file must stay import-free (see the
+  `WINDOW_DAYS = 14`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, and
+  `publicRating(sum, count, sessions)`, which returns `{ average: "4.7", count }` when
+  `sessions >= MIN_SESSIONS && count >= MIN_RATINGS`, and `null` otherwise. The same
+  gate applies to both ratings: for the overall rating, `count` is all of the tutor's
+  ratings; for a course rating, it is that course's ratings, with the tutor's total
+  sessions. The client form imports these, so this file must stay import-free (see the
   CLAUDE.md conventions).
 - **`src/server/modules/scoring/posterior.ts`** is pure and unit-tested. It holds two
   functions, both returning basis points:
@@ -122,9 +124,10 @@ Review the plans for the aggregate and for the card read. Neither may read acros
     bought again.
 - **`reads.ts`**:
   - `cardRatings(institutionId, tutorCourseIds)` returns, per card, the course
-    `publicRating` and the overall one. Overall is unlocked by counting the tutor's
-    `session_earned` rows. The threshold is applied *here*: below it the function
-    returns `null`, never the numbers.
+    `publicRating` and the overall one. Sessions are the count of the tutor's
+    `session_earned` rows across all courses, and both ratings use that count. The
+    threshold is applied *here*: below it the function returns `null`, never the
+    numbers.
   - `notesForTutor(actor)` returns note text and course only, for ratings whose window
     has closed, with no student or date.
 - **`matching/score.ts`**:

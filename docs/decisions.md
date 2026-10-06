@@ -293,12 +293,17 @@ stays rejected.
 Calc I and weak in Organic, so the course rating is the one that matters on a course's
 deck, and the overall rating sits beside it.
 
-- **Overall** shows once the tutor has 10 delivered paid sessions, in any course or
-  courses. It averages every rating the tutor has, across all their courses.
-- **Course** shows once that `tutor_course` has 5 ratings. *To confirm with the user:*
-  the brief read "course rating appears after 5" as five ratings, not five paid
-  sessions in that course. Five sessions can carry one rating, and "5.0 · 1 rating" is
-  the number this threshold exists to prevent.
+- **No rating is public until the tutor has 10 delivered paid sessions**, in any
+  course or courses. That holds for both the overall rating and every course rating.
+- **Overall** shows when the tutor has at least 10 sessions *and* at least 5 ratings.
+  It averages every rating the tutor has, across all their courses.
+- **Course** shows when the tutor has at least 10 sessions *and* that `tutor_course`
+  has at least 5 ratings. The threshold counts ratings, not sessions in the course:
+  five sessions can carry one rating, and "5.0 · 1 rating" is the number this
+  threshold exists to prevent.
+- Requiring 5 ratings for the overall rating too stops it from showing "2.0 · 1
+  rating". It also stops it from revealing, for a tutor with one course, a course
+  average that is still below its own threshold.
 - **Shown as average and count**, e.g. "4.7 · 12 ratings", the average to one decimal.
   Below its threshold a rating reads "New tutor" (overall) or "New in this course",
   and its average and count never leave the server.
@@ -375,8 +380,9 @@ reports and a human, never for an average.
 **The old objections, answered honestly:**
 
 - *The absence of a rating is itself a signal.* Accepted, because of the threshold.
-  "New tutor" means fewer than 10 sessions and "New in this course" means fewer than
-  five ratings. Both are volume facts, not quality judgements, and the ranker scores
+  "New tutor" means fewer than 10 sessions or fewer than five ratings, and "New in
+  this course" means either of those or fewer than five ratings in the course. All of
+  them are volume facts, not quality judgements, and the ranker scores
   them at the prior, so on the deck "new" is not "bad". A student may still prefer the
   rated tutor. That is the price of the decision, and the bandit is what spends
   exposure on new tutors deliberately.
@@ -425,9 +431,8 @@ prior strength 5, and both fall back from course to campus once there are fewer 
 They are not blended into one number. They have different scales, different priors
 and different failure modes: stars inflate, and renewals read a student who passed and
 stopped as a loss. Keeping them apart lets either weight be tuned without re-deriving
-the other. *To confirm with the user:* 15/15 is the recommendation. The alternative is
-to keep stars at 30 and add renewals at 30 on top, which makes earned signals rival a
-professor match.
+the other. The rejected alternative was to keep stars at 30 and add renewals at 30 on
+top, which would make earned signals rival a professor match.
 
 **Tutors get the rule, never the number.** One line on the tutor home: *"Students who
 book you again through Quad Tutor move you up for that course."* The tutor sees no
@@ -444,9 +449,9 @@ disintermediation*. The first-purchase default is still exam-anchored.
 **Direct mid-term renewal is the next item after public ratings.** A pair renews with
 the same tutor from their thread or the session page, without going back through the
 deck or making a new request. The matching cost is sunk, which is the same reasoning
-as the top-up. The tutor still has to have open slots, and booking from posted hours is
-already their consent. *To confirm when it is proposed:* whether a direct renewal
-skips the tutor's accept step entirely, or keeps a lighter one.
+as the top-up. **The tutor's accept step stays.** Double opt-in holds on every
+package, so a direct renewal is a request to this one tutor that skips the deck, not a
+purchase the tutor never agreed to. The tutor also still needs open slots.
 
 ### Technical
 
