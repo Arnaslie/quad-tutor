@@ -4,6 +4,7 @@ import {
   uuid,
   text,
   integer,
+  smallint,
   boolean,
   timestamp,
   date,
@@ -20,6 +21,7 @@ import {
   REPORT_REASONS,
   THREAD_SIDES,
 } from "../modules/messaging/rules";
+import { NOTE_MAX } from "../modules/ratings/rules";
 
 import { user, session, account, verification } from "./auth-schema";
 
@@ -630,6 +632,41 @@ export const userBlock = pgTable(
   ],
 );
 
+export const sessionRating = pgTable(
+  "session_rating",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessionBooking.id),
+    tutorCourseId: uuid("tutor_course_id")
+      .notNull()
+      .references(() => tutorCourse.id),
+    studentProfileId: uuid("student_profile_id")
+      .notNull()
+      .references(() => studentProfile.id),
+    stars: smallint("stars").notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedByUserId: text("removed_by_user_id").references(() => user.id),
+  },
+  (t) => [
+    uniqueIndex("session_rating_session_idx").on(t.sessionId),
+    index("session_rating_tutor_course_idx")
+      .on(t.institutionId, t.tutorCourseId)
+      .where(sql`${t.removedAt} is null`),
+    index("session_rating_student_idx").on(t.studentProfileId),
+    check("session_rating_stars", sql`${t.stars} between 1 and 5`),
+    check("session_rating_note_length", sql`char_length(${t.note}) <= ${sql.raw(String(NOTE_MAX))}`),
+  ],
+);
+
 export const messageReport = pgTable(
   "message_report",
   {
@@ -637,9 +674,8 @@ export const messageReport = pgTable(
     institutionId: uuid("institution_id")
       .notNull()
       .references(() => institution.id),
-    threadId: uuid("thread_id")
-      .notNull()
-      .references(() => messageThread.id),
+    threadId: uuid("thread_id").references(() => messageThread.id),
+    sessionRatingId: uuid("session_rating_id").references(() => sessionRating.id),
     reporterUserId: text("reporter_user_id")
       .notNull()
       .references(() => user.id),
@@ -654,6 +690,8 @@ export const messageReport = pgTable(
   (t) => [
     index("message_report_institution_idx").on(t.institutionId, t.reviewedAt),
     index("message_report_thread_idx").on(t.threadId),
+    index("message_report_session_rating_idx").on(t.sessionRatingId),
+    check("message_report_subject", sql`num_nonnulls(${t.threadId}, ${t.sessionRatingId}) = 1`),
   ],
 );
 

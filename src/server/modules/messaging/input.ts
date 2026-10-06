@@ -11,15 +11,18 @@ export const sendInput = z.object({
     .max(MESSAGE_MAX_LENGTH, `Keep it under ${MESSAGE_MAX_LENGTH} characters.`),
 });
 
-export const reportInput = z.object({
-  threadId: z.uuid(),
+const reportFields = {
   reason: z.enum(REPORT_REASONS, "Pick a reason."),
   note: z
     .string()
     .trim()
     .max(REPORT_NOTE_MAX_LENGTH)
     .transform((note) => note || null),
-});
+};
+
+export const reportInput = z.object({ threadId: z.uuid(), ...reportFields });
+
+export const ratingReportInput = z.object({ sessionRatingId: z.uuid(), ...reportFields });
 
 export const blockInput = z.object({
   threadId: z.uuid(),

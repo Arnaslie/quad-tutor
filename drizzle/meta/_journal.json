@@ -127,6 +127,13 @@
       "when": 1791129926685,
       "tag": "0017_location_stamp_ms",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791247883789,
+      "tag": "0018_session_rating",
+      "breakpoints": true
     }
   ]
 }

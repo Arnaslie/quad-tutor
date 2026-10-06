@@ -18,14 +18,23 @@ export const REPORT_REASON_LABEL: Record<ReportReason, string> = {
   other: "Something else",
 };
 
-export const REPORT_OUTCOMES = ["no_action", "warned", "escalated"] as const;
+export const REPORT_OUTCOMES = ["no_action", "warned", "escalated", "removed"] as const;
 export type ReportOutcome = (typeof REPORT_OUTCOMES)[number];
 
 export const REPORT_OUTCOME_LABEL: Record<ReportOutcome, string> = {
   no_action: "No action needed",
   warned: "Warned the sender",
   escalated: "Escalated",
+  removed: "Removed the rating",
 };
+
+export type ReportSubject = "thread" | "rating";
+
+export function outcomesFor(subject: ReportSubject): readonly ReportOutcome[] {
+  return subject === "rating"
+    ? REPORT_OUTCOMES
+    : REPORT_OUTCOMES.filter((outcome) => outcome !== "removed");
+}
 
 export const DELETED_USER = "Deleted user";
 
