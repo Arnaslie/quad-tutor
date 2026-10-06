@@ -166,7 +166,7 @@ function StudentNotes({ notes }: { notes: TutorNote[] }) {
       <div className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold tracking-tight">What students wrote</h2>
         <p className="text-sm text-muted">
-          Notes show up here once a session&apos;s rating window has closed, without a name or a date.
+          Notes show up here in groups, a while after sessions end, without a name or a date.
         </p>
       </div>
       {notes.length === 0 ? (

@@ -57,7 +57,7 @@ export function RatingForm({
       <Field
         id={noteId}
         label="Anything to add? (optional)"
-        hint={`${note.length} / ${NOTE_MAX}. Your tutor sees notes after ratings close, without your name.`}
+        hint={`${note.length} / ${NOTE_MAX}. Your tutor sees notes later, grouped with others, without your name.`}
       >
         <Textarea
           id={noteId}
