@@ -45,6 +45,7 @@ import { MessagingError } from "@/server/modules/messaging/threads";
 
 import { rateSession } from "./capture";
 import { cardRatings, notesForTutor, sessionRatingState } from "./reads";
+import { releaseRatings } from "./release";
 import { WINDOW_DAYS } from "./rules";
 import { RatingError } from "./window";
 
@@ -199,6 +200,18 @@ const counts = async () => ({
   ledger: (await db.select({ n: sql<number>`count(*)::int` }).from(ledgerEntry).where(eq(ledgerEntry.engagementId, engagementId)))[0].n,
 });
 
+const releaseStamps = async (id: string) =>
+  (
+    await db
+      .select({
+        released: sql<number>`count(${sessionRating.releasedAt})::int`,
+        stamps: sql<number>`count(distinct ${sessionRating.releasedAt})::int`,
+        pending: sql<number>`(count(*) filter (where ${sessionRating.releasedAt} is null))::int`,
+      })
+      .from(sessionRating)
+      .where(eq(sessionRating.tutorCourseId, id))
+  )[0];
+
 before(async () => {
   home = await campus("home");
   away = await campus("away");
@@ -305,7 +318,7 @@ test("a non-owner can't rate, or see the rating", async () => {
   assert.equal(await sessionRatingState(stranger, sessionId), null);
 });
 
-test("after the window the rating is fixed and the note reaches the tutor, anonymously", async () => {
+test("after the window the rating is fixed, and its note waits for a release", async () => {
   await ageRecognition(WINDOW_DAYS - 1);
   assert.equal((await sessionRatingState(student, sessionId))?.open, true);
   assert.deepEqual(await notesForTutor(tutor), []);
@@ -321,40 +334,64 @@ test("after the window the rating is fixed and the note reaches the tutor, anony
     .where(and(eq(ledgerEntry.sessionId, sessionId), eq(ledgerEntry.type, "session_earned")));
   assert.equal(state?.closesAt.getTime(), new Date(earned.at).getTime());
 
+  assert.equal(await releaseRatings(home.institutionId), 0);
+  assert.deepEqual(await notesForTutor(tutor), [], "a closed note stays hidden until its batch releases");
+});
+
+test("the first 5 closed ratings release together, and the note reaches the tutor anonymously", async () => {
+  const tcB = await claim(tutor, home.b.courseId);
+  const b = await engagementFor(tcB, home.b.offeringId);
+
+  await delivered({ engagementId, count: 3, rate: { tutorCourseId, stars: [4, 4, 5] } });
+  await delivered({ engagementId: b.id, count: 4, rate: { tutorCourseId: tcB, stars: [2] } });
+  assert.equal(await releaseRatings(home.institutionId), 0);
+  const four = await cardRatings(home.institutionId, [tutorCourseId, tcB]);
+  assert.deepEqual(four.get(tutorCourseId), { courseRating: null, overallRating: null }, "4 closed ratings");
+  assert.deepEqual(four.get(tcB), { courseRating: null, overallRating: null });
+
+  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [3] } });
+  const unreleased = await cardRatings(home.institutionId, [tutorCourseId]);
+  assert.deepEqual(unreleased.get(tutorCourseId), { courseRating: null, overallRating: null }, "closed is not enough");
+  assert.deepEqual(await notesForTutor(tutor), []);
+
+  assert.equal(await releaseRatings(home.institutionId), 5);
+  assert.deepEqual(await releaseStamps(tutorCourseId), { released: 5, stamps: 1, pending: 0 });
+  const nine = await cardRatings(home.institutionId, [tutorCourseId]);
+  assert.deepEqual(nine.get(tutorCourseId), { courseRating: null, overallRating: null }, "9 sessions, 5 released ratings");
+
+  await delivered({ engagementId: b.id, count: 1 });
+  const rated = await cardRatings(home.institutionId, [tutorCourseId, tcB]);
+  const publicA = { average: "4.2", count: 5 };
+  assert.deepEqual(rated.get(tutorCourseId), { courseRating: publicA, overallRating: publicA }, "B's lone rating stays out of overall");
+  assert.deepEqual(rated.get(tcB), { courseRating: null, overallRating: publicA });
+  assert.equal(await releaseRatings(home.institutionId), 0, "a re-run releases nothing");
+
   const notes = await notesForTutor(tutor);
   assert.equal(notes.length, 1);
   assert.deepEqual(Object.keys(notes[0]).sort(), ["courseLabel", "note", "ratingId", "reported"]);
   assert.equal(notes[0].note, "Went over the old exams.");
   assert.equal(notes[0].reported, false);
   assert.deepEqual(await notesForTutor(otherTutor), []);
-});
-
-test("card ratings stay null below each threshold and are numbers above it", async () => {
-  const tcB = await claim(tutor, home.b.courseId);
-  const b = await engagementFor(tcB, home.b.offeringId);
-
-  await delivered({ engagementId, count: 3, rate: { tutorCourseId, stars: [4, 4, 5] } });
-  await delivered({ engagementId: b.id, count: 5, rate: { tutorCourseId: tcB, stars: [2] } });
-
-  const nine = await cardRatings(home.institutionId, [tutorCourseId, tcB]);
-  assert.deepEqual(nine.get(tutorCourseId), { courseRating: null, overallRating: null }, "9 sessions, 5 ratings");
-
-  await delivered({ engagementId: b.id, count: 1 });
-  const ten = await cardRatings(home.institutionId, [tutorCourseId, tcB]);
-  assert.deepEqual(ten.get(tutorCourseId), { courseRating: null, overallRating: null }, "4 and 1 course ratings");
-  assert.deepEqual(ten.get(tcB), { courseRating: null, overallRating: null });
-
-  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [3] } });
-  const rated = await cardRatings(home.institutionId, [tutorCourseId, tcB]);
-  const publicA = { average: "4.2", count: 5 };
-  assert.deepEqual(rated.get(tutorCourseId), { courseRating: publicA, overallRating: publicA }, "B's lone rating stays out of overall");
-  assert.deepEqual(rated.get(tcB), { courseRating: null, overallRating: publicA });
-
-  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [1] }, recognisedDaysAgo: WINDOW_DAYS - 4 });
-  const inWindow = await cardRatings(home.institutionId, [tutorCourseId]);
-  assert.deepEqual(inWindow.get(tutorCourseId), { courseRating: publicA, overallRating: publicA }, "an open-window rating is not counted");
 
   assert.equal((await cardRatings(away.institutionId, [tutorCourseId])).size, 0, "no read across campuses");
+});
+
+test("after the first release, ratings release in batches of 3, and an open-window rating never does", async () => {
+  const publicA = { average: "4.2", count: 5 };
+  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [1] }, recognisedDaysAgo: WINDOW_DAYS - 4 });
+  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [1] } });
+  assert.equal(await releaseRatings(home.institutionId), 0);
+  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [1] } });
+  assert.equal(await releaseRatings(home.institutionId), 0);
+  const two = await cardRatings(home.institutionId, [tutorCourseId]);
+  assert.deepEqual(two.get(tutorCourseId), { courseRating: publicA, overallRating: publicA }, "1 or 2 closed ratings change nothing");
+
+  await delivered({ engagementId, count: 1, rate: { tutorCourseId, stars: [1] } });
+  assert.equal(await releaseRatings(home.institutionId), 3);
+  assert.deepEqual(await releaseStamps(tutorCourseId), { released: 8, stamps: 2, pending: 1 });
+  const eight = { average: "3.0", count: 8 };
+  assert.deepEqual((await cardRatings(home.institutionId, [tutorCourseId])).get(tutorCourseId), { courseRating: eight, overallRating: eight });
+  assert.equal(await releaseRatings(home.institutionId), 0, "the open-window rating stays unreleased");
 });
 
 test("open-window ratings stay out of the course count but their sessions count, and overall sums every public course", async () => {
@@ -367,6 +404,7 @@ test("open-window ratings stay out of the course count but their sessions count,
   await delivered({ engagementId: a.id, count: 4, rate: { tutorCourseId: tcA, stars: [5, 5, 4, 4] } });
   await delivered({ engagementId: a.id, count: 1, rate: { tutorCourseId: tcA, stars: [1] }, recognisedDaysAgo: 1 });
   await delivered({ engagementId: b.id, count: 5, rate: { tutorCourseId: tcB, stars: [3, 3, 3, 3, 3] } });
+  assert.equal(await releaseRatings(home.institutionId), 5);
 
   const gated = await cardRatings(home.institutionId, [tcA, tcB]);
   const publicB = { average: "3.0", count: 5 };
@@ -374,10 +412,23 @@ test("open-window ratings stay out of the course count but their sessions count,
   assert.deepEqual(gated.get(tcB), { courseRating: publicB, overallRating: publicB });
 
   await delivered({ engagementId: a.id, count: 1, rate: { tutorCourseId: tcA, stars: [4] } });
+  assert.equal(await releaseRatings(home.institutionId), 5);
   const both = await cardRatings(home.institutionId, [tcA, tcB]);
   const overall = { average: "3.7", count: 10 };
   assert.deepEqual(both.get(tcA), { courseRating: { average: "4.4", count: 5 }, overallRating: overall });
   assert.deepEqual(both.get(tcB), { courseRating: publicB, overallRating: overall });
+});
+
+test("overlapping sweeps release a batch once and don't error", async () => {
+  const racer = await tutorFor("race-tutor", home.institutionId);
+  const tc = await claim(racer, home.a.courseId);
+  const e = await engagementFor(tc, home.a.offeringId);
+  await delivered({ engagementId: e.id, count: 5, rate: { tutorCourseId: tc, stars: [5, 4, 3, 2, 1] } });
+
+  const runs = await Promise.all(Array.from({ length: 4 }, () => releaseRatings(home.institutionId)));
+  assert.equal(runs.reduce((sum, n) => sum + n, 0), 5);
+  assert.deepEqual(await releaseStamps(tc), { released: 5, stamps: 1, pending: 0 });
+  assert.equal(await releaseRatings(home.institutionId), 0);
 });
 
 test("a reported rating is reviewed beside thread reports, and removal takes it out of every aggregate", async () => {
@@ -425,7 +476,7 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
   await reviewReport({ operator: ops, reportId: threadReport.id, outcome: "warned" });
 
   const beforeRemoval = (await cardRatings(home.institutionId, [tutorCourseId])).get(tutorCourseId);
-  assert.equal(beforeRemoval?.overallRating?.count, 5);
+  assert.equal(beforeRemoval?.overallRating?.count, 8);
 
   await assert.rejects(reviewReport({ operator: awayOps, reportId: ratingReport.id, outcome: "removed" }), MessagingError);
   await reviewReport({ operator: ops, reportId: ratingReport.id, outcome: "removed" });
@@ -440,7 +491,8 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
   assert.equal(open.length, 0);
 
   const afterRemoval = (await cardRatings(home.institutionId, [tutorCourseId])).get(tutorCourseId);
-  assert.deepEqual(afterRemoval, { courseRating: null, overallRating: null });
+  const seven = { average: "2.7", count: 7 };
+  assert.deepEqual(afterRemoval, { courseRating: seven, overallRating: seven }, "removal leaves at once, without a release");
   assert.deepEqual(await notesForTutor(tutor), []);
   assert.equal((await sessionRatingState(student, sessionId))?.rating, null);
   await assert.rejects(rateSession({ actor: student, sessionId, stars: 5, note: null }), /removed/);

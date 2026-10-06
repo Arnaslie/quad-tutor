@@ -11,6 +11,7 @@ CREATE TABLE "session_rating" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"removed_at" timestamp with time zone,
 	"removed_by_user_id" text,
+	"released_at" timestamp with time zone,
 	CONSTRAINT "session_rating_stars" CHECK ("session_rating"."stars" between 1 and 5),
 	CONSTRAINT "session_rating_note_length" CHECK (char_length("session_rating"."note") <= 280)
 );

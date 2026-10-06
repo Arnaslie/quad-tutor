@@ -660,6 +660,7 @@ export const sessionRating = pgTable(
 
     removedAt: timestamp("removed_at", { withTimezone: true }),
     removedByUserId: text("removed_by_user_id").references(() => user.id),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
   },
   (t) => [
     uniqueIndex("session_rating_session_idx").on(t.sessionId),

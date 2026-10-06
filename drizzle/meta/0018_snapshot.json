@@ -2929,6 +2929,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
