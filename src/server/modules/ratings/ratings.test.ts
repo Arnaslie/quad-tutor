@@ -43,7 +43,7 @@ import {
 } from "@/server/modules/messaging/reports";
 import { MessagingError } from "@/server/modules/messaging/threads";
 
-import { rateSession } from "./capture";
+import { rateSession, saveRating } from "./capture";
 import { cardRatings, notesForTutor, sessionRatingState } from "./reads";
 import { releaseRatings } from "./release";
 import { WINDOW_DAYS } from "./rules";
@@ -498,10 +498,17 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
   await assert.rejects(rateSession({ actor: student, sessionId, stars: 5, note: null }), /removed/);
 });
 
-async function pastOffering(): Promise<string> {
+const ENDED_AGO = WINDOW_DAYS + 2;
+
+async function dbDate(daysAgo: number): Promise<string> {
+  const [row] = await db.select({ day: sql<string>`(current_date - ${daysAgo}::int)::text` }).from(institution).limit(1);
+  return row.day;
+}
+
+async function pastOffering(endedDaysAgo = ENDED_AGO): Promise<string> {
   const [past] = await db
     .insert(term)
-    .values({ institutionId: home.institutionId, name: `Past ${randomUUID().slice(0, 6)}`, startsOn: inDays(-150), endsOn: inDays(-1) })
+    .values({ institutionId: home.institutionId, name: `Past ${randomUUID().slice(0, 6)}`, startsOn: inDays(-150), endsOn: await dbDate(endedDaysAgo) })
     .returning({ id: term.id });
   const [row] = await db
     .insert(courseOffering)
@@ -510,10 +517,11 @@ async function pastOffering(): Promise<string> {
   return row.id;
 }
 
-async function termEndPool(key: string) {
+async function termEndPool(key: string, endedDaysAgo?: number) {
   const owner = await tutorFor(key, home.institutionId);
   const tc = await claim(owner, home.a.courseId);
-  return { tc, ended: await engagementFor(tc, await pastOffering()), current: await engagementFor(tc, home.a.offeringId) };
+  const endedOffering = await pastOffering(endedDaysAgo);
+  return { tc, endedOffering, ended: await engagementFor(tc, endedOffering), current: await engagementFor(tc, home.a.offeringId) };
 }
 
 test("at term end a leftover pool of 2 is released, and a pool of 1 is not", async () => {
@@ -572,4 +580,41 @@ test("a sweep for one campus leaves another campus's ratings alone", async () =>
   assert.equal(await releaseRatings(away.institutionId), 0);
   assert.deepEqual(await releaseStamps(tc), { released: 0, stamps: 0, pending: 5 });
   assert.equal(await releaseRatings(home.institutionId), 5);
+});
+
+test("a term-end pool waits until the term's rating window has passed, then releases whole", async () => {
+  const pool = await termEndPool("term-straggler", 2);
+  await delivered({ engagementId: pool.ended.id, count: 2, rate: { tutorCourseId: pool.tc, stars: [5, 1] } });
+  await delivered({ engagementId: pool.ended.id, count: 1, rate: { tutorCourseId: pool.tc, stars: [3] }, recognisedDaysAgo: 1 });
+  assert.equal(await releaseRatings(home.institutionId), 0, "2 closed and 1 open in a term ended 2 days ago");
+  assert.deepEqual(await releaseStamps(pool.tc), { released: 0, stamps: 0, pending: 3 });
+
+  const [offering] = await db.select({ termId: courseOffering.termId }).from(courseOffering).where(eq(courseOffering.id, pool.endedOffering));
+  await db.update(term).set({ endsOn: await dbDate(ENDED_AGO) }).where(eq(term.id, offering.termId));
+  await db
+    .update(ledgerEntry)
+    .set({ occurredAt: new Date(Date.now() - (WINDOW_DAYS + 1) * 86_400_000) })
+    .where(eq(ledgerEntry.engagementId, pool.ended.id));
+  assert.equal(await releaseRatings(home.institutionId), 3);
+  assert.deepEqual(await releaseStamps(pool.tc), { released: 3, stamps: 1, pending: 0 });
+});
+
+test("a term ending today, or exactly a window and a day ago, holds its pool", async () => {
+  const today = await termEndPool("term-today", 0);
+  await delivered({ engagementId: today.ended.id, count: 2, rate: { tutorCourseId: today.tc, stars: [4, 4] } });
+  const edge = await termEndPool("term-edge", WINDOW_DAYS + 1);
+  await delivered({ engagementId: edge.ended.id, count: 2, rate: { tutorCourseId: edge.tc, stars: [4, 4] } });
+  assert.equal(await releaseRatings(home.institutionId), 0);
+  assert.deepEqual(await releaseStamps(today.tc), { released: 0, stamps: 0, pending: 2 });
+  assert.deepEqual(await releaseStamps(edge.tc), { released: 0, stamps: 0, pending: 2 });
+});
+
+test("the upsert itself refuses an edit once the window has closed", async () => {
+  const { rows } = await closedPool("window-sql", 1);
+  const [row] = rows;
+  const { institutionId, sessionId: rated, tutorCourseId: tc, studentProfileId } = row;
+  const saved = await saveRating({ institutionId, sessionId: rated, tutorCourseId: tc, studentProfileId, stars: 5, note: "late edit" });
+  assert.equal(saved.length, 0);
+  const [after] = await db.select().from(sessionRating).where(eq(sessionRating.id, row.id));
+  assert.deepEqual([after.stars, after.note], [2, null]);
 });

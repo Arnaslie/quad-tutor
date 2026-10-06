@@ -3,7 +3,7 @@ import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/server/db";
 import { courseOffering, engagement, sessionBooking, sessionRating, term } from "@/server/db/schema";
 
-import { MIN_RATINGS, RELEASE_BATCH, TERM_END_MIN } from "./rules";
+import { MIN_RATINGS, RELEASE_BATCH, TERM_END_MIN, WINDOW_DAYS } from "./rules";
 import { ratingWindowClosed } from "./window";
 
 const RELEASE_LOCK = 0x5241;
@@ -21,7 +21,7 @@ export async function releaseRatings(institutionId: string): Promise<number> {
           id: sessionRating.id,
           tutorCourseId: sessionRating.tutorCourseId,
           pending: sql<number>`count(*) over (partition by ${sessionRating.tutorCourseId})`.as("pending"),
-          termsEnded: sql<boolean>`bool_and(${term.endsOn} < current_date) over (partition by ${sessionRating.tutorCourseId})`.as(
+          termsEnded: sql<boolean>`bool_and(${term.endsOn} + ${WINDOW_DAYS + 1}::int < current_date) over (partition by ${sessionRating.tutorCourseId})`.as(
             "terms_ended",
           ),
         })

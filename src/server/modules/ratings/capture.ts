@@ -26,19 +26,24 @@ export async function rateSession(params: {
   if (row.removedAt) throw new RatingError("This rating was removed and can't be changed.");
   if (!row.open) throw new RatingError("Ratings for this session have closed.");
 
-  const saved = await db
+  const saved = await saveRating({
+    institutionId: actor.institutionId,
+    sessionId,
+    tutorCourseId: row.tutorCourseId,
+    studentProfileId: actor.studentProfileId,
+    stars,
+    note,
+  });
+  if (saved.length === 0) throw new RatingError("This rating is closed or was removed and can't be changed.");
+}
+
+export function saveRating(values: typeof sessionRating.$inferInsert) {
+  return db
     .insert(sessionRating)
-    .values({
-      institutionId: actor.institutionId,
-      sessionId,
-      tutorCourseId: row.tutorCourseId,
-      studentProfileId: actor.studentProfileId,
-      stars,
-      note,
-    })
+    .values(values)
     .onConflictDoUpdate({
       target: sessionRating.sessionId,
-      set: { stars, note, updatedAt: sql`now()` },
+      set: { stars: values.stars, note: values.note, updatedAt: sql`now()` },
       setWhere: and(
         isNull(sessionRating.removedAt),
         isNull(sessionRating.releasedAt),
@@ -46,5 +51,4 @@ export async function rateSession(params: {
       ),
     })
     .returning({ id: sessionRating.id });
-  if (saved.length === 0) throw new RatingError("This rating is closed or was removed and can't be changed.");
 }

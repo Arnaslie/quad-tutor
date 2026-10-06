@@ -668,7 +668,7 @@ export const sessionRating = pgTable(
       .on(t.institutionId, t.tutorCourseId)
       .where(sql`${t.removedAt} is null and ${t.releasedAt} is not null`),
     index("session_rating_pending_idx")
-      .on(t.tutorCourseId)
+      .on(t.institutionId, t.tutorCourseId)
       .where(sql`${t.releasedAt} is null and ${t.removedAt} is null`),
     index("session_rating_student_idx").on(t.studentProfileId),
     check("session_rating_stars", sql`${t.stars} between 1 and 5`),

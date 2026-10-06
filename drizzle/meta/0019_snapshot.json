@@ -2979,6 +2979,12 @@
           "name": "session_rating_pending_idx",
           "columns": [
             {
+              "expression": "institution_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "tutor_course_id",
               "isExpression": false,
               "asc": true,
