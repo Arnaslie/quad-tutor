@@ -14,6 +14,7 @@ import {
   verificationFile,
 } from "@/server/db/schema";
 import type { OperatorActor, TutorActor } from "@/server/modules/identity/actor";
+import { refreshScores } from "@/server/modules/scoring/stats";
 
 import {
   PDF_TYPE,
@@ -204,6 +205,11 @@ async function decide(
   await purgeProofFiles(campus[0].institutionId).catch((error) => {
     console.error(`[verification] purge after decision on ${tutorCourseId} failed`, error);
   });
+  if (outcome.status === "active") {
+    await refreshScores(campus[0].institutionId).catch((error) => {
+      console.error(`[verification] score refresh after approving ${tutorCourseId} failed`, error);
+    });
+  }
 }
 
 export function verifyClaim(params: {

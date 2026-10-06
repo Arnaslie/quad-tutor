@@ -20,16 +20,9 @@ const STATS_LOCK = 0x5343;
 
 type Pools = { stars: Pool; renewals: Pool };
 
-type Refreshed = {
-  id: string;
-  scoreSampleCount: number;
-  scorePosteriorMean: number;
-  renewalTrialCount: number;
-  renewalPosteriorMean: number;
-};
-
 export async function refreshScores(institutionId: string): Promise<number> {
   return db.transaction(async (tx) => {
+    await tx.execute(sql`set local lock_timeout = '5s'`);
     await tx.execute(sql`select pg_advisory_xact_lock(${STATS_LOCK}::int, hashtext(${institutionId}))`);
 
     const ratings = tx.$with("ratings").as(
@@ -85,27 +78,25 @@ export async function refreshScores(institutionId: string): Promise<number> {
       .leftJoin(renewals, eq(renewals.renewedId, tutorCourse.id))
       .where(eq(tutorCourse.institutionId, institutionId));
 
-    const own = new Map<string, Pools>();
     const byCourse = new Map<string, Pools>();
     let campus: Pools = { stars: EMPTY_POOL, renewals: EMPTY_POOL };
     for (const row of rows) {
-      const pools = { stars: starPool(row.count, row.starSum), renewals: renewalPool(row.trials, row.successes) };
-      own.set(row.id, pools);
+      const pools = poolsOf(row);
       byCourse.set(row.courseId, sum(byCourse.get(row.courseId), pools));
       campus = sum(campus, pools);
     }
 
-    const refreshed: Refreshed[] = rows
+    const refreshed = rows
       .filter((row) => row.active)
       .map((row) => {
-        const pools = own.get(row.id)!;
+        const pools = poolsOf(row);
         const course = byCourse.get(row.courseId)!;
         return {
           id: row.id,
-          scoreSampleCount: pools.stars.samples,
-          scorePosteriorMean: posteriorBp(pools.stars, priorBp(course.stars, campus.stars, STAR_PRIOR_BP)),
-          renewalTrialCount: pools.renewals.samples,
-          renewalPosteriorMean: posteriorBp(pools.renewals, priorBp(course.renewals, campus.renewals, RENEWAL_PRIOR_BP)),
+          score_sample_count: pools.stars.samples,
+          score_posterior_mean: posteriorBp(pools.stars, priorBp(course.stars, campus.stars, STAR_PRIOR_BP)),
+          renewal_trial_count: pools.renewals.samples,
+          renewal_posterior_mean: posteriorBp(pools.renewals, priorBp(course.renewals, campus.renewals, RENEWAL_PRIOR_BP)),
         };
       });
     if (refreshed.length === 0) return 0;
@@ -116,7 +107,7 @@ export async function refreshScores(institutionId: string): Promise<number> {
         score_posterior_mean = v.score_posterior_mean,
         renewal_trial_count = v.renewal_trial_count,
         renewal_posterior_mean = v.renewal_posterior_mean
-      from jsonb_to_recordset(${JSON.stringify(refreshed.map(toColumns))}::jsonb) as v(
+      from jsonb_to_recordset(${JSON.stringify(refreshed)}::jsonb) as v(
         id uuid, score_sample_count int, score_posterior_mean int, renewal_trial_count int, renewal_posterior_mean int
       )
       where ${tutorCourse.id} = v.id
@@ -133,12 +124,6 @@ function sum(a: Pools | undefined, b: Pools): Pools {
   return a ? { stars: addPools(a.stars, b.stars), renewals: addPools(a.renewals, b.renewals) } : b;
 }
 
-function toColumns(row: Refreshed) {
-  return {
-    id: row.id,
-    score_sample_count: row.scoreSampleCount,
-    score_posterior_mean: row.scorePosteriorMean,
-    renewal_trial_count: row.renewalTrialCount,
-    renewal_posterior_mean: row.renewalPosteriorMean,
-  };
+function poolsOf(row: { count: number; starSum: number; trials: number; successes: number }): Pools {
+  return { stars: starPool(row.count, row.starSum), renewals: renewalPool(row.trials, row.successes) };
 }

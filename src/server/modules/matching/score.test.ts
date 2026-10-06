@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   EMPTY_POOL,
   RENEWAL_PRIOR_BP,
+  STAR_PRIOR_BP,
   posteriorBp,
   priorBp,
   renewalPool,
@@ -52,8 +53,7 @@ test("an unrated tutor scored at the prior is not below a rated average tutor", 
   assert.equal(rankCandidates([average, unrated])[0].tutorCourseId, "a-unrated");
 });
 
-test("a claim the stats job hasn't reached yet adds nothing for either term", () => {
-  assert.equal(scoreCandidate(base), 20 - 5);
-  assert.equal(scoreCandidate({ ...base, scorePosteriorMeanBp: 7_500 }), 15 + 11.25);
-  assert.equal(scoreCandidate({ ...base, renewalPosteriorMeanBp: 4_000 }), 15 + 6);
+test("a claim at both fallback priors scores what approval now writes for it", () => {
+  const approved = { ...base, scorePosteriorMeanBp: STAR_PRIOR_BP, renewalPosteriorMeanBp: RENEWAL_PRIOR_BP };
+  assert.equal(scoreCandidate(approved), 20 - 5 + 11.25 + 6);
 });

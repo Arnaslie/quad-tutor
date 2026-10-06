@@ -26,6 +26,8 @@ import {
   notifyVerificationDecisions,
 } from "@/server/modules/notifications/dispatch";
 
+import { RENEWAL_PRIOR_BP, STAR_PRIOR_BP } from "@/server/modules/scoring/posterior";
+
 import { proofStore } from "./proof-store";
 import {
   VerificationError,
@@ -185,7 +187,7 @@ after(async () => {
   await db.$client.end();
 });
 
-test("approval activates the claim, deletes the proof and emails the waiting student once", async () => {
+test("approval activates the claim at both ranking priors, deletes the proof and emails the waiting student once", async () => {
   const id = await claim(home.courseIds[0]);
 
   await assert.rejects(
@@ -211,6 +213,8 @@ test("approval activates the claim, deletes the proof and emails the waiting stu
   assert.equal(approved.status, "active");
   assert.ok(approved.verifiedAt);
   assert.equal(approved.reviewedByUserId, ops.userId);
+  assert.equal(approved.scorePosteriorMean, STAR_PRIOR_BP);
+  assert.equal(approved.renewalPosteriorMean, RENEWAL_PRIOR_BP);
   assert.equal((await currentFiles(id)).length, 0);
   assert.equal(await proofStore().get(file.pathname), null);
 

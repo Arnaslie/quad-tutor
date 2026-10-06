@@ -51,10 +51,6 @@ export async function GET(request: Request) {
         console.error(`[cron] rating release for ${campus.slug} failed`, error);
         return 0;
       });
-      refreshedScores += await refreshScores(campus.id).catch((error) => {
-        console.error(`[cron] score refresh for ${campus.slug} failed`, error);
-        return 0;
-      });
       purgedProofs += await purgeProofFiles(campus.id).catch((error) => {
         console.error(`[cron] proof purge for ${campus.slug} failed`, error);
         return 0;
@@ -63,6 +59,10 @@ export async function GET(request: Request) {
       refunded += refunds.length;
       refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
       notified += await runNotifications(campus.id);
+      refreshedScores += await refreshScores(campus.id).catch((error) => {
+        console.error(`[cron] score refresh for ${campus.slug} failed`, error);
+        return 0;
+      });
     }
 
     return Response.json({
