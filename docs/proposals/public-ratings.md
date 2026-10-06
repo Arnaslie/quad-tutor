@@ -124,7 +124,15 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   is one `UPDATE tutor_course … FROM (ratings aggregate) JOIN (renewal aggregate)`,
   scoped by `institution_id`, and it writes all four fields on every active claim,
   including `n = 0`, which gets the prior. It is a full recompute, so it is
-  idempotent. The renewal aggregate works as follows:
+  idempotent.
+
+  The ratings aggregate counts only closed, unremoved ratings from the start. That
+  applies to `n`, `Σ stars` and the course and campus means behind `C`. It uses the
+  same closed-window predicate as `cardRatings`, defined once in `ratings/` and
+  imported by both, so the display and the ranker can never disagree about which
+  ratings count.
+
+  The renewal aggregate works as follows:
   - a trial is a distinct `(student_profile_id, tutor_course_id)` whose earliest
     engagement is `completed` or `refunded`;
   - a success is that pair having any later engagement;
@@ -166,11 +174,8 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   `.catch` like the proof purge, so a failure here never blocks refunds.
 - The card reads live, but it only counts closed ratings, so a new rating appears
   publicly once its 14-day window has closed. That lag is deliberate.
-- **Open for step 2:** should the ranker also count only closed ratings? The user has
-  not decided. The tech lead recommends yes, so there is one definition of a counted
-  rating, and so a deck position that moves the day after a session is not another
-  live signal. Until the user decides, `stats.ts` has no window filter and is built
-  so one can be added in a single place.
+- **The ranker counts closed ratings only** (user decision, 2026-10-06). A rating
+  reaches the ranker on the first sweep after its window closes, never before.
 - The window needs no sweep: closing is computed from `session_earned.occurred_at` at
   read time.
 - Confirm that overlapping cron runs only race to write the same values.
@@ -203,7 +208,10 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 - Grep the RSC payload of the course page for a tutor below each threshold: no
   average, no count.
 - A rating inside its window changes no public number: not a course average, an
-  overall average, a count, or a threshold crossing.
+  overall average, a count, or a threshold crossing. It also changes no
+  `tutor_course` score field.
+- `stats.ts` and `cardRatings` share one closed-window predicate. Neither has its own
+  copy.
 - With one public course and one hidden course, the overall rating equals the public
   course's rating.
 - Every open of a rating report writes exactly one access row.

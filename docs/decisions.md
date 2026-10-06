@@ -363,6 +363,11 @@ grounds for removal.
   open rating can still be edited, and a total that moves the day after one session
   tells the tutor that student's stars. Displayed numbers therefore lag by up to 14
   days. That is the price, and it is accepted.
+- **The hidden ranker counts closed ratings only, too** (user, 2026-10-06). The stats
+  job applies the same predicate to `score_sample_count`, `score_posterior_mean` and
+  the course and campus prior means. That gives one definition of a counted rating,
+  and it means a deck position that moves the day after a session cannot become a
+  live signal of one student's stars.
 - **The overall rating counts only courses whose own rating is public.** If it
   averaged every course, a tutor with one public course and one below its threshold
   could subtract the public course from the overall and recover the hidden one. With
@@ -376,7 +381,7 @@ grounds for removal.
 **The ranker smooths the course rating toward the course mean.** The stats job writes
 two fields on every active `tutor_course`, including those with no ratings:
 
-- `score_sample_count` is the number of ratings.
+- `score_sample_count` is the number of ratings (closed windows only; see below).
 - `score_posterior_mean`, in basis points of the 1–5 scale (1★ = 0, 5★ = 10 000), is
   the Bayesian average `(m·C + Σ stars) / (m + n)`, where:
   - `m = 5`, the same as the display threshold;
