@@ -497,3 +497,48 @@ test("a reported rating is reviewed beside thread reports, and removal takes it 
   assert.equal((await sessionRatingState(student, sessionId))?.rating, null);
   await assert.rejects(rateSession({ actor: student, sessionId, stars: 5, note: null }), /removed/);
 });
+
+async function pastOffering(): Promise<string> {
+  const [past] = await db
+    .insert(term)
+    .values({ institutionId: home.institutionId, name: `Past ${randomUUID().slice(0, 6)}`, startsOn: inDays(-150), endsOn: inDays(-1) })
+    .returning({ id: term.id });
+  const [row] = await db
+    .insert(courseOffering)
+    .values({ institutionId: home.institutionId, courseId: home.a.courseId, termId: past.id, section: "001" })
+    .returning({ id: courseOffering.id });
+  return row.id;
+}
+
+async function termEndPool(key: string) {
+  const owner = await tutorFor(key, home.institutionId);
+  const tc = await claim(owner, home.a.courseId);
+  return { tc, ended: await engagementFor(tc, await pastOffering()), current: await engagementFor(tc, home.a.offeringId) };
+}
+
+test("at term end a leftover pool of 2 is released, and a pool of 1 is not", async () => {
+  const two = await termEndPool("term-two");
+  await delivered({ engagementId: two.ended.id, count: 2, rate: { tutorCourseId: two.tc, stars: [4, 2] } });
+  const one = await termEndPool("term-one");
+  await delivered({ engagementId: one.ended.id, count: 1, rate: { tutorCourseId: one.tc, stars: [3] } });
+
+  assert.equal(await releaseRatings(home.institutionId), 2);
+  assert.deepEqual(await releaseStamps(two.tc), { released: 2, stamps: 1, pending: 0 });
+  assert.deepEqual(await releaseStamps(one.tc), { released: 0, stamps: 0, pending: 1 });
+});
+
+test("a pool in a running term, or mixing an ended and a running term, follows the batch rule only", async () => {
+  const running = await termEndPool("term-running");
+  await delivered({ engagementId: running.current.id, count: 2, rate: { tutorCourseId: running.tc, stars: [5, 5] } });
+  const mixed = await termEndPool("term-mixed");
+  await delivered({ engagementId: mixed.ended.id, count: 1, rate: { tutorCourseId: mixed.tc, stars: [1] } });
+  await delivered({ engagementId: mixed.current.id, count: 1, rate: { tutorCourseId: mixed.tc, stars: [5] } });
+
+  assert.equal(await releaseRatings(home.institutionId), 0);
+  assert.deepEqual(await releaseStamps(running.tc), { released: 0, stamps: 0, pending: 2 });
+  assert.deepEqual(await releaseStamps(mixed.tc), { released: 0, stamps: 0, pending: 2 });
+
+  await delivered({ engagementId: mixed.current.id, count: 3, rate: { tutorCourseId: mixed.tc, stars: [4, 4, 4] } });
+  assert.equal(await releaseRatings(home.institutionId), 5);
+  assert.deepEqual(await releaseStamps(mixed.tc), { released: 5, stamps: 1, pending: 0 });
+});

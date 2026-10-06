@@ -6,6 +6,7 @@ export const WINDOW_DAYS = 7;
 export const MIN_SESSIONS = 10;
 export const MIN_RATINGS = 5;
 export const RELEASE_BATCH = 3;
+export const TERM_END_MIN = 2;
 
 export type PublicRating = { average: string; count: number };
 
