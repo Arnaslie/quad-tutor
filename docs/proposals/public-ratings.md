@@ -3,7 +3,8 @@
 Status: **build brief, not started.** The rules are settled in `docs/decisions.md`
 (Ratings, Renewals). This file is how to build them. Written 2026-10-05 against
 `origin/docs/take-rate-cap` at `36ffa09`. Code refs are the same on `origin/main` at
-`11fa99e`.
+`11fa99e`. Updated 2026-10-06 for the aggregate rules from the ratings code review
+(`decisions.md`, Ratings, "What the aggregates count").
 
 ## What exists today
 
@@ -80,7 +81,10 @@ On `tutor_course`, add `renewal_trial_count` (integer, not null, default 0) and
 - Add `check (num_nonnulls(thread_id, session_rating_id) = 1)`.
 - Add `removed` to `report_outcome`.
 
-`message_thread_access` is unaffected: it still requires a thread report.
+Opening a rating report must write an append-only access row: operator, report and
+time, the same way `message_thread_access` does for threads. That table requires a
+`thread_id` today. Whether to generalise it or add a sibling table is for the database
+and backend engineers to decide.
 
 Review the plans for the aggregate and for the card read. Neither may read across
 `institution_id`.
@@ -91,9 +95,13 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   `WINDOW_DAYS = 14`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, and
   `publicRating(sum, count, sessions)`, which returns `{ average: "4.7", count }` when
   `sessions >= MIN_SESSIONS && count >= MIN_RATINGS`, and `null` otherwise. The same
-  gate applies to both ratings: for the overall rating, `count` is all of the tutor's
-  ratings; for a course rating, it is that course's ratings, with the tutor's total
-  sessions. The client form imports these, so this file must stay import-free (see the
+  gate applies to both ratings, always with the tutor's total sessions:
+  - for a course rating, `count` is that course's closed ratings;
+  - for the overall rating, `sum` and `count` cover only the courses whose own rating
+    is public.
+
+  Because a public course already has 5 or more, the overall rating is public exactly
+  when at least one course rating is. The client form imports these, so this file must stay import-free (see the
   CLAUDE.md conventions).
 - **`src/server/modules/scoring/posterior.ts`** is pure and unit-tested. It holds two
   functions, both returning basis points:
@@ -124,9 +132,18 @@ Review the plans for the aggregate and for the card read. Neither may read acros
     bought again.
 - **`reads.ts`**:
   - `cardRatings(institutionId, tutorCourseIds)` returns, per card, the course
-    `publicRating` and the overall one. Sessions are the count of the tutor's
-    `session_earned` rows across all courses, and both ratings use that count. The
-    threshold is applied *here*: below it the function returns `null`, never the
+    `publicRating` and the overall one. It works in three steps:
+    1. It counts only ratings whose window has closed, meaning the session's
+       `session_earned.occurred_at` is more than `WINDOW_DAYS` ago, and that are not
+       removed. That filter feeds the averages, the counts and both thresholds. An
+       open rating moves nothing a student or the tutor can see.
+    2. It computes each of the tutor's course ratings from those closed ratings.
+    3. It builds the overall rating only from the courses that came out public, so
+       subtracting a public course from the overall rating can never reveal a hidden
+       one. Courses that are not on the current deck still count, if they are public.
+
+    Sessions are the count of the tutor's `session_earned` rows across all courses.
+    The threshold is applied *here*: below it the function returns `null`, never the
     numbers.
   - `notesForTutor(actor)` returns note text and course only, for ratings whose window
     has closed, with no student or date.
@@ -139,14 +156,21 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 - **`messaging/reports.ts`**:
   - add `reportRating`, which only the rated tutor can call;
   - teach `reportsForOperator` and `reviewReport` the rating case;
+  - opening a rating report writes the access row (see Schema), in the same
+    transaction as the read, as `openReportedThread` does;
   - a `removed` outcome sets `session_rating.removed_at`.
 
 ### Sweep (Distributed-systems engineer)
 
 - Call `refreshScores(campus.id)` in the cron loop (`route.ts:45`), wrapped in
   `.catch` like the proof purge, so a failure here never blocks refunds.
-- A rating written between runs reaches the ranker on the next run. The card reads
-  live, so the student sees it at once. That lag is fine.
+- The card reads live, but it only counts closed ratings, so a new rating appears
+  publicly once its 14-day window has closed. That lag is deliberate.
+- **Open for step 2:** should the ranker also count only closed ratings? The user has
+  not decided. The tech lead recommends yes, so there is one definition of a counted
+  rating, and so a deck position that moves the day after a session is not another
+  live signal. Until the user decides, `stats.ts` has no window filter and is built
+  so one can be added in a single place.
 - The window needs no sweep: closing is computed from `session_earned.occurred_at` at
   read time.
 - Confirm that overlapping cron runs only race to write the same values.
@@ -178,6 +202,11 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 
 - Grep the RSC payload of the course page for a tutor below each threshold: no
   average, no count.
+- A rating inside its window changes no public number: not a course average, an
+  overall average, a count, or a threshold crossing.
+- With one public course and one hidden course, the overall rating equals the public
+  course's rating.
+- Every open of a rating report writes exactly one access row.
 - `TutorCard` gains only the two `PublicRating` fields.
 - Nothing in `ratings/` imports or writes `reliability_event`, and nothing in
   `reliability/` reads `session_rating`.
@@ -187,9 +216,9 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 
 ## Order
 
-1. **Ratings.** Schema, capture, card and moderation. It is useful on its own,
-   because the display reads live, and moderation has to be in before ratings reach
-   students.
+1. **Ratings.** Schema, capture, card and moderation, with the access audit. It is
+   useful on its own, because the display reads live, and moderation has to be in
+   before ratings reach students.
 2. **Ranker.** The renewal columns, `scoring/`, the cron hook, the `score.ts` split
    and guard fix, and the tutor rule line. This PR is the whole ranking change.
 
