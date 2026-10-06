@@ -3,8 +3,9 @@
 Status: **build brief, not started.** The rules are settled in `docs/decisions.md`
 (Ratings, Renewals). This file is how to build them. Written 2026-10-05 against
 `origin/docs/take-rate-cap` at `36ffa09`. Code refs are the same on `origin/main` at
-`11fa99e`. Updated 2026-10-06 for the aggregate rules from the ratings code review
-(`decisions.md`, Ratings, "What the aggregates count").
+`11fa99e`. Updated 2026-10-06 for the aggregate rules from the ratings code review,
+and again for released batches (`decisions.md`, Ratings, "What the aggregates
+count").
 
 ## What exists today
 
@@ -66,9 +67,15 @@ score += (renewalPosteriorBp / 10_000) * renewalWeight    // 15
 | `note` | text null, `check (char_length(note) <= 280)` |
 | `created_at`, `updated_at` | timestamptz |
 | `removed_at`, `removed_by_user_id` | moderation. A removed rating is out of every aggregate. |
+| `released_at` | timestamptz null. Set by the release sweep, never by capture, and never cleared. |
 
-Indexes: `(institution_id, tutor_course_id) where removed_at is null`, and
-`(student_profile_id)`.
+A counted rating is `released_at is not null and removed_at is null`. Every aggregate,
+both public and ranker, uses only that predicate.
+
+Indexes:
+- `(institution_id, tutor_course_id) where removed_at is null and released_at is not null`, for the counted set;
+- `(tutor_course_id) where released_at is null and removed_at is null`, for the release pool;
+- `(student_profile_id)`.
 
 On `tutor_course`, add `renewal_trial_count` (integer, not null, default 0) and
 `renewal_posterior_mean` (integer, basis points). The existing
@@ -92,11 +99,11 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 ### Server: `src/server/modules/ratings/` (Backend engineer)
 
 - **`rules.ts`** imports nothing. It holds `STARS = [1..5]`, `NOTE_MAX = 280`,
-  `WINDOW_DAYS = 7`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, and
+  `WINDOW_DAYS = 7`, `MIN_SESSIONS = 10`, `MIN_RATINGS = 5`, `RELEASE_BATCH = 3`, and
   `publicRating(sum, count, sessions)`, which returns `{ average: "4.7", count }` when
   `sessions >= MIN_SESSIONS && count >= MIN_RATINGS`, and `null` otherwise. The same
   gate applies to both ratings, always with the tutor's total sessions:
-  - for a course rating, `count` is that course's closed ratings;
+  - for a course rating, `count` is that course's released ratings;
   - for the overall rating, `sum` and `count` cover only the courses whose own rating
     is public.
 
@@ -126,11 +133,10 @@ Review the plans for the aggregate and for the card read. Neither may read acros
   including `n = 0`, which gets the prior. It is a full recompute, so it is
   idempotent.
 
-  The ratings aggregate counts only closed, unremoved ratings from the start. That
+  The ratings aggregate counts only released, unremoved ratings from the start. That
   applies to `n`, `Σ stars` and the course and campus means behind `C`. It uses the
-  same closed-window predicate as `cardRatings`, defined once in `ratings/` and
-  imported by both, so the display and the ranker can never disagree about which
-  ratings count.
+  same counted predicate as `cardRatings`, defined once in `ratings/` and imported by
+  both, so the display and the ranker can never disagree about which ratings count.
 
   The renewal aggregate works as follows:
   - a trial is a distinct `(student_profile_id, tutor_course_id)` whose earliest
@@ -141,11 +147,10 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 - **`reads.ts`**:
   - `cardRatings(institutionId, tutorCourseIds)` returns, per card, the course
     `publicRating` and the overall one. It works in three steps:
-    1. It counts only ratings whose window has closed, meaning the session's
-       `session_earned.occurred_at` is more than `WINDOW_DAYS` ago, and that are not
-       removed. That filter feeds the averages, the counts and both thresholds. An
-       open rating moves nothing a student or the tutor can see.
-    2. It computes each of the tutor's course ratings from those closed ratings.
+    1. It counts only released, unremoved ratings. That filter feeds the averages,
+       the counts and both thresholds. An open rating, or a closed one still waiting
+       for its batch, moves nothing a student or the tutor can see.
+    2. It computes each of the tutor's course ratings from those released ratings.
     3. It builds the overall rating only from the courses that came out public, so
        subtracting a public course from the overall rating can never reveal a hidden
        one. Courses that are not on the current deck still count, if they are public.
@@ -153,8 +158,21 @@ Review the plans for the aggregate and for the card read. Neither may read acros
     Sessions are the count of the tutor's `session_earned` rows across all courses.
     The threshold is applied *here*: below it the function returns `null`, never the
     numbers.
-  - `notesForTutor(actor)` returns note text and course only, for ratings whose window
-    has closed, with no student or date.
+  - `notesForTutor(actor)` returns note text and course only, for released ratings,
+    with no student or date. It returns them in release batches and in no order
+    within a batch, so a note can't be tied back to a session.
+- **`release.ts`** has `releaseRatings(institutionId)`. A rating is in the pool for
+  its `tutor_course` when all three hold:
+  - its window has closed: `session_earned.occurred_at` is more than `WINDOW_DAYS`
+    ago;
+  - `removed_at` is null;
+  - `released_at` is null.
+
+  If the course has no released rating yet, the pool needs at least `MIN_RATINGS`.
+  Otherwise it needs at least `RELEASE_BATCH`. When the pool is big enough, every
+  rating in it gets the same `released_at`. A pool too small is left alone, with no
+  partial release and no term-end flush. The closed-window predicate lives only here
+  now.
 - **`matching/score.ts`**:
   - split the weight as above;
   - drop the `scoreSampleCount > 0` guard at `:55` and keep the `null` checks;
@@ -170,16 +188,21 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 
 ### Sweep (Distributed-systems engineer)
 
-- Call `refreshScores(campus.id)` in the cron loop (`route.ts:45`), wrapped in
-  `.catch` like the proof purge, so a failure here never blocks refunds.
-- The card reads live, but it only counts closed ratings, so a new rating appears
-  publicly once its 7-day window has closed, so public numbers lag by up to 7 days.
-  The window was shortened from 14 days on 2026-10-06. That lag is deliberate.
-- **The ranker counts closed ratings only** (user decision, 2026-10-06). A rating
-  reaches the ranker on the first sweep after its window closes, never before.
-- The window needs no sweep: closing is computed from `session_earned.occurred_at` at
-  read time.
-- Confirm that overlapping cron runs only race to write the same values.
+- **Release sweep (step 1).** Call `releaseRatings(campus.id)` in the cron loop
+  (`route.ts:45`), wrapped in `.catch` like the proof purge, so a failure here never
+  blocks refunds.
+  - Lock each `tutor_course` with a pool, `for update`, before counting, so two
+    overlapping runs cannot each release part of a pool.
+  - The update is `where released_at is null`, so running it twice changes nothing.
+- **Stats sweep (step 2).** Call `refreshScores(campus.id)` after `releaseRatings` in
+  the same loop, so a batch reaches the ranker in the same sweep it goes public.
+- The card reads live, but it counts released ratings only. A new rating appears
+  publicly once its 7-day window has closed *and* its batch has filled. The window
+  was shortened from 14 days on 2026-10-06. Both lags are deliberate.
+- **The ranker counts released ratings only** (user decision, 2026-10-06). It is never
+  ahead of the card, and never behind it by more than one sweep.
+- Confirm that overlapping runs of `refreshScores` only race to write the same
+  values.
 
 ### Pages (Web engineer)
 
@@ -208,11 +231,15 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 
 - Grep the RSC payload of the course page for a tutor below each threshold: no
   average, no count.
-- A rating inside its window changes no public number: not a course average, an
-  overall average, a count, or a threshold crossing. It also changes no
-  `tutor_course` score field.
-- `stats.ts` and `cardRatings` share one closed-window predicate. Neither has its own
-  copy.
+- An unreleased rating, whether its window is open or closed, changes no public
+  number: not a course average, an overall average, a count, or a threshold crossing.
+  It also shows no note and changes no `tutor_course` score field.
+- A release never moves fewer than 3 ratings, and the first release for a course
+  never moves fewer than 5. Test the 2-pending case and the 4-pending-first case.
+- Two concurrent `releaseRatings` runs on the same pool release it once, as one
+  batch.
+- `stats.ts`, `cardRatings` and `notesForTutor` share one counted predicate. The
+  closed-window check appears only in `release.ts`.
 - With one public course and one hidden course, the overall rating equals the public
   course's rating.
 - Every open of a rating report writes exactly one access row.
@@ -225,9 +252,9 @@ Review the plans for the aggregate and for the card read. Neither may read acros
 
 ## Order
 
-1. **Ratings.** Schema, capture, card and moderation, with the access audit. It is
-   useful on its own, because the display reads live, and moderation has to be in
-   before ratings reach students.
+1. **Ratings.** Schema (including `released_at`), capture, the release sweep, card
+   and moderation, with the access audit. Nothing becomes public without the release
+   sweep, so it ships here, not in step 2.
 2. **Ranker.** The renewal columns, `scoring/`, the cron hook, the `score.ts` split
    and guard fix, and the tutor rule line. This PR is the whole ranking change.
 
