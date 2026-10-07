@@ -84,7 +84,7 @@ async function claim(where: Campus, courseId: string, status: "active" | "pendin
 }
 
 let bought = 0;
-async function buy(where: Campus, offeringId: string, tutorCourseId: string, studentProfileId: string, status: "active" | "completed" | "refunded") {
+async function buy(where: Campus, offeringId: string, tutorCourseId: string, studentProfileId: string, outcome: "active" | "completed" | "guarantee_refunded" | "term_refunded") {
   const [row] = await db
     .insert(engagement)
     .values({
@@ -94,8 +94,8 @@ async function buy(where: Campus, offeringId: string, tutorCourseId: string, stu
       courseOfferingId: offeringId,
       sessionsPurchased: 4,
       pricePaidMinor: 10_000,
-      status,
-      guaranteeUsed: status === "refunded",
+      status: outcome === "guarantee_refunded" || outcome === "term_refunded" ? "refunded" : outcome,
+      guaranteeUsed: outcome === "guarantee_refunded",
       createdAt: new Date(Date.UTC(2026, 8, 1) + (bought += 1) * 60_000),
     })
     .returning({ id: engagement.id });
@@ -196,10 +196,10 @@ test("a renewal is a trial and a success; a lone guarantee refund fails unless t
   await buy(home, home.b.offeringId, renewing, renewed, "active");
 
   const refunded = await student(home);
-  await buy(home, home.b.offeringId, renewing, refunded, "refunded");
+  await buy(home, home.b.offeringId, renewing, refunded, "guarantee_refunded");
 
   const refundedThenBack = await student(home);
-  await buy(home, home.b.offeringId, renewing, refundedThenBack, "refunded");
+  await buy(home, home.b.offeringId, renewing, refundedThenBack, "guarantee_refunded");
   await buy(home, home.b.offeringId, renewing, refundedThenBack, "active");
 
   const stillGoing = await student(home);
@@ -208,6 +208,20 @@ test("a renewal is a trial and a success; a lone guarantee refund fails unless t
 
   await refreshScores(home.institutionId);
   assert.deepEqual(await fields(renewing), { ...prior, renewalTrialCount: 3, renewalPosteriorMean: 5_000 });
+});
+
+test("a first package refunded at term end with no session delivered is no trial, even if the pair bought again", async () => {
+  const termEnd = await claim(home, home.b.courseId);
+  const lapsed = await student(home);
+  await buy(home, home.b.offeringId, termEnd, lapsed, "term_refunded");
+  const lapsedThenBack = await student(home);
+  await buy(home, home.b.offeringId, termEnd, lapsedThenBack, "term_refunded");
+  await buy(home, home.b.offeringId, termEnd, lapsedThenBack, "active");
+  const guaranteed = await student(home);
+  await buy(home, home.b.offeringId, termEnd, guaranteed, "guarantee_refunded");
+
+  await refreshScores(home.institutionId);
+  assert.deepEqual(await fields(termEnd), { ...prior, renewalTrialCount: 1, renewalPosteriorMean: 3_333 });
 });
 
 test("another campus is neither written nor counted toward this campus's prior", async () => {

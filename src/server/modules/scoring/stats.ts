@@ -42,7 +42,7 @@ export async function refreshScores(institutionId: string): Promise<number> {
         .select({
           pairId: engagement.tutorCourseId,
           first: sql<boolean>`row_number() over (partition by ${engagement.studentProfileId}, ${engagement.tutorCourseId} order by ${engagement.createdAt}, ${engagement.id}) = 1`.as("first"),
-          ended: sql<boolean>`${engagement.status} in ('completed', 'refunded')`.as("ended"),
+          ran: sql<boolean>`(${engagement.status} = 'completed' or (${engagement.status} = 'refunded' and ${engagement.guaranteeUsed}))`.as("ran"),
           renewed: sql<boolean>`count(*) over (partition by ${engagement.studentProfileId}, ${engagement.tutorCourseId}) > 1`.as("renewed"),
         })
         .from(engagement)
@@ -58,7 +58,7 @@ export async function refreshScores(institutionId: string): Promise<number> {
           successes: sql<number>`(count(*) filter (where ${pairs.renewed}))::int`.as("successes"),
         })
         .from(pairs)
-        .where(sql`${pairs.first} and ${pairs.ended}`)
+        .where(sql`${pairs.first} and ${pairs.ran}`)
         .groupBy(pairs.pairId),
     );
 
