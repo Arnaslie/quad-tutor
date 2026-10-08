@@ -127,12 +127,12 @@ drift:
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
 
   The rules behind it:
-  - Student before request, tutor before request, engagement before tutor.
-  - Never hold the tutor while waiting on an engagement or a session.
-    `setDefaultLocation` (`tutoring/location.ts`) also takes the tutor first and never
-    waits on a session being settled.
-  - A booking path locks an existing engagement only with key share. For update would
-    deadlock with confirmation, which takes the engagement after the tutor.
+  - Student before request; tutor before request.
+  - A path that locks an engagement before the tutor (`bookSession`) takes it only for
+    key share. Key share does not conflict with confirmation's no-key update of the
+    engagement after the tutor.
+  - Nothing holds the tutor while waiting on an engagement for update, or on a
+    session. `setDefaultLocation` (`tutoring/location.ts`) also takes the tutor first.
 - **Rounding.** Integer minor units only:
   `fee = min(floor(session × 1000 / 10000), max(0, 10000 − meter))`. Floor rounds in the
   tutor's favour, and the session that crosses the line takes a partial fee (the 29th
