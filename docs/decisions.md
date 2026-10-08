@@ -114,10 +114,25 @@ drift:
   row too and the room returns.
 - **Concurrency.** `recognise()` locks the `tutor_profile` row before reading the
   meter, so two sessions for one tutor recognised at the same moment serialise and the
-  second sees the first's fee. `recognise()` takes the tutor lock after the session
-  lock. `purchasePackage` (`engagements/purchase.ts`) and `setDefaultLocation`
-  (`tutoring/location.ts`) take the tutor first, but never wait on a session being
-  settled; keep it that way.
+  second sees the first's fee. Lock order, per path:
+
+  | Path | Order |
+  |---|---|
+  | `requestTutors`, `requestRenewal` | `student_profile` (no key update), then the student's pending `match_request` rows (for update) |
+  | `acceptRequest` | `student_profile`, then that `match_request` (for update of `match_request`) |
+  | `purchasePackage` | `tutor_profile` (no key update), then `match_request` |
+  | `purchaseTopUp` | `tutor_profile` |
+  | `bookSession` | `engagement` (for key share; re-read, refused unless `active`), then `tutor_profile` |
+  | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update) |
+  | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
+
+  The rules behind it:
+  - Student before request, tutor before request, engagement before tutor.
+  - Never hold the tutor while waiting on an engagement or a session.
+    `setDefaultLocation` (`tutoring/location.ts`) also takes the tutor first and never
+    waits on a session being settled.
+  - A booking path locks an existing engagement only with key share. For update would
+    deadlock with confirmation, which takes the engagement after the tutor.
 - **Rounding.** Integer minor units only:
   `fee = min(floor(session × 1000 / 10000), max(0, 10000 − meter))`. Floor rounds in the
   tutor's favour, and the session that crosses the line takes a partial fee (the 29th
