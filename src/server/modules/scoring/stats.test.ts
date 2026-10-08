@@ -11,6 +11,7 @@ import {
   courseOffering,
   engagement,
   institution,
+  matchRequest,
   sessionBooking,
   sessionRating,
   studentProfile,
@@ -20,7 +21,7 @@ import {
   user,
 } from "@/server/db/schema";
 
-import { RENEWAL_PRIOR_BP, STAR_PRIOR_BP } from "./posterior";
+import { RENEWAL_PRIOR_BP, STAR_PRIOR_BP, posteriorBp, renewalPool } from "./posterior";
 import { refreshScores } from "./stats";
 
 const databaseHost = new URL(process.env.DATABASE_URL ?? "postgres://unset").hostname;
@@ -84,7 +85,14 @@ async function claim(where: Campus, courseId: string, status: "active" | "pendin
 }
 
 let bought = 0;
-async function buy(where: Campus, offeringId: string, tutorCourseId: string, studentProfileId: string, outcome: "active" | "completed" | "guarantee_refunded" | "term_refunded") {
+async function buy(
+  where: Campus,
+  offeringId: string,
+  tutorCourseId: string,
+  studentProfileId: string,
+  outcome: "active" | "completed" | "guarantee_refunded" | "term_refunded",
+  kind: "exam_anchored" | "through_final" | "top_up" = "exam_anchored",
+) {
   const [row] = await db
     .insert(engagement)
     .values({
@@ -92,6 +100,7 @@ async function buy(where: Campus, offeringId: string, tutorCourseId: string, stu
       studentProfileId,
       tutorCourseId,
       courseOfferingId: offeringId,
+      kind,
       sessionsPurchased: 4,
       pricePaidMinor: 10_000,
       status: outcome === "guarantee_refunded" || outcome === "term_refunded" ? "refunded" : outcome,
@@ -158,6 +167,7 @@ after(async () => {
   const courseIds = (await db.select({ id: course.id }).from(course).where(inArray(course.institutionId, institutions))).map((row) => row.id);
   await db.delete(sessionRating).where(inArray(sessionRating.institutionId, institutions));
   await db.delete(sessionBooking).where(inArray(sessionBooking.institutionId, institutions));
+  await db.delete(matchRequest).where(inArray(matchRequest.institutionId, institutions));
   await db.delete(engagement).where(inArray(engagement.institutionId, institutions));
   await db.delete(tutorCourse).where(inArray(tutorCourse.courseId, courseIds));
   await db.delete(tutorProfile).where(inArray(tutorProfile.userId, made.users));
@@ -222,6 +232,38 @@ test("a first package refunded at term end with no session delivered is no trial
 
   await refreshScores(home.institutionId);
   assert.deepEqual(await fields(termEnd), { ...prior, renewalTrialCount: 1, renewalPosteriorMean: 3_333 });
+});
+
+test("a refill and a direct-renewal package each make the pair a success once; an accepted renewal never bought does not", async () => {
+  const direct = await claim(home, home.b.courseId);
+
+  const refilled = await student(home);
+  await buy(home, home.b.offeringId, direct, refilled, "completed");
+  await buy(home, home.b.offeringId, direct, refilled, "completed", "top_up");
+  await buy(home, home.b.offeringId, direct, refilled, "active", "top_up");
+
+  const renewed = await student(home);
+  await buy(home, home.b.offeringId, direct, renewed, "completed");
+  await buy(home, home.b.offeringId, direct, renewed, "active", "through_final");
+
+  const askedOnly = await student(home);
+  await buy(home, home.b.offeringId, direct, askedOnly, "completed");
+  await db.insert(matchRequest).values({
+    institutionId: home.institutionId,
+    studentProfileId: askedOnly,
+    tutorCourseId: direct,
+    courseOfferingId: home.b.offeringId,
+    status: "accepted",
+    requestedKind: "through_final",
+    expiresAt: new Date(),
+  });
+
+  await refreshScores(home.institutionId);
+  assert.deepEqual(await fields(direct), {
+    ...prior,
+    renewalTrialCount: 3,
+    renewalPosteriorMean: posteriorBp(renewalPool(3, 2), RENEWAL_PRIOR_BP),
+  });
 });
 
 test("another campus is neither written nor counted toward this campus's prior", async () => {
