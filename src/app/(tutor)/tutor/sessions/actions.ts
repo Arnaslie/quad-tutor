@@ -3,11 +3,8 @@
 import { revalidatePath } from "next/cache";
 
 import { SessionError } from "@/server/modules/engagements/access";
-import {
-  confirmAttendance,
-  denyAttendance,
-  type SessionOutcome,
-} from "@/server/modules/engagements/confirmation";
+import { outcomeOf, type AnswerOutcome } from "@/server/modules/engagements/answer-outcome";
+import { confirmAttendance, denyAttendance } from "@/server/modules/engagements/confirmation";
 import {
   cancelSessionInput,
   confirmAttendanceInput,
@@ -16,6 +13,7 @@ import {
 } from "@/server/modules/engagements/input";
 import { cancelSession, setSessionLocation } from "@/server/modules/engagements/scheduling";
 import { requireTutor } from "@/server/modules/identity/actor";
+import { notifySessionChangesSoon } from "@/server/modules/notifications/soon";
 
 import type { LocationState } from "../location-form";
 
@@ -25,16 +23,10 @@ export type SessionActionState =
       status: "answered";
 
       answer: "confirmed" | "denied";
-      outcome: "attended" | "not_attended" | "awaiting_other" | "disputed";
+      outcome: AnswerOutcome;
     }
   | { status: "cancelled"; late: boolean }
   | { status: "error"; message: string };
-
-function outcomeOf(result: SessionOutcome): "attended" | "not_attended" | "awaiting_other" | "disputed" {
-  if (result.status === "disputed") return "disputed";
-  if (result.status === "scheduled") return "awaiting_other";
-  return result.status === "completed" ? "attended" : "not_attended";
-}
 
 export async function answerSession(
   _previous: SessionActionState,
@@ -50,12 +42,14 @@ export async function answerSession(
         note: formData.get("note") ?? undefined,
       });
       const result = await denyAttendance({ actor, ...input });
-      return { status: "answered", answer: "denied", outcome: outcomeOf(result) };
+      notifySessionChangesSoon(actor.institutionId);
+      return { status: "answered", answer: "denied", outcome: outcomeOf(result.status) };
     }
 
     const input = confirmAttendanceInput.parse({ sessionId: formData.get("sessionId") });
     const result = await confirmAttendance({ actor, ...input });
-    return { status: "answered", answer: "confirmed", outcome: outcomeOf(result) };
+    notifySessionChangesSoon(actor.institutionId);
+    return { status: "answered", answer: "confirmed", outcome: outcomeOf(result.status) };
   } catch (error) {
     return { status: "error", message: readable(error) };
   }
@@ -70,6 +64,7 @@ export async function cancelTutorSession(
   try {
     const input = cancelSessionInput.parse({ sessionId: formData.get("sessionId") });
     const { late } = await cancelSession({ actor, ...input });
+    notifySessionChangesSoon(actor.institutionId);
     return { status: "cancelled", late };
   } catch (error) {
     return { status: "error", message: readable(error) };

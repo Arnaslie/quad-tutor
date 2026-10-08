@@ -4,6 +4,7 @@ import {
   uuid,
   text,
   integer,
+  smallint,
   boolean,
   timestamp,
   date,
@@ -20,6 +21,7 @@ import {
   REPORT_REASONS,
   THREAD_SIDES,
 } from "../modules/messaging/rules";
+import { NOTE_MAX } from "../modules/ratings/rules";
 
 import { user, session, account, verification } from "./auth-schema";
 
@@ -228,6 +230,7 @@ export const courseCodeAlias = pgTable(
   "course_code_alias",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     courseId: uuid("course_id")
       .notNull()
       .references(() => course.id),
@@ -242,6 +245,7 @@ export const courseOffering = pgTable(
   "course_offering",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     courseId: uuid("course_id")
       .notNull()
       .references(() => course.id),
@@ -261,6 +265,7 @@ export const exam = pgTable(
   "exam",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     courseOfferingId: uuid("course_offering_id")
       .notNull()
       .references(() => courseOffering.id),
@@ -274,6 +279,7 @@ export const enrollment = pgTable(
   "enrollment",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     studentProfileId: uuid("student_profile_id")
       .notNull()
       .references(() => studentProfile.id),
@@ -291,6 +297,7 @@ export const tutorCourse = pgTable(
   "tutor_course",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     tutorProfileId: uuid("tutor_profile_id")
       .notNull()
       .references(() => tutorProfile.id),
@@ -317,10 +324,13 @@ export const tutorCourse = pgTable(
 
     scoreSampleCount: integer("score_sample_count").notNull().default(0),
     scorePosteriorMean: integer("score_posterior_mean"),
+    renewalTrialCount: integer("renewal_trial_count").notNull().default(0),
+    renewalPosteriorMean: integer("renewal_posterior_mean"),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index("tutor_course_institution_idx").on(t.institutionId),
     uniqueIndex("tutor_course_unique_idx").on(t.tutorProfileId, t.courseId),
     index("tutor_course_course_idx").on(t.courseId),
   ],
@@ -363,6 +373,7 @@ export const matchRequest = pgTable(
   "match_request",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     studentProfileId: uuid("student_profile_id")
       .notNull()
       .references(() => studentProfile.id),
@@ -379,11 +390,13 @@ export const matchRequest = pgTable(
 
     tutorNotifiedAt: timestamp("tutor_notified_at", { withTimezone: true }),
     studentNotifiedAt: timestamp("student_notified_at", { withTimezone: true }),
+    notifyClaimedAt: timestamp("notify_claimed_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index("match_request_institution_idx").on(t.institutionId),
     index("match_request_student_idx").on(t.studentProfileId, t.status),
     index("match_request_tutor_course_idx").on(t.tutorCourseId, t.status),
   ],
@@ -393,6 +406,7 @@ export const engagement = pgTable(
   "engagement",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     studentProfileId: uuid("student_profile_id")
       .notNull()
       .references(() => studentProfile.id),
@@ -419,6 +433,7 @@ export const engagement = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (t) => [
+    index("engagement_institution_idx").on(t.institutionId),
     uniqueIndex("engagement_match_request_idx").on(t.matchRequestId),
     index("engagement_student_idx").on(t.studentProfileId, t.status),
     index("engagement_tutor_course_idx").on(t.tutorCourseId),
@@ -429,6 +444,7 @@ export const sessionBooking = pgTable(
   "session_booking",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     engagementId: uuid("engagement_id")
       .notNull()
       .references(() => engagement.id),
@@ -440,6 +456,9 @@ export const sessionBooking = pgTable(
     location: text("location"),
     studentNote: text("student_note"),
     notifiedLocation: text("notified_location"),
+    locationChangedAt: timestamp("location_changed_at", { withTimezone: true })
+      .notNull()
+      .default(sql`date_trunc('milliseconds', now())`),
 
     status: sessionStatus("status").notNull().default("scheduled"),
 
@@ -456,6 +475,10 @@ export const sessionBooking = pgTable(
 
     bookedNotifiedAt: timestamp("booked_notified_at", { withTimezone: true }),
     remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    cancelNotifiedAt: timestamp("cancel_notified_at", { withTimezone: true }),
+    answerPromptedAt: timestamp("answer_prompted_at", { withTimezone: true }),
+    settledNotifiedAt: timestamp("settled_notified_at", { withTimezone: true }),
+    notifyClaimedAt: timestamp("notify_claimed_at", { withTimezone: true }),
     confirmationWindowEndsAt: timestamp("confirmation_window_ends_at", {
       withTimezone: true,
     }),
@@ -464,6 +487,7 @@ export const sessionBooking = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index("session_booking_institution_idx").on(t.institutionId),
     index("session_engagement_idx").on(t.engagementId),
     index("session_scheduled_idx").on(t.scheduledAt),
   ],
@@ -473,6 +497,7 @@ export const reliabilityEvent = pgTable(
   "reliability_event",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     userId: text("user_id")
       .notNull()
       .references(() => user.id),
@@ -487,6 +512,7 @@ export const ledgerEntry = pgTable(
   "ledger_entry",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     engagementId: uuid("engagement_id")
       .notNull()
       .references(() => engagement.id),
@@ -499,13 +525,19 @@ export const ledgerEntry = pgTable(
     stripeReference: text("stripe_reference"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("ledger_entry_engagement_idx").on(t.engagementId, t.occurredAt)],
+  (t) => [
+    index("ledger_entry_engagement_idx").on(t.engagementId, t.occurredAt),
+    index("ledger_entry_session_earned_idx")
+      .on(t.sessionId)
+      .where(sql`${t.type} = 'session_earned'`),
+  ],
 );
 
 export const tutorAvailability = pgTable(
   "tutor_availability",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     tutorProfileId: uuid("tutor_profile_id")
       .notNull()
       .references(() => tutorProfile.id),
@@ -521,6 +553,7 @@ export const demandSignal = pgTable(
   "demand_signal",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").references(() => institution.id),
     studentProfileId: uuid("student_profile_id")
       .notNull()
       .references(() => studentProfile.id),
@@ -532,6 +565,7 @@ export const demandSignal = pgTable(
     notifiedAt: timestamp("notified_at", { withTimezone: true }),
   },
   (t) => [
+    index("demand_signal_institution_idx").on(t.institutionId),
     uniqueIndex("demand_signal_unique_idx").on(t.studentProfileId, t.courseOfferingId),
   ],
 );
@@ -605,6 +639,45 @@ export const userBlock = pgTable(
   ],
 );
 
+export const sessionRating = pgTable(
+  "session_rating",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessionBooking.id),
+    tutorCourseId: uuid("tutor_course_id")
+      .notNull()
+      .references(() => tutorCourse.id),
+    studentProfileId: uuid("student_profile_id")
+      .notNull()
+      .references(() => studentProfile.id),
+    stars: smallint("stars").notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedByUserId: text("removed_by_user_id").references(() => user.id),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("session_rating_session_idx").on(t.sessionId),
+    index("session_rating_counted_idx")
+      .on(t.institutionId, t.tutorCourseId)
+      .where(sql`${t.removedAt} is null and ${t.releasedAt} is not null`),
+    index("session_rating_pending_idx")
+      .on(t.institutionId, t.tutorCourseId)
+      .where(sql`${t.releasedAt} is null and ${t.removedAt} is null`),
+    index("session_rating_student_idx").on(t.studentProfileId),
+    check("session_rating_stars", sql`${t.stars} between 1 and 5`),
+    check("session_rating_note_length", sql`char_length(${t.note}) <= ${sql.raw(String(NOTE_MAX))}`),
+  ],
+);
+
 export const messageReport = pgTable(
   "message_report",
   {
@@ -612,9 +685,8 @@ export const messageReport = pgTable(
     institutionId: uuid("institution_id")
       .notNull()
       .references(() => institution.id),
-    threadId: uuid("thread_id")
-      .notNull()
-      .references(() => messageThread.id),
+    threadId: uuid("thread_id").references(() => messageThread.id),
+    sessionRatingId: uuid("session_rating_id").references(() => sessionRating.id),
     reporterUserId: text("reporter_user_id")
       .notNull()
       .references(() => user.id),
@@ -629,6 +701,10 @@ export const messageReport = pgTable(
   (t) => [
     index("message_report_institution_idx").on(t.institutionId, t.reviewedAt),
     index("message_report_thread_idx").on(t.threadId),
+    uniqueIndex("message_report_open_rating_idx")
+      .on(t.sessionRatingId)
+      .where(sql`${t.reviewedAt} is null`),
+    check("message_report_subject", sql`num_nonnulls(${t.threadId}, ${t.sessionRatingId}) = 1`),
   ],
 );
 
@@ -651,4 +727,25 @@ export const messageThreadAccess = pgTable(
     accessedAt: timestamp("accessed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("message_thread_access_thread_idx").on(t.threadId, t.accessedAt)],
+);
+
+export const sessionRatingAccess = pgTable(
+  "session_rating_access",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id")
+      .notNull()
+      .references(() => institution.id),
+    sessionRatingId: uuid("session_rating_id")
+      .notNull()
+      .references(() => sessionRating.id),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => messageReport.id),
+    operatorUserId: text("operator_user_id")
+      .notNull()
+      .references(() => user.id),
+    accessedAt: timestamp("accessed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("session_rating_access_rating_idx").on(t.sessionRatingId, t.accessedAt)],
 );

@@ -239,6 +239,7 @@ export async function upcomingExams(offeringId: string) {
 
 export async function enroll(params: {
   studentProfileId: string;
+  institutionId: string;
   courseOfferingId: string;
 }): Promise<void> {
   await db.insert(enrollment).values(params).onConflictDoNothing();
@@ -257,6 +258,7 @@ export async function awaitCoverage(params: {
 
   const seat = {
     studentProfileId: params.actor.studentProfileId,
+    institutionId: params.actor.institutionId,
     courseOfferingId: params.courseOfferingId,
   };
   await enroll(seat);

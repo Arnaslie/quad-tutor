@@ -1,8 +1,10 @@
 # Proposal: off-platform payment (cash under the table)
 
-Status: **proposal, nothing settled.** Written 2026-10-04 against `origin/main` at
-`ddb6d18`. Nothing here is recorded in `docs/decisions.md` until the user answers the
-questions at the end.
+Status: **answered 2026-10-05.** Written 2026-10-04 against `origin/main` at
+`ddb6d18`. Every question at the end is answered and recorded in `docs/decisions.md`.
+Question 1 went against this recommendation, so the hidden-only reasoning below is kept
+as written but is no longer the plan. Read it alongside Ratings and Renewals in the
+decision record.
 
 ## The item
 
@@ -112,7 +114,7 @@ Beyond the conflicts, public reviews would not work here even if they were allow
 |---|---|
 | **Paid renewals feed the hidden ranker** | **Recommended (MVP).** Detailed below. |
 | Tell tutors the rule | **Recommended (MVP).** The incentive only works if tutors know about it. They see the rule, never their score or rank. |
-| Lower take on same-pair renewals | Strong lever, but it is a money choice. It narrows the $7.70 gap exactly where leakage happens. Question 4. |
+| Lower take on same-pair renewals | **Superseded.** The take is now 10% capped at $100 per tutor per term (`docs/decisions.md`, Product). Question 4. |
 | Through-final as the default renewal offer | Turns 3–4 leakage moments per term into one (`decisions.md:284-288`). Product choice. Question 5. |
 | Direct "renew with this tutor" mid-term, skipping the deck and a new request | Removes friction at the leakage moment. The top-up reasoning applies: matching cost is sunk. It is a bigger build, so post-MVP. Question 6. |
 | Detect or redact contact details in messages | Reject. Message content never feeds anything (`decisions.md:174-177`). It is trivially bypassed, and the pair meets in person at session one anyway. |
@@ -192,23 +194,26 @@ bandit.
 
 ## Questions for the user
 
-1. **Public rankings and reviews stay rejected?** Recommend yes: hidden ranker only.
-   Strongest alternative: private, payment-gated "would you book them again?" asked
-   once per package, which feeds only the hidden score. It is more signal, but it is a
-   subjective input and a prompt nobody enjoys.
-2. **Reject course locks (Option B)?** Recommend yes. Strongest alternative: a soft
-   cap on *parallel engagements* for a tutor's first term, rather than a course lock.
-   It still costs supply, and the guarantee already covers a bad first session.
-3. **Tell tutors that on-app renewals raise their ranking?** Recommend yes, rule only.
-   Alternative: say nothing. That avoids gaming talk, but then the incentive does not
-   exist for anyone who does not already know.
-4. **Money: lower the take on same-pair renewals (for example 22% to 15%)?** Recommend
-   not yet. Revisit once renewal rates exist to compare against. Alternative: ship it
-   now, because renewal is exactly where leakage concentrates and the reduced take is
-   cheaper than the lost package.
-5. **Product: offer "through the final" first when an existing pair renews mid-term?**
-   Recommend yes. It collapses several leakage moments into one. Alternative: keep
-   exam-anchored as the default everywhere, for consistency and a smaller ask.
-6. **Product: direct mid-term renewal with the same tutor, skipping the deck and a new
-   request?** Recommend yes, but as the next item rather than this one. Alternative:
-   leave it as the request flow, which keeps double opt-in fresh each package.
+1. ~~**Public rankings and reviews stay rejected?**~~
+   **Answered 2026-10-05: no.** Public star ratings, gated on paid sessions: an overall
+   rating after 10 delivered sessions and a per-course one after 5 ratings. The course
+   rating feeds the hidden ranker, smoothed toward the course mean. Recorded in
+   `docs/decisions.md` (Ratings, and Reversed). Build brief:
+   `docs/proposals/public-ratings.md`.
+2. ~~**Reject course locks (Option B)?**~~ **Answered 2026-10-05: yes, rejected.**
+   Recorded in `docs/decisions.md` (Rejected).
+3. ~~**Tell tutors that on-app renewals raise their ranking?**~~ **Answered
+   2026-10-05: yes, the rule only.** The renewal rate is its own hidden term beside
+   stars, 15 points each. Recorded in `docs/decisions.md` (Renewals).
+4. ~~**Money: lower the take on same-pair renewals (for example 22% to 15%)?**~~
+   **Answered 2026-10-05, by a different lever:** the flat 22% becomes 10% of every
+   session, capped at $100 per tutor per term, after which the tutor keeps 100%. The
+   cash gap falls from $7.70 to $3.50 a session, and to zero for the busy tutors with
+   the most reason to leave. No separate renewal rate. Recorded in `docs/decisions.md`
+   (Product). The 22% figures above are as written on 2026-10-04.
+5. ~~**Product: offer "through the final" first when an existing pair renews
+   mid-term?**~~ **Answered 2026-10-05: yes.** Recorded in `docs/decisions.md`
+   (Renewals).
+6. ~~**Product: direct mid-term renewal with the same tutor, skipping the deck and a
+   new request?**~~ **Answered 2026-10-05: yes, as the next item after public
+   ratings.** Recorded in `docs/decisions.md` (Renewals).

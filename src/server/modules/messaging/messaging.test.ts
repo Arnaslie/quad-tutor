@@ -85,10 +85,10 @@ async function campus(slug: string) {
     .insert(course)
     .values({ institutionId: inst.id, title: "Messaging 101", department: "TEST" })
     .returning({ id: course.id });
-  await db.insert(courseCodeAlias).values({ courseId: courseRow.id, code: `MSG ${run}` });
+  await db.insert(courseCodeAlias).values({ institutionId: inst.id, courseId: courseRow.id, code: `MSG ${run}` });
   const [offering] = await db
     .insert(courseOffering)
-    .values({ courseId: courseRow.id, termId: termRow.id, section: "001" })
+    .values({ institutionId: inst.id, courseId: courseRow.id, termId: termRow.id, section: "001" })
     .returning({ id: courseOffering.id });
   return { institutionId: inst.id, termId: termRow.id, courseId: courseRow.id, offeringId: offering.id };
 }
@@ -112,6 +112,7 @@ async function tutorFor(key: string, place: { institutionId: string; courseId: s
     .returning({ id: tutorProfile.id });
   await db.insert(tutorCourse).values({
     tutorProfileId: profile.id,
+    institutionId: place.institutionId,
     courseId: place.courseId,
     takenTermId: place.termId,
     gradeEarned: "A",
@@ -294,7 +295,11 @@ test("a blocked pair can't send, gets no email, and drops out of matching", asyn
   assert.deepEqual(deck.candidates.map((card) => card.tutorProfileId), [otherTutor.tutorProfileId]);
 
   await db.update(tutorCourse).set({ status: "retired" }).where(eq(tutorCourse.tutorProfileId, otherTutor.tutorProfileId));
-  await db.insert(demandSignal).values({ studentProfileId: student.studentProfileId, courseOfferingId: home.offeringId });
+  await db.insert(demandSignal).values({
+    studentProfileId: student.studentProfileId,
+    institutionId: home.institutionId,
+    courseOfferingId: home.offeringId,
+  });
   assert.equal(await notifyCoveredSections(home.institutionId), 0, "a blocked tutor does not count as coverage");
   await db.update(tutorCourse).set({ status: "active" }).where(eq(tutorCourse.tutorProfileId, otherTutor.tutorProfileId));
   await db.delete(demandSignal).where(eq(demandSignal.studentProfileId, student.studentProfileId));

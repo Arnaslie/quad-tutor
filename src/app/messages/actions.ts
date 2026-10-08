@@ -6,22 +6,10 @@ import { after } from "next/server";
 import { requireActor } from "@/server/modules/identity/actor";
 import { alertThread } from "@/server/modules/messaging/alerts";
 import { blockInput, reportInput, sendInput } from "@/server/modules/messaging/input";
-import {
-  MessagingError,
-  blockThread,
-  sendMessage,
-} from "@/server/modules/messaging/threads";
+import { MessagingError, blockThread, sendMessage } from "@/server/modules/messaging/threads";
 import { reportThread } from "@/server/modules/messaging/reports";
 
-export type MessageActionState =
-  | { status: "idle" }
-  | { status: "sent" }
-  | { status: "error"; message: string; draft?: string };
-
-function failure(error: unknown, draft?: string): MessageActionState {
-  if (error instanceof MessagingError) return { status: "error", message: error.message, draft };
-  throw error;
-}
+import { failure, type MessageActionState } from "./action-state";
 
 export async function sendAction(
   _previous: MessageActionState,

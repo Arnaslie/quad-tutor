@@ -65,7 +65,7 @@ async function CourseStep({
     <div className="flex flex-col gap-6">
       <PageHeader
         title="What are you stuck in?"
-        description="Pick the course, then the section and professor. Under 45 seconds, start to finish."
+        description="Pick the course, then the section and professor."
       />
 
       <CourseSearch initialQuery={query} collegeId={collegeId} colleges={colleges} />

@@ -155,6 +155,7 @@ export async function bookSession(params: {
       .insert(sessionBooking)
       .values({
         engagementId: target.id,
+        institutionId: params.actor.institutionId,
         scheduledAt: params.slotStartsAt,
         durationMinutes: SESSION_MINUTES,
         location: target.defaultLocation,
@@ -213,6 +214,7 @@ export async function cancelSession(params: {
     if (late && session.role === "student") {
       await tx.insert(reliabilityEvent).values({
         userId: session.studentUserId,
+        institutionId: session.institutionId,
         sessionId: session.sessionId,
         type: "late_cancelled",
         occurredAt: now,
@@ -253,7 +255,7 @@ export async function setSessionLocation(params: {
 
     await tx
       .update(sessionBooking)
-      .set({ location: params.location })
+      .set({ location: params.location, locationChangedAt: now })
       .where(eq(sessionBooking.id, session.sessionId));
   });
 }

@@ -4,13 +4,13 @@ import { useActionState, useId } from "react";
 
 import { Button } from "@/components/button";
 import { Field, Select } from "@/components/field";
-import { REPORT_OUTCOMES, REPORT_OUTCOME_LABEL } from "@/server/modules/messaging/rules";
+import { REPORT_OUTCOME_LABEL, outcomesFor, type ReportSubject } from "@/server/modules/messaging/rules";
 
 import { reviewReportAction, type ReviewState } from "./actions";
 
 const INITIAL: ReviewState = { status: "idle" };
 
-export function ReviewForm({ reportId }: { reportId: string }) {
+export function ReviewForm({ reportId, subject }: { reportId: string; subject: ReportSubject }) {
   const [state, submit, pending] = useActionState(reviewReportAction, INITIAL);
   const id = useId();
 
@@ -22,7 +22,7 @@ export function ReviewForm({ reportId }: { reportId: string }) {
           <option value="" disabled>
             Pick an outcome
           </option>
-          {REPORT_OUTCOMES.map((outcome) => (
+          {outcomesFor(subject).map((outcome) => (
             <option key={outcome} value={outcome}>
               {REPORT_OUTCOME_LABEL[outcome]}
             </option>

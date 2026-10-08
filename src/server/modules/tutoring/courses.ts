@@ -115,6 +115,7 @@ export async function claimCourse(params: {
     .insert(tutorCourse)
     .values({
       tutorProfileId: params.tutor.tutorProfileId,
+      institutionId: campus,
       courseId: params.courseId,
       takenTermId: params.takenTermId,
       takenUnderProfessorId: professorId,

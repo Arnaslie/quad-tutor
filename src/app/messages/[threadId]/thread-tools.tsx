@@ -1,7 +1,7 @@
 import { Button } from "@/components/button";
+import { ReportForm } from "@/components/report-form";
 
-import { blockAction } from "../actions";
-import { ReportForm } from "./report-form";
+import { blockAction, reportAction } from "../actions";
 
 export function ThreadTools({
   threadId,
@@ -18,7 +18,14 @@ export function ThreadTools({
         Report or block
       </summary>
       <div className="flex flex-col gap-6 border-t border-border p-4">
-        <ReportForm threadId={threadId} />
+        <ReportForm
+          action={reportAction}
+          field="threadId"
+          value={threadId}
+          label="Report this conversation"
+          hint="Staff can read a conversation only once it is reported."
+          sent="Reported. Someone on the Quad Tutor team will read this conversation."
+        />
 
         <form action={blockAction} className="flex flex-col items-start gap-2">
           <input type="hidden" name="threadId" value={threadId} />

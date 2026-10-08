@@ -5,6 +5,8 @@ import { useActionState, useState } from "react";
 import { Button } from "@/components/button";
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icons";
+import { RatingLine } from "@/components/rating";
+import type { PublicRating } from "@/server/modules/ratings/rules";
 
 import { askTutors, type ActionResult } from "../../actions";
 
@@ -17,6 +19,8 @@ export type TutorCard = {
   takenUnderProfessorName: string | null;
   takenTermName: string;
   matchesProfessor: boolean;
+  courseRating: PublicRating | null;
+  overallRating: PublicRating | null;
 };
 
 function TutorProfile({ tutor }: { tutor: TutorCard }) {
@@ -30,6 +34,23 @@ function TutorProfile({ tutor }: { tutor: TutorCard }) {
       </div>
 
       <dl className="flex flex-col gap-1.5 text-sm">
+        <div className="flex flex-col gap-1.5">
+          <dt className="sr-only">Ratings</dt>
+          {tutor.overallRating ? (
+            <>
+              <dd>
+                <RatingLine rating={tutor.courseRating} empty="New in this course" />
+              </dd>
+              <dd>
+                <RatingLine rating={tutor.overallRating} empty="New tutor" label="Overall" secondary />
+              </dd>
+            </>
+          ) : (
+            <dd>
+              <RatingLine rating={null} empty="New tutor" />
+            </dd>
+          )}
+        </div>
         <div className="flex gap-2">
           <dt className="sr-only">Took it under</dt>
           <dd

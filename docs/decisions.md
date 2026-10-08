@@ -5,7 +5,7 @@ Full source analysis in `docs/research/`. Where a decision came from independent
 agreement between reviewers who could not see each other's work, that is noted — it
 is the strongest signal in here.
 
-Last updated: 2026-09-29.
+Last updated: 2026-10-05.
 
 ---
 
@@ -42,8 +42,8 @@ where everyone talks.
 **A single session exists, but only as an end-of-term top-up.** One session, full
 price, offered to a student who has finished a package with that tutor when fewer
 weeks remain in the term than a package has sessions. It is not a cheaper door into
-the product: a cold one-off has no dosage, a 22% take on $35 does not pay for
-course-level matching, and a pair who met once has no reason to come back through the
+the product: a cold one-off has no dosage, a $3.50 take on a $35 session does not pay
+for course-level matching, and a pair who met once has no reason to come back through the
 platform. A renewal shares none of that — the matching cost is sunk, the tutor is
 known, the dosage already happened, and the pair could already have left and did not.
 
@@ -54,6 +54,69 @@ directly. The second is free and easier, so the package rule was producing leaka
 the exact moment the relationship is worth most. Top-ups chain: a booked-but-unheld
 session leaves nothing to book, so a second can be bought before the first happens,
 which is what finals week actually looks like.
+
+**The take is 10% of each session, capped at $100 per tutor per term.** The session
+price stays $35 and the student pays nothing on top: a student booking fee was
+rejected because the student is already paying for the tutor. Once a tutor's platform
+share for a term reaches $100, they keep 100% for the rest of that term. This replaces
+the flat 22%, which was too high. At $35 a session the cap is reached on the 29th
+session — $1,000 of sessions, about $900 of it to the tutor. The ceiling is 100
+tutors × $100 × 3 terms ≈ $30k a year, before processing.
+
+The cap is the disintermediation lever, not just a discount. The tutor with the most
+to gain from cash is the busy one, and past the cap that tutor's on-app sessions cost
+them nothing. It supersedes a lower take on renewals only (question 4 in
+`docs/proposals/off-platform-payment.md`).
+
+Each rule below keeps the cap a sum over the ledger rather than a counter that can
+drift:
+
+- **Scope.** One meter per `tutor_profile` per `term`, across all of that tutor's
+  courses and students. The term is the engagement's (`course_offering.term_id`), not
+  the date the session settles, so a dispute resolved after term end counts against
+  the term it was taught in.
+- **Charged at recognition, never at purchase.** A package is deferred revenue, and its
+  split is unknown until each session is delivered. The fee is fixed in `recognise()`
+  (`engagements/confirmation.ts`), the one place a session becomes revenue — two
+  confirmations, auto-release, or a dispute resolved as attended. It is written as a
+  `platform_fee` row beside `session_earned` and `tutor_payout`, so every delivered
+  session satisfies `session_earned = tutor_payout + platform_fee`, and the meter is
+  the sum of `platform_fee` for that tutor and term.
+- **Fixed once written.** A session's fee never changes after recognition. Nothing is
+  re-priced retroactively, in either direction.
+- **Reversals follow the tutor's pay.** A term-end refund returns only undelivered
+  sessions, which never charged a fee, so it does not touch the meter. A guarantee
+  refund does not give room back: the platform eats that refund rather than clawing
+  back from the tutor, and returning cap room would make the tutor's next session pay
+  for it — the same clawback by another route. A disputed session charges nothing while
+  it holds; resolved as attended, it is charged at resolution against the meter as it
+  stands then; resolved as not attended, never. Nothing today reverses a recognised
+  session. If something ever does, and takes the tutor's pay back with it, it reverses
+  the fee row too and the room returns.
+- **Concurrency.** `recognise()` locks the `tutor_profile` row before reading the
+  meter, so two sessions for one tutor recognised at the same moment serialise and the
+  second sees the first's fee. `recognise()` takes the tutor lock after the session
+  lock. `purchasePackage` (`engagements/purchase.ts`) and `setDefaultLocation`
+  (`tutoring/location.ts`) take the tutor first, but never wait on a session being
+  settled; keep it that way.
+- **Rounding.** Integer minor units only:
+  `fee = min(floor(session × 1000 / 10000), max(0, 10000 − meter))`. Floor rounds in the
+  tutor's favour, and the session that crosses the line takes a partial fee (the 29th
+  at $35 pays $2.00), so the meter lands on exactly $100.00 and never over. A
+  through-final session ($31.50) pays $3.15 and caps on the 32nd.
+- **The platform absorbs card processing, before and after the cap.** "Keep 100%" is
+  literally true. At Stripe's standard US card rate a $140 four-pack costs about $4.36
+  to collect, roughly $1.10 a session: a third of the $3.50 fee before the cap and a
+  straight loss after it, plus Connect's per-payout charge. Passing processing through
+  to capped tutors was the alternative, and was rejected to keep the promise simple.
+- **The guarantee's cost is accepted as is.** A guarantee refund now costs the platform
+  the tutor's $31.50 plus processing, about nine sessions of fee where it used to be
+  four. The guarantee terms are unchanged.
+- **The tutor sees their own meter; no student ever does.** The earnings page shows
+  progress toward the cap ("$64 of $100 this term"), because the incentive only works
+  if a busy tutor knows how close they are. Whether a tutor is capped says how busy
+  they are, which is an ordering, so it never reaches a student-facing shape or
+  `score.ts`.
 
 **Seed ~10–30 weed-out courses. Not the full catalog.** Concentration buys patience;
 a full catalog is vanity work.
@@ -135,6 +198,23 @@ The tutor can move a single session, but not inside the late-cancel window
 old spot would be recorded as a no-show the platform caused. A move after the booking
 email has gone out, whether by hand or by the fill, emails the student the new spot.
 
+**Every session state change is an email, not a page to check.** Booking from the
+tutor's posted hours needs no second confirmation, so "booked" means confirmed for both
+and both are emailed. A cancel emails the other party. When a session ends, whoever
+has not answered is asked whether it happened, and the settled result goes to everyone
+except the person whose answer settled it (they saw it on screen). Each send takes a
+ten-minute lease on the row (`notify_claimed_at`), sends with a Resend idempotency key,
+and only then stamps its timestamp, so the sweep and the `after()` call from the action
+that caused it send once between them, and a send cut off mid-flight is retried once the
+lease lapses (Resend dedupes the key for ~24h). Request emails work the same way on
+`match_request`. One lease per row means a second kind of email for the same row can
+wait for the next sweep. The booked and moved keys carry `location_changed_at` and a
+hash of the spot, so a reused key whose body has since changed (Resend's
+`invalid_idempotent_request`) can only mean the wording changed, and counts as delivered. The copy
+never mentions late cancels or no-shows: those are reliability facts and stay unseen.
+These are not filtered by blocks — a block stops messages, not word of a session that
+was paid for.
+
 **Intake under 45 seconds.** Course selection is the primary input (schedule
 screenshot → OCR, with catalog type-ahead as fallback); section and professor are a
 required second step. Everything the course code already answers is cut.
@@ -185,7 +265,9 @@ the user without a cascade.
 
 **Tutor side: hidden per-course quality score.** Bayesian shrinkage toward the mean at
 low sample counts, plus bandit-style exploration so new tutors get real shots instead
-of starving at the bottom. Never publicly visible.
+of starving at the bottom. The score is never publicly visible. Since 2026-10-05 it has
+two inputs: the course star rating, which has a public face past a threshold (see
+Ratings), and the on-app renewal rate, which never does (see Renewals).
 
 **At launch n=0 for everyone, so MVP ranking is a deterministic sort.** Ship the
 schema and the stats job now; the Bayesian ranker lands in V1. A learned ranker is
@@ -196,6 +278,255 @@ failed. Timestamped facts, nothing subjective. Surfaced as platform mechanics
 (deposit required, fewer parallel asks), never as a badge or number, always
 recoverable in ~3 clean sessions. Prevention (T-12h confirm, auto-release, check-in)
 comes before any penalty.
+
+### Ratings
+
+Decided 2026-10-05. This reverses the rejection of public star ratings (see Reversed)
+and answers question 1 of `docs/proposals/off-platform-payment.md` ("Public rankings
+and reviews stay rejected?"): **no.** The proposal recommended a hidden ranker only;
+the user chose public, payment-gated ratings instead, as the incentive to stay
+on-app. Build brief: `docs/proposals/public-ratings.md`.
+
+**Only a student who paid rates, once per session, 1–5 stars, with an optional short
+note.** A paid session is a delivered, recognised one: it has a `session_earned`
+ledger row. Ratings go one way. Tutors never rate students; rating students by ability
+stays rejected.
+
+**Two public ratings, an overall one and one per course.** A tutor can be strong in
+Calc I and weak in Organic, so the course rating is the one that matters on a course's
+deck, and the overall rating sits beside it.
+
+- **No rating is public until the tutor has 10 delivered paid sessions**, in any
+  course or courses. That holds for both the overall rating and every course rating.
+- **Overall** shows when the tutor has at least 10 sessions *and* at least 5 ratings.
+  It averages the ratings in those of the tutor's courses whose own rating is public
+  (see the aggregates rules below).
+- **Course** shows when the tutor has at least 10 sessions *and* that `tutor_course`
+  has at least 5 ratings. The threshold counts ratings, not sessions in the course:
+  five sessions can carry one rating, and "5.0 · 1 rating" is the number this
+  threshold exists to prevent.
+- Requiring 5 ratings for the overall rating too stops it from showing "2.0 · 1
+  rating". It also stops it from revealing, for a tutor with one course, a course
+  average that is still below its own threshold.
+- **Shown as average and count**, e.g. "4.7 · 12 ratings", the average to one decimal.
+  Below its threshold a rating reads "New tutor" (overall) or "New in this course",
+  and its average and count never leave the server.
+
+**Which sessions can be rated.**
+
+- **Only sessions settled as attended**: `session_booking.status = 'completed'`, which
+  covers both confirmations, auto-release, and a dispute resolved as attended. A
+  disputed session can be rated only once it resolves as attended. Cancelled sessions
+  and disputes resolved as not attended never can.
+- **An auto-released session can be rated.** The money moved and the session is
+  recognised. A rating writes no reliability fact either, so it cannot launder a
+  silence into an `attended` row.
+- **The session a guarantee refunded can be rated.** It was delivered and recognised,
+  and the platform paid the tutor for it. Excluding it would drop exactly the ratings
+  that explain why someone asked for their money back.
+
+**The window is 7 days from recognition**, the `session_earned` row's `occurred_at`.
+It was shortened from 14 days on 2026-10-06. That is long enough to answer once the
+session has sunk in, and short enough that the rating is still about the session.
+Nobody is nagged: there is one prompt, on the session page, and no email.
+
+**A student can edit their rating, stars and note, until the window closes.** After
+that it is fixed. Changing your mind a day later is ordinary. Being lobbied by a
+classmate a month later is what the lock prevents.
+
+**Notes are tutor-only and anonymous.** They are never public. The tutor sees each
+note, without the student's name or the session date, once it is released (below). The
+delay is what makes it anonymous: a tutor with one session last Tuesday can tell who
+wrote it, and the window cannot be lobbied once it has shut. The tutor sees the same
+two public numbers students see, and never the stars on any single rating.
+Public notes, meaning reviews, were the alternative. They are more useful to a student
+deciding, but they put a peer's written account in front of the whole campus, and
+every one becomes a moderation case.
+
+**Moderation reuses the `message_report` flow.** A tutor can report a note from where
+they read it. It lands in the same `/ops/reports` queue, scoped to the operator's
+campuses, with the same reasons. A new outcome, `removed`, takes the whole rating out
+of every aggregate. It is for ratings that are not about the session, or that are
+harassment, or retaliation in either direction. A low score on its own is never
+grounds for removal.
+
+**What the aggregates count.** Settled 2026-10-06, from the ratings code review.
+
+- **The gate, restated.** No rating, overall or course, is public until the tutor has
+  10 delivered paid sessions. After that, a course rating needs at least 5 ratings in
+  that course, and the overall rating needs at least one course whose rating is
+  public. The 10 sessions are confirmed by the user. The gate is independent of the
+  take cap: 10 sessions at $35 is about $35 of platform fee, and the $100 cap is
+  reached at about 29 sessions. Neither threshold reads the other.
+- **Only released ratings are counted** (batches decided by the user, 2026-10-06).
+  This replaces "only ratings whose window has closed". A rating's 7-day window must
+  close before it can be released, and released is what counts. That applies to:
+  - the course average and count;
+  - the overall average and count;
+  - both thresholds;
+  - the tutor's notes.
+
+  A sweep releases a course's closed, unremoved, unreleased ratings together. The
+  first release for a `tutor_course` needs at least 5 (`MIN_RATINGS`), so the course
+  rating goes public with its first batch. After that, a release needs at least 3
+  (`RELEASE_BATCH`).
+
+  Why batches: counting closed ratings still added each one at a predictable moment,
+  7 days after its session. A tutor could read one student's stars off the change in
+  the totals, and the note appeared at the same moment. A batch mixes at least 3
+  ratings into every change.
+
+  The cost is accepted. Public numbers can lag until a batch fills, and a course with
+  few sessions may wait until term end.
+
+  **Leftovers are released at term end** (user, 2026-10-06). A course's waiting pool is
+  also released once the term of every rating in it has ended, if it holds at least 2
+  ratings (`TERM_END_MIN`). The term is the engagement's (`course_offering.term_id`).
+  The normal 5/3 rule is unchanged, so a term-end release is only ever a pool that
+  rule would not release. A pool of 1 is never released, at term end or after; it
+  waits for later ratings in the same course to join it. Released ratings still have
+  to reach 5 before the course rating is public, so a term-end batch can show the
+  tutor its notes without the course going public.
+
+  Accepted risk: a term-end batch of 2 lets a tutor narrow down which of two students
+  gave which stars and note. The user chose that over losing the feedback.
+
+  The term-end release waits for the term's last rating window to pass too: it runs
+  from `term.ends_on` + 7 days + 1 day. Sessions held in finals week are still inside
+  their window when the term ends. Waiting lets them join the leftovers, so the term's
+  last ratings release in one batch rather than two. This is a timing clarification
+  that follows from the user's rule, not a new decision.
+
+  Not covered, and accepted: when an operator removes a rating, the totals change
+  immediately. That only happens when an operator acts.
+- **The hidden ranker counts released ratings only, too** (user, 2026-10-06). The
+  stats job applies the same predicate to `score_sample_count`, `score_posterior_mean`
+  and the course and campus prior means. That gives one definition of a counted
+  rating. A deck position that moved when a single rating closed would be the same
+  live signal the batches exist to remove.
+- **The overall rating counts only courses whose own rating is public.** If it
+  averaged every course, a tutor with one public course and one below its threshold
+  could subtract the public course from the overall and recover the hidden one. With
+  this rule the overall rating is built only from numbers that are already public,
+  and it stays "New tutor" until at least one course rating is public.
+- **Opening a rating report is audited, like a thread report.** Each time an operator
+  opens a rating report, an append-only access row records the operator, the report
+  and the time, the same way `message_thread_access` does for threads.
+- **Staff see a rating's note only through a report** (user, 2026-10-06). Every such
+  view is logged in `session_rating_access`.
+
+**The ranker smooths the course rating toward the course mean.** The stats job writes
+two fields on every active `tutor_course`, including those with no ratings:
+
+- `score_sample_count` is the number of ratings (released ratings only; see above).
+- `score_posterior_mean`, in basis points of the 1–5 scale (1★ = 0, 5★ = 10 000), is
+  the Bayesian average `(m·C + Σ stars) / (m + n)`, where:
+  - `m = 5`, the same as the display threshold;
+  - `C` is the mean of every rating in that course on that campus;
+  - if the course has fewer than 20 ratings, `C` is the campus mean, and below 20 on
+    the campus, it is 4.0★.
+
+With n = 0 the posterior is the prior, so an unrated tutor ranks as an average one,
+not a bad one. That means the `scoreSampleCount > 0` guard in `score.ts` goes. The
+term gets 15 of the slot's 30 points; renewals get the other 15 (see Renewals).
+
+Campus inflation compresses real averages into roughly 4.5–5.0★. At weight 15 that is
+about two points of score against 40 for a professor match, so stars nudge the deck
+rather than rule it. Revisit the weight with real data. The rest of the formula stays
+hidden: professor match, grade, recency, the silent-expiry penalty, the renewal term,
+and the weights. Exploration for new tutors is still the V1 bandit.
+
+**Ratings never feed reliability**, on either side. They are subjective, and
+reliability is timestamped facts only. A rating never writes a `reliability_event`,
+never reaches the student's standing, and is never written from one.
+
+**A rating can be a reason for a student not to book a tutor. It is never a gate on
+the tutor.** No average delists, hides, caps, deposits, delays a payout, or limits the
+parallel requests of anyone. Its only effects are the number on the card and the
+posterior term in the ranker. A tutor leaves the platform for conduct, through
+reports and a human, never for an average.
+
+**The old objections, answered honestly:**
+
+- *The absence of a rating is itself a signal.* Accepted, because of the threshold.
+  "New tutor" means fewer than 10 sessions or fewer than five ratings, and "New in
+  this course" means either of those or fewer than five ratings in the course. All of
+  them are volume facts, not quality judgements, and the ranker scores
+  them at the prior, so on the deck "new" is not "bad". A student may still prefer the
+  rated tutor. That is the price of the decision, and the bandit is what spends
+  exposure on new tutors deliberately.
+- *Rating inflation.* Expected. On a campus nearly everything will be 4.5 or above,
+  and the public average will carry little information. Its count, and the line
+  between "new" and "rated", carry more. The ranker is relative to the course mean,
+  so inflation compresses the term rather than swamping the other inputs. Payment
+  gating and one rating per session stop the cheapest inflation, friends rating
+  friends for free.
+- *Rating a peer.* The rater and the rated may share a class on Thursday. The tutor
+  never sees who gave which stars. Notes arrive anonymous and only in released
+  batches, the window shuts lobbying out, and there is no rating in the other direction
+  to trade against.
+- *New: tutors avoiding struggling students.* With double opt-in, a tutor protecting
+  an average can decline the students most likely to rate them low on a bad exam.
+  That is the inversion the ability-rating rejection exists to prevent, arriving by
+  another route. It is not solved here. Watch the decline rates once there is data.
+
+### Renewals
+
+Decided 2026-10-05. These are the answers to questions 3, 5 and 6 of
+`docs/proposals/off-platform-payment.md`. Question 2 is under Rejected. Question 4 is
+the take cap under Product.
+
+**Renewing through the app raises a tutor's ranking, and tutors are told so.** The
+proposal's signal is the on-app renewal rate per (tutor, course):
+
+- **A trial** is a distinct student whose first engagement with that `tutor_course`
+  ran: it ended `completed`, or it was refunded under the guarantee. It counts per
+  pair, so a student counts once.
+- **A first package refunded at term end with no session delivered is not a trial**
+  (user, 2026-10-07). The package never ran, so it says nothing about whether the
+  student would come back. That holds even if the pair bought again later: the pair
+  has no trial. A term-end refund with sessions delivered ends the package as
+  `completed`, so it is a trial like any other.
+- **A success** is that student buying another engagement from the same
+  `tutor_course`. A top-up counts.
+- **A guarantee refund counts as a failed trial.**
+
+Renewal is the event that cash removes, and it costs two paid packages to fake.
+
+**Stars and renewals are two separate hidden terms, 15 points each.** They split the
+30 that the posterior slot had, so earned signals carry the same weight against
+professor match and grade as before. Both are smoothed toward the course mean with
+prior strength 5, and both fall back from course to campus once there are fewer than
+20 samples:
+
+- **Stars:** see Ratings.
+- **Renewals:** a Beta-binomial `(successes + 5·C) / (trials + 5)`. The last-resort
+  prior is 0.4, a placeholder until there is data.
+
+They are not blended into one number. They have different scales, different priors
+and different failure modes: stars inflate, and renewals read a student who passed and
+stopped as a loss. Keeping them apart lets either weight be tuned without re-deriving
+the other. The rejected alternative was to keep stars at 30 and add renewals at 30 on
+top, which would make earned signals rival a professor match.
+
+**Tutors get the rule, never the number.** One line on the tutor home: *"Students who
+book you again through Quad Tutor move you up for that course."* The tutor sees no
+renewal rate, no trial count and no position. The renewal term never reaches a student
+in any form, and like ratings it never feeds reliability or gates anyone.
+
+**A mid-term renewal offers "through the final" first.** When an existing pair books
+again with exam-anchored sessions still possible, "through the final" is the default
+and the exam-anchored package is the second option. Each renewal is a leakage moment,
+and this turns three or four of them a term into one. The end-of-term top-up rule is
+unchanged. This settles the renewal half of the open question *Package length vs.
+disintermediation*. The first-purchase default is still exam-anchored.
+
+**Direct mid-term renewal is the next item after public ratings.** A pair renews with
+the same tutor from their thread or the session page, without going back through the
+deck or making a new request. The matching cost is sunk, which is the same reasoning
+as the top-up. **The tutor's accept step stays.** Double opt-in holds on every
+package, so a direct renewal is a request to this one tutor that skips the deck, not a
+purchase the tutor never agreed to. The tutor also still needs open slots.
 
 ### Technical
 
@@ -252,10 +583,6 @@ the purpose of the product.
 and proxies for ability — the student who didn't attempt the problem set often
 *couldn't*. It reintroduces the ability rating through the back door.
 
-**Public star ratings.** Nothing to compare against under a ranked deck, and it
-imports every marketplace pathology. Note that positive-only badges do not solve this:
-the *absence* of a badge is itself a signal.
-
 **Lifetime pricing.** Real marginal cost per session — it would be a liability that
 grows with usage, and "lifetime" is meaningless to someone who graduates in four years.
 
@@ -271,6 +598,25 @@ verification plus per-course grade proof replaces them.
 **Nullable `user_id` / a dormant `guardianship` table "kept cheap for later."** A
 nullable FK is `string | null` in every inferred type and every join, forever — paid
 daily for a ruled-out scenario.
+
+**Course locks until a tutor has X sessions or courses (2026-10-05, question 2 of
+`docs/proposals/off-platform-payment.md`).** They cut supply in the weed-out courses,
+which are the whole seeded catalog, so a locked tutor has nowhere to earn X. Session
+count is the credential of the generalist marketplace, the one the wedge exists to
+beat, and a locked-out tutor has more reason to tutor for cash, not less. A verified
+grade and a professor match are the credibility gate.
+
+---
+
+## Reversed
+
+**Public star ratings — rejected at design, reversed 2026-10-05.** The original
+rejection: *"Nothing to compare against under a ranked deck, and it imports every
+marketplace pathology. Note that positive-only badges do not solve this: the absence
+of a badge is itself a signal."* The user reversed it: a tutor with 10 paid sessions
+has had enough reps to be judged on them, and a public rating that only paid sessions
+can earn is the reason to keep sessions on the app. The objections are answered, or
+accepted with their cost stated, under Ratings.
 
 ---
 
@@ -298,7 +644,8 @@ real cancellation data, deliberately — this is currently a default, not a deci
 
 **Disintermediation generally** — now the top business risk, and not solvable by
 engineering. Two adults on one campus with no safeguarding reason to stay on-platform.
-Price it in rather than trying to build against it.
+Price it in rather than trying to build against it. The take cap (see Product) is the
+pricing half of that.
 
 **Course catalog ingestion.** UA reportedly runs Banner 9, whose
 `StudentRegistrationSsb` JSON endpoints are said to be reachable across 750+
@@ -335,8 +682,9 @@ paying, not non-consumers.**
 
 **3. Get the real course codes and the CAS peer-tutor pay rate** from the UA contact.
 Known wage floor: UA on-campus ~$10/hr, America Reads/Counts $12/hr, athletics
-tutoring $10–17.50. Target roughly 2×: **$25–30/hr to the tutor, $30–40 session price,
-20–25% take** — beating Wyzant (~34%) and Preply (~33%).
+tutoring $10–17.50. Target roughly 2×: **$25–30/hr to the tutor, $30–40 session price.**
+The 20–25% take this originally targeted is superseded by 10% capped at $100 per tutor
+per term (see Product) — well under Wyzant (~34%) and Preply (~33%).
 
 ---
 

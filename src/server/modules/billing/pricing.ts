@@ -1,5 +1,6 @@
 export const SESSION_PRICE_MINOR = 3_500;
-export const TAKE_RATE_BP = 2_200;
+export const TAKE_RATE_BP = 1_000;
+export const TERM_FEE_CAP_MINOR = 10_000;
 
 export const EXAM_ANCHORED_SESSIONS = 4;
 
@@ -86,11 +87,14 @@ export function perSessionMinor(engagement: {
   return Math.floor(engagement.pricePaidMinor / engagement.sessionsPurchased);
 }
 
-export function splitMinor(sessionMinor: number): {
-  tutorMinor: number;
-  platformMinor: number;
-} {
-  const platformMinor = Math.round((sessionMinor * TAKE_RATE_BP) / 10_000);
+export function splitMinor(
+  sessionMinor: number,
+  feeChargedThisTermMinor: number,
+): { tutorMinor: number; platformMinor: number } {
+  const platformMinor = Math.min(
+    Math.floor((sessionMinor * TAKE_RATE_BP) / 10_000),
+    Math.max(0, TERM_FEE_CAP_MINOR - feeChargedThisTermMinor),
+  );
   return { tutorMinor: sessionMinor - platformMinor, platformMinor };
 }
 

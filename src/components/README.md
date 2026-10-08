@@ -1,8 +1,9 @@
 # Shared UI
 
 Everything here is a **server component** unless the file starts with `"use client"`.
-Only `nav-link.tsx` and `sign-out-button.tsx` do. Keep it that way: reach for
-`"use client"` at the leaf that actually needs interaction, not at the screen.
+Only `nav-link.tsx`, `profile-menu.tsx` and `sign-out-button.tsx` do. Keep it that
+way: reach for `"use client"` at the leaf that actually needs interaction, not at
+the screen.
 
 ---
 
@@ -23,8 +24,9 @@ and one must not be added.
 - Positive-only badges do **not** solve this. The *absence* of a badge is itself a
   signal. See `docs/decisions.md` → "Rejected, and why".
 
-The `Tutor` pill in the header is a **surface label** (which side of the app you
-are on), not a status. That is the only pill-shaped thing in the system.
+The `Student | Tutor` toggle and the `Ops` pill in the header are **surface
+labels** (which side of the app you are on), not a status. Nothing else in the
+system is pill-shaped.
 
 ---
 
@@ -81,6 +83,9 @@ const id = useId();          // client components only
 | `Select` | every `<select>` prop, plus `invalid?: boolean` |
 | `Textarea` | every `<textarea>` prop, plus `invalid?: boolean` |
 
+`Field` points its one child control at the hint or error with `aria-describedby`, so
+pass the control directly, not wrapped.
+
 `Field` does **not** generate the id — `useId` would drag every form across the
 server boundary. Pass the same id to both. `error` replaces `hint` and renders
 with `role="alert"`.
@@ -120,7 +125,7 @@ them" reads honest, "that is all we found" reads broken.
 ```
 
 `IconName`: `book | send | calendar | inbox | clock | cap | user | check |
-arrow-right | pin | chat | flag`. No icon package. Need another? Add a path to `PATHS` — do not inline
+arrow-right | chevron-down | pin | chat | flag`. No icon package. Need another? Add a path to `PATHS` — do not inline
 an `<svg>` in a screen.
 
 ---
@@ -193,7 +198,7 @@ thread. It reaches every surface through a header icon with an unread count
 
 `/tutor/start` is the `becomeTutor` entry point and is deliberately not a tab.
 
-### `nav-link.tsx` · `sign-out-button.tsx` · `surface-switch.tsx`
+### `nav-link.tsx` · `profile-menu.tsx` · `sign-out-button.tsx` · `surface-switch.tsx`
 
 Shell internals. You should not need to import these directly.
 

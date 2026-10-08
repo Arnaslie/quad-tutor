@@ -99,6 +99,7 @@ export async function requestTutors(params: {
     await tx.insert(matchRequest).values(
       toCreate.map((tutorCourseId) => ({
         studentProfileId: params.actor.studentProfileId,
+        institutionId: params.actor.institutionId,
         tutorCourseId,
         courseOfferingId: params.courseOfferingId,
         expiresAt,

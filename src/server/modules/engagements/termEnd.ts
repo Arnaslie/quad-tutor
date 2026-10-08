@@ -88,10 +88,12 @@ export async function refundUnusedSessions(
         sessionsPurchased: engagement.sessionsPurchased,
         pricePaidMinor: engagement.pricePaidMinor,
         currency: engagement.currency,
+        institutionId: studentProfile.institutionId,
       })
       .from(engagement)
+      .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
       .where(eq(engagement.id, engagementId))
-      .for("update")
+      .for("update", { of: engagement })
       .limit(1);
 
     const target = rows.at(0);
@@ -128,6 +130,7 @@ export async function refundUnusedSessions(
       await record(tx, [
         {
           engagementId,
+          institutionId: target.institutionId,
           type: "refund",
           amountMinor: refund.refundMinor,
           currency: target.currency,
