@@ -5,7 +5,7 @@ Full source analysis in `docs/research/`. Where a decision came from independent
 agreement between reviewers who could not see each other's work, that is noted — it
 is the strongest signal in here.
 
-Last updated: 2026-10-05.
+Last updated: 2026-10-08.
 
 ---
 
@@ -31,29 +31,50 @@ independently:* domain reached it from conversion timing (people buy right after
 bad exam grade, not in week one), UX from the renewal curve (this is a sawtooth, and
 the renewal moment is course registration, not a billing date).
 
-**Paid first session under a self-serve refund guarantee** — not a free intro. Free
-intros burn scarce supply on people who were never going to buy. On a refund the
-platform eats the tutor's pay rather than clawing it back; protecting supply beats
-recovering a few dollars. Cap at one guarantee per student per term.
+**The first session is paid, with no refund guarantee and no free intro.** Free
+intros burn scarce supply on people who were never going to buy. The self-serve
+first-session guarantee was removed on 2026-10-08 (see Reversed): buying a session
+is a commitment, and a delivered session stays paid.
 
-**Unused sessions auto-refund at term end.** Breakage income is a trap on a campus
-where everyone talks.
+**A student can end a package early** (user, 2026-10-08). This replaces the
+guarantee as the way out of a bad fit. Ending runs the term-end refund on demand:
+- The sessions not yet delivered are refunded and the delivered ones stay paid.
+- Future bookings are cancelled and the tutor is emailed for each, as for any
+  on-time cancel.
+- The package closes as `completed` if anything was delivered, otherwise as
+  `refunded`.
 
-**A single session exists, but only as an end-of-term top-up.** One session, full
-price, offered to a student who has finished a package with that tutor when fewer
-weeks remain in the term than a package has sessions. It is not a cheaper door into
-the product: a cold one-off has no dosage, a $3.50 take on a $35 session does not pay
-for course-level matching, and a pair who met once has no reason to come back through the
-platform. A renewal shares none of that — the matching cost is sunk, the tutor is
-known, the dosage already happened, and the pair could already have left and did not.
+It moves only deferred money: no fee, no payout, and the cap meter is not touched.
+Ending writes no reliability fact. It is refused while a session is inside the
+late-cancel window, past its start and unconfirmed, or disputed. A late cancel stays
+something only the cancel action records, and a session that may have happened is
+never refunded. Only the student can end their package.
 
-What it fixes is the tail of the term, which the package shape gets wrong. A student
-who used four sessions and wants one more before finals otherwise chooses between
-another four-pack that mostly auto-refunds at term end and texting the tutor
-directly. The second is free and easier, so the package rule was producing leakage at
-the exact moment the relationship is worth most. Top-ups chain: a booked-but-unheld
-session leaves nothing to book, so a second can be bought before the first happens,
-which is what finals week actually looks like.
+**Unused sessions refund at term end, or when the student ends the package.**
+Breakage income is a trap on a campus where everyone talks.
+
+**A single session exists, but only for an existing pair.** One session, full
+price, offered to a student whose packages with that tutor in a course have nothing
+left to book, at any point before the term ends. Revised 2026-10-08: it used to be
+an end-of-term top-up only (see Reversed). It is not a cheaper door into the
+product: a cold one-off has no dosage, a $3.50 take on a $35 session does not pay
+for course-level matching, and a pair who met once has no reason to come back
+through the platform. Cold one-offs stay rejected. A renewal shares none of that —
+the matching cost is sunk, the tutor is known, the dosage already happened, and the
+pair could already have left and did not. None of those reasons depend on the
+calendar, so the refill does not either.
+
+What it fixes is the gap after a package, which the package shape gets wrong. A
+student who used four sessions and wants one more before the next exam otherwise
+chooses between another four-pack that partly auto-refunds and texting the tutor
+directly. The second is free and easier, so the package rule was producing leakage
+at the exact moment the relationship is worth most. Refills chain: a
+booked-but-unheld session leaves nothing to book, so a second can be bought before
+the first happens, which is what finals week actually looks like.
+
+The refill books straight into one of the tutor's published open slots, with no
+accept step: the tutor already offered that hour, and one session commits them to
+nothing beyond it. A package needs the tutor's accept (see Renewals).
 
 **The take is 10% of each session, capped at $100 per tutor per term.** The session
 price stays $35 and the student pays nothing on top: a student booking fee was
@@ -84,15 +105,13 @@ drift:
   the sum of `platform_fee` for that tutor and term.
 - **Fixed once written.** A session's fee never changes after recognition. Nothing is
   re-priced retroactively, in either direction.
-- **Reversals follow the tutor's pay.** A term-end refund returns only undelivered
-  sessions, which never charged a fee, so it does not touch the meter. A guarantee
-  refund does not give room back: the platform eats that refund rather than clawing
-  back from the tutor, and returning cap room would make the tutor's next session pay
-  for it — the same clawback by another route. A disputed session charges nothing while
-  it holds; resolved as attended, it is charged at resolution against the meter as it
-  stands then; resolved as not attended, never. Nothing today reverses a recognised
-  session. If something ever does, and takes the tutor's pay back with it, it reverses
-  the fee row too and the room returns.
+- **Reversals follow the tutor's pay.** A term-end refund, and a package the student
+  ends early, return only undelivered sessions, which never charged a fee, so
+  neither touches the meter. A disputed session charges nothing while it holds;
+  resolved as attended, it is charged at resolution against the meter as it stands
+  then; resolved as not attended, never. Nothing today reverses a recognised session.
+  If something ever does, and takes the tutor's pay back with it, it reverses the fee
+  row too and the room returns.
 - **Concurrency.** `recognise()` locks the `tutor_profile` row before reading the
   meter, so two sessions for one tutor recognised at the same moment serialise and the
   second sees the first's fee. `recognise()` takes the tutor lock after the session
@@ -109,9 +128,6 @@ drift:
   to collect, roughly $1.10 a session: a third of the $3.50 fee before the cap and a
   straight loss after it, plus Connect's per-payout charge. Passing processing through
   to capped tutors was the alternative, and was rejected to keep the promise simple.
-- **The guarantee's cost is accepted as is.** A guarantee refund now costs the platform
-  the tutor's $31.50 plus processing, about nine sessions of fee where it used to be
-  four. The guarantee terms are unchanged.
 - **The tutor sees their own meter; no student ever does.** The earnings page shows
   progress toward the cap ("$64 of $100 this term"), because the incentive only works
   if a busy tutor knows how close they are. Whether a tutor is capped says how busy
@@ -156,6 +172,13 @@ is a property of (offering, viewer), not of the offering.
 **Double opt-in.** The tutor accepts too. On the tutor side an explicit pass costs
 nothing, ever; silent expiry carries a ranking penalty. Requests expire at 12h.
 Punishing declines makes tutors accept students they cannot serve.
+
+**A request names its package.** The student picks exam-anchored or through the
+final when asking, and the tutor sees the number of sessions before accepting,
+because accepting commits them to that many sessions and slots. A tutor who can fit
+three sessions can decline an eight-session ask at no cost, like any pass. Checkout
+buys exactly the requested package. Decided 2026-10-08. Requests made before then
+carry no package and keep the free pick at checkout.
 
 **Charge only after the tutor accepts and a slot is picked** — never at request time,
 or double opt-in generates a refund queue in week one.
@@ -229,10 +252,12 @@ asked, and a tutor cannot write to a student who has not asked them. Keying on
 
 **Writable while there is something between them.** A pending request, an accepted
 request not yet bought (inside its term), or an active package. Writability is
-computed from those rows, never stored. When the last package ends the thread closes:
-it still opens and shows its history, and the composer becomes a "Book another
-package" prompt into the existing top-up or request flow. Booking again reopens it. A
-tutor whose request auto-withdrew keeps a read-only thread.
+computed from those rows, never stored. When the last package ends the thread closes,
+but it still opens and shows its history. While the term runs, the student sees "Book
+again" (see Renewals) once the pair has nothing left to book, whether the thread is
+open or closed. After the term ends, a closed thread points to the course list. A
+renewal request or a refill reopens the thread. A tutor whose request auto-withdrew
+keeps a read-only thread.
 
 **Staff read reported threads only, and every read is logged.** An operator sees
 reports for their own campuses and can open the reported thread; each open writes an
@@ -321,9 +346,6 @@ deck, and the overall rating sits beside it.
 - **An auto-released session can be rated.** The money moved and the session is
   recognised. A rating writes no reliability fact either, so it cannot launder a
   silence into an `attended` row.
-- **The session a guarantee refunded can be rated.** It was delivered and recognised,
-  and the platform paid the tutor for it. Excluding it would drop exactly the ratings
-  that explain why someone asked for their money back.
 
 **The window is 7 days from recognition**, the `session_earned` row's `occurred_at`.
 It was shortened from 14 days on 2026-10-06. That is long enough to answer once the
@@ -480,8 +502,12 @@ the take cap under Product.
 proposal's signal is the on-app renewal rate per (tutor, course):
 
 - **A trial** is a distinct student whose first engagement with that `tutor_course`
-  ran: it ended `completed`, or it was refunded under the guarantee. It counts per
-  pair, so a student counts once.
+  ran: it ended `completed`. It counts per pair, so a student counts once. A first
+  package refunded under the former guarantee (removed 2026-10-08) is still a trial,
+  so past trials do not shift.
+- **A first package the student ended early follows the term-end rule.** With
+  sessions delivered it ends `completed`, so it is a trial. Without a later purchase
+  it is a failed one. With nothing delivered it never ran, so it is not a trial.
 - **A first package refunded at term end with no session delivered is not a trial**
   (user, 2026-10-07). The package never ran, so it says nothing about whether the
   student would come back. That holds even if the pair bought again later: the pair
@@ -489,7 +515,8 @@ proposal's signal is the on-app renewal rate per (tutor, course):
   `completed`, so it is a trial like any other.
 - **A success** is that student buying another engagement from the same
   `tutor_course`. A top-up counts.
-- **A guarantee refund counts as a failed trial.**
+- **A historical guarantee refund counts as a failed trial**, unless the pair bought
+  again.
 
 Renewal is the event that cash removes, and it costs two paid packages to fake.
 
@@ -517,16 +544,29 @@ in any form, and like ratings it never feeds reliability or gates anyone.
 **A mid-term renewal offers "through the final" first.** When an existing pair books
 again with exam-anchored sessions still possible, "through the final" is the default
 and the exam-anchored package is the second option. Each renewal is a leakage moment,
-and this turns three or four of them a term into one. The end-of-term top-up rule is
-unchanged. This settles the renewal half of the open question *Package length vs.
-disintermediation*. The first-purchase default is still exam-anchored.
+and this turns three or four of them a term into one. One more session is the third
+option (see Product). This settles the renewal half of the open question *Package
+length vs. disintermediation*. The first-purchase default is still exam-anchored.
 
-**Direct mid-term renewal is the next item after public ratings.** A pair renews with
-the same tutor from their thread or the session page, without going back through the
-deck or making a new request. The matching cost is sunk, which is the same reasoning
-as the top-up. **The tutor's accept step stays.** Double opt-in holds on every
-package, so a direct renewal is a request to this one tutor that skips the deck, not a
-purchase the tutor never agreed to. The tutor also still needs open slots.
+**Direct mid-term renewal: one "Book again" entry.** Decided 2026-10-08. Build
+brief: `docs/proposals/direct-renewal.md`. From the thread or the session page,
+once the pair's packages in the course have nothing left to book and the term has
+not ended, the student sees three options in this order: through the final,
+exam-anchored, one more session. The matching cost is sunk, which is the same
+reasoning as the refill.
+
+- **A package is a request to this one tutor that skips the deck.** It is an
+  ordinary `match_request` that names its package (see Matching). It has the same
+  12h expiry and silent-expiry penalty and the same accept and decline. It is one
+  of the student's parallel asks. It is charged only after the accept and a slot
+  pick. Double opt-in holds on every package, because a package is a commitment
+  the tutor has to agree to.
+- **One more session books directly** into one of the tutor's published open
+  slots, with no accept step (see Product).
+- **Both count as a renewal success** for the ranker. Like the rest of the renewal
+  term, neither ever reaches the student or the card.
+- **A blocked pair gets neither**, and neither does a tutor whose claim on the
+  course is no longer active.
 
 ### Technical
 
@@ -617,6 +657,23 @@ of a badge is itself a signal."* The user reversed it: a tutor with 10 paid sess
 has had enough reps to be judged on them, and a public rating that only paid sessions
 can earn is the reason to keep sessions on the app. The objections are answered, or
 accepted with their cost stated, under Ratings.
+
+**Single session only as an end-of-term top-up — settled at design, revised
+2026-10-08.** The original rule offered one session only when fewer weeks remained
+in the term than a package has sessions. The user revised it: the reasons a
+renewal is worth having (matching cost sunk, tutor known, dosage happened, the pair
+stayed) hold all term, and the gap after any package is a leakage moment, not just
+the last one. Cold one-offs stay rejected. The current rule is under Product.
+
+**Self-serve first-session refund guarantee — settled at design, reversed
+2026-10-08.** The original rule: *"Paid first session under a self-serve refund
+guarantee — not a free intro. On a refund the platform eats the tutor's pay rather
+than clawing it back. Cap at one guarantee per student per term."* The user removed
+it: "if you buy a session, you're committing, no free lunch." The column and ledger
+type stay for history, and past guarantee refunds keep their meaning in the renewal
+trial count. Ending a package early (see Product) is the way out of a bad fit
+instead: it refunds only what was not delivered. The paid-first-session rule and
+the rejection of free intros stand.
 
 ---
 
