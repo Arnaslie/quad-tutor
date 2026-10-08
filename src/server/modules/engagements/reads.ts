@@ -219,7 +219,6 @@ const remainingCount = sql<number>`greatest(0, ${engagement.sessionsPurchased} -
 export type BookAgain = {
   tutorCourseId: string;
   offeringId: string;
-  latestEngagementId: string;
   tutorProfileId: string;
   tutorName: string;
   tutorLocation: string | null;
@@ -265,7 +264,6 @@ async function bookAgainRows(
     .select({
       tutorCourseId: engagement.tutorCourseId,
       offeringId: engagement.courseOfferingId,
-      latestEngagementId: sql<string>`(array_agg(${engagement.id} order by ${engagement.createdAt} desc))[1]`,
       sessionsRemaining: sql<number>`coalesce(sum(${remainingCount}) filter (where ${engagement.status} = 'active'), 0)::int`,
       tutorProfileId: tutorProfile.id,
       tutorName: user.name,
@@ -351,7 +349,6 @@ async function bookAgainRows(
     return {
       tutorCourseId: pair.tutorCourseId,
       offeringId: pair.offeringId,
-      latestEngagementId: pair.latestEngagementId,
       tutorProfileId: pair.tutorProfileId,
       tutorName: pair.tutorName,
       tutorLocation: pair.tutorLocation,

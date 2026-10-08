@@ -45,7 +45,7 @@ import {
   slotsForTopUp,
 } from "./purchase";
 import { bookAgain, bookAgainList } from "./reads";
-import { bookSession } from "./scheduling";
+import { bookSession, slotsForEngagement } from "./scheduling";
 
 const databaseHost = new URL(process.env.DATABASE_URL ?? "postgres://unset").hostname;
 if (!isLocalHost(databaseHost)) {
@@ -190,7 +190,6 @@ test("book again opens mid-term once the pair's packages have nothing left to bo
   const gate = await bookAgain(student, tutorCourseId);
   assert.ok(gate);
   assert.equal(gate.offeringId, home.offeringId);
-  assert.equal(gate.latestEngagementId, engagementId);
   assert.equal(gate.liveRequest, null);
   assert.equal((await bookAgainList(student)).length, 1, "one row per pair");
 
@@ -374,6 +373,69 @@ test("two students racing for the same slot: one gets it", async () => {
     .from(sessionBooking)
     .where(and(eq(sessionBooking.institutionId, home.institutionId), eq(sessionBooking.scheduledAt, slot), sql`${sessionBooking.status} <> 'cancelled'`));
   assert.equal(n, 1);
+});
+
+test("two tutors accepting the same student's asks at once: one wins, the other is told cleanly", async () => {
+  const student = await person(home.institutionId);
+  await requestTutors({ actor: student, courseOfferingId: home.offeringId, tutorCourseIds: [tutorCourseId, otherTutorCourseId], kind: "exam_anchored" });
+  const [mine, theirs] = await Promise.all([pendingRequest(student, tutorCourseId), pendingRequest(student, otherTutorCourseId)]);
+
+  const results = await Promise.allSettled([
+    acceptRequest({ tutor, requestId: mine }),
+    acceptRequest({ tutor: otherTutor, requestId: theirs }),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  const lost = results.find((result) => result.status === "rejected");
+  assert.ok(lost?.reason instanceof RequestError, String(lost?.reason));
+
+  const [{ n }] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(matchRequest)
+    .where(and(eq(matchRequest.studentProfileId, student.studentProfileId), eq(matchRequest.status, "accepted")));
+  assert.equal(n, 1);
+});
+
+test("a session booking and a refill racing for one slot: one gets it", async () => {
+  for (const headStartMs of [0, 2, 4, 6, 8, 12]) {
+    const booker = await person(home.institutionId);
+    const engagementId = await boughtPackage(booker);
+    const { student: refiller } = await finishedPair();
+    const [slot] = await slotsForEngagement({ actor: booker, engagementId });
+
+    const results = await Promise.allSettled([
+      purchaseTopUp({ actor: refiller, tutorCourseId, slotStartsAt: slot }),
+      new Promise((resolve) => setTimeout(resolve, headStartMs)).then(() =>
+        bookSession({ actor: booker, engagementId, slotStartsAt: slot }),
+      ),
+    ]);
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1, `head start ${headStartMs}ms`);
+    const [{ n }] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(sessionBooking)
+      .where(and(eq(sessionBooking.institutionId, home.institutionId), eq(sessionBooking.scheduledAt, slot), sql`${sessionBooking.status} <> 'cancelled'`));
+    assert.equal(n, 1);
+  }
+});
+
+test("a booking against a package refunded while it waits is refused", async () => {
+  const student = await person(home.institutionId);
+  const engagementId = await boughtPackage(student);
+  const [slot] = await slotsForEngagement({ actor: student, engagementId });
+
+  let booking: Promise<unknown> = Promise.resolve();
+  await db.transaction(async (tx) => {
+    await tx.select({ id: engagement.id }).from(engagement).where(eq(engagement.id, engagementId)).for("update");
+    booking = bookSession({ actor: student, engagementId, slotStartsAt: slot }).then(
+      () => "booked",
+      (error: unknown) => error,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await tx.update(engagement).set({ status: "refunded", completedAt: new Date() }).where(eq(engagement.id, engagementId));
+  });
+
+  assert.ok((await booking) instanceof SessionError);
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(sessionBooking).where(eq(sessionBooking.engagementId, engagementId));
+  assert.equal(n, 1, "only the session bought with the package");
 });
 
 test("the request email names the package the tutor would commit to", () => {
