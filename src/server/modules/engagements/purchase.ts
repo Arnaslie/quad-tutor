@@ -21,7 +21,7 @@ import {
 import type { Executor } from "./access";
 import { SESSION_MINUTES, remindedAtForNewBooking } from "./attendance";
 import { bookAgain } from "./reads";
-import { availableSlots, confirmationDeadline, holdSlot, lockTutor } from "./slots";
+import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slots";
 
 export class PurchaseError extends Error {}
 
@@ -137,12 +137,12 @@ export async function purchasePackage(params: {
     }
     const option = packageOption(kind);
 
-    const slotOpen = await holdSlot(tx, {
+    const open = await slotOpen(tx, {
       tutorProfileId: request.tutorProfileId,
       institutionId: params.actor.institutionId,
       slotStartsAt: params.slotStartsAt,
     });
-    if (!slotOpen) throw new PurchaseError("That time is no longer available.");
+    if (!open) throw new PurchaseError("That time is no longer available.");
 
     // TODO(stripe): take payment here, before any row is written. A failed
 
@@ -231,12 +231,12 @@ export async function purchaseTopUp(params: {
 
     const gate = await refillGate(tx, params);
 
-    const slotOpen = await holdSlot(tx, {
+    const open = await slotOpen(tx, {
       tutorProfileId: gate.tutorProfileId,
       institutionId: params.actor.institutionId,
       slotStartsAt: params.slotStartsAt,
     });
-    if (!slotOpen) throw new PurchaseError("That time is no longer available.");
+    if (!open) throw new PurchaseError("That time is no longer available.");
 
     // TODO(stripe): take payment here, before any row is written, same as
 

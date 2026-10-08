@@ -95,12 +95,11 @@ export async function lockTutor(exec: Executor, tutorProfileId: string): Promise
     .for("no key update");
 }
 
-/** Takes the tutor lock, so call it before any session lock in the same transaction. */
-export async function holdSlot(
+/** The caller must already hold `lockTutor` for this tutor, or two bookings can take one slot. */
+export async function slotOpen(
   exec: Executor,
   params: { tutorProfileId: string; institutionId: string; slotStartsAt: Date },
 ): Promise<boolean> {
-  await lockTutor(exec, params.tutorProfileId);
   const open = await availableSlots({ ...params, exec });
   const wanted = params.slotStartsAt.getTime();
   return open.some((slot) => slot.getTime() === wanted);

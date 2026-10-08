@@ -11,7 +11,7 @@ import {
 } from "@/server/db/schema";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
-import { availableSlots, confirmationDeadline, holdSlot } from "./slots";
+import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slots";
 import { SessionError, lockSession, loadParticipation, type Executor } from "./access";
 import {
   LATE_CANCEL_HOURS,
@@ -43,13 +43,14 @@ export async function sessionsRemaining(params: {
 async function loadBookablePackage(
   actor: Actor,
   engagementId: string,
+  lockIn?: Executor,
 ): Promise<{
   id: string;
   tutorProfileId: string;
   sessionsPurchased: number;
   defaultLocation: string | null;
 }> {
-  const context = await db
+  const query = (lockIn ?? db)
     .select({
       id: engagement.id,
       status: engagement.status,
@@ -70,6 +71,7 @@ async function loadBookablePackage(
       ),
     )
     .limit(1);
+  const context = lockIn ? await query.for("key share", { of: engagement }) : await query;
 
   const target = context.at(0);
   if (!target) throw new SessionError("That package does not exist.");
@@ -112,15 +114,16 @@ export async function bookSession(params: {
   slotStartsAt: Date;
   studentNote?: string | null;
 }): Promise<{ sessionId: string; remaining: number }> {
-  const target = await loadBookablePackage(params.actor, params.engagementId);
-
   return db.transaction(async (tx) => {
-    const slotOpen = await holdSlot(tx, {
+    const target = await loadBookablePackage(params.actor, params.engagementId, tx);
+    await lockTutor(tx, target.tutorProfileId);
+
+    const open = await slotOpen(tx, {
       tutorProfileId: target.tutorProfileId,
       institutionId: params.actor.institutionId,
       slotStartsAt: params.slotStartsAt,
     });
-    if (!slotOpen) throw new SessionError("That time is no longer available.");
+    if (!open) throw new SessionError("That time is no longer available.");
 
     const remaining = await sessionsRemaining({
       exec: tx,
