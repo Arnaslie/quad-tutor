@@ -230,7 +230,7 @@ export const courseCodeAlias = pgTable(
   "course_code_alias",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     courseId: uuid("course_id")
       .notNull()
       .references(() => course.id),
@@ -245,7 +245,7 @@ export const courseOffering = pgTable(
   "course_offering",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     courseId: uuid("course_id")
       .notNull()
       .references(() => course.id),
@@ -265,7 +265,7 @@ export const exam = pgTable(
   "exam",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     courseOfferingId: uuid("course_offering_id")
       .notNull()
       .references(() => courseOffering.id),
@@ -279,7 +279,7 @@ export const enrollment = pgTable(
   "enrollment",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     studentProfileId: uuid("student_profile_id")
       .notNull()
       .references(() => studentProfile.id),
@@ -297,7 +297,7 @@ export const tutorCourse = pgTable(
   "tutor_course",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     tutorProfileId: uuid("tutor_profile_id")
       .notNull()
       .references(() => tutorProfile.id),
@@ -373,7 +373,7 @@ export const matchRequest = pgTable(
   "match_request",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     studentProfileId: uuid("student_profile_id")
       .notNull()
       .references(() => studentProfile.id),
@@ -406,7 +406,7 @@ export const engagement = pgTable(
   "engagement",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     studentProfileId: uuid("student_profile_id")
       .notNull()
       .references(() => studentProfile.id),
@@ -444,7 +444,7 @@ export const sessionBooking = pgTable(
   "session_booking",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     engagementId: uuid("engagement_id")
       .notNull()
       .references(() => engagement.id),
@@ -497,7 +497,7 @@ export const reliabilityEvent = pgTable(
   "reliability_event",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     userId: text("user_id")
       .notNull()
       .references(() => user.id),
@@ -512,7 +512,7 @@ export const ledgerEntry = pgTable(
   "ledger_entry",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     engagementId: uuid("engagement_id")
       .notNull()
       .references(() => engagement.id),
@@ -537,7 +537,7 @@ export const tutorAvailability = pgTable(
   "tutor_availability",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     tutorProfileId: uuid("tutor_profile_id")
       .notNull()
       .references(() => tutorProfile.id),
@@ -553,7 +553,7 @@ export const demandSignal = pgTable(
   "demand_signal",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    institutionId: uuid("institution_id").references(() => institution.id),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
     studentProfileId: uuid("student_profile_id")
       .notNull()
       .references(() => studentProfile.id),
