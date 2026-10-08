@@ -7,6 +7,7 @@ import { runTermEndRefunds } from "@/server/modules/engagements/termEnd";
 import { runNotifications } from "@/server/modules/notifications/dispatch";
 import { expireStaleRequests } from "@/server/modules/matching/requests";
 import { releaseRatings } from "@/server/modules/ratings/release";
+import { refreshScores } from "@/server/modules/scoring/stats";
 import { purgeProofFiles } from "@/server/modules/tutoring/verification";
 
 export const maxDuration = 60;
@@ -43,6 +44,7 @@ export async function GET(request: Request) {
     let notified = 0;
     let purgedProofs = 0;
     let releasedRatings = 0;
+    let refreshedScores = 0;
 
     for (const campus of campuses) {
       releasedRatings += await releaseRatings(campus.id).catch((error) => {
@@ -57,6 +59,10 @@ export async function GET(request: Request) {
       refunded += refunds.length;
       refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
       notified += await runNotifications(campus.id);
+      refreshedScores += await refreshScores(campus.id).catch((error) => {
+        console.error(`[cron] score refresh for ${campus.slug} failed`, error);
+        return 0;
+      });
     }
 
     return Response.json({
@@ -67,6 +73,7 @@ export async function GET(request: Request) {
       notified,
       purgedProofs,
       releasedRatings,
+      refreshedScores,
       campuses: campuses.length,
       tookMs: Date.now() - startedAt,
     });

@@ -480,7 +480,13 @@ the take cap under Product.
 proposal's signal is the on-app renewal rate per (tutor, course):
 
 - **A trial** is a distinct student whose first engagement with that `tutor_course`
-  has ended, `completed` or `refunded`. It counts per pair, so a student counts once.
+  ran: it ended `completed`, or it was refunded under the guarantee. It counts per
+  pair, so a student counts once.
+- **A first package refunded at term end with no session delivered is not a trial**
+  (user, 2026-10-07). The package never ran, so it says nothing about whether the
+  student would come back. That holds even if the pair bought again later: the pair
+  has no trial. A term-end refund with sessions delivered ends the package as
+  `completed`, so it is a trial like any other.
 - **A success** is that student buying another engagement from the same
   `tutor_course`. A top-up counts.
 - **A guarantee refund counts as a failed trial.**
