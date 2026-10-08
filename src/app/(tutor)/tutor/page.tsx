@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { formatCountdown, formatDayTime } from "@/components/format";
 import { Icon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
+import { packageSummary } from "@/server/modules/billing/pricing";
 import { requireTutor, type TutorActor } from "@/server/modules/identity/actor";
 import { inboxForTutor, type TutorInboxItem } from "@/server/modules/matching/requests";
 import { availabilityForTutor } from "@/server/modules/tutoring/availability";
@@ -151,6 +152,13 @@ function RequestCard({ request }: { request: TutorInboxItem }) {
         </h2>
         <p className="text-sm text-muted">{request.courseTitle}</p>
       </div>
+
+      {request.requestedKind ? (
+        <p className="flex items-center gap-2 text-sm font-medium">
+          <Icon name="calendar" className="size-4 shrink-0 text-muted" />
+          Asking for {packageSummary(request.requestedKind)}
+        </p>
+      ) : null}
 
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <span

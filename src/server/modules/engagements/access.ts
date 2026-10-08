@@ -58,6 +58,7 @@ export type SessionContextRow = {
   tutorUserId: string;
   tutorName: string;
   engagementStatus: "active" | "completed" | "refunded" | "cancelled";
+  tutorCourseId: string;
   sessionsPurchased: number;
   pricePaidMinor: number;
   currency: string;
@@ -97,6 +98,7 @@ export function sessionContext(exec: Executor = db) {
       tutorUserId: tutorProfile.userId,
       tutorName: tutorUser.name,
       engagementStatus: engagement.status,
+      tutorCourseId: engagement.tutorCourseId,
       sessionsPurchased: engagement.sessionsPurchased,
       pricePaidMinor: engagement.pricePaidMinor,
       currency: engagement.currency,

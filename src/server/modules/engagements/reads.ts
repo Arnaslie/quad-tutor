@@ -415,6 +415,7 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
 
 export type SessionDetail = SessionListItem & {
   courseId: string;
+  tutorCourseId: string;
   termName: string;
 
   theirAnswer: Answer;
@@ -441,6 +442,7 @@ export async function sessionDetail(params: {
   return {
     ...toListItem(row, row.role, now),
     courseId: row.courseId,
+    tutorCourseId: row.tutorCourseId,
     termName: row.termName,
     theirAnswer: answerFor(row, otherSide(row.role)),
     denialNote: row.denialNote,

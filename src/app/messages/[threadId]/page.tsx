@@ -71,11 +71,20 @@ function Footer({ thread }: { thread: ThreadView }) {
             : `This conversation is closed. It opens again if ${thread.otherName} books you.`}
         </p>
         {thread.bookAgainHref ? (
-          <ButtonLink href={thread.bookAgainHref}>Book another package</ButtonLink>
+          <ButtonLink href={thread.bookAgainHref}>Book again</ButtonLink>
         ) : null}
       </Card>
     );
   }
 
-  return <Composer threadId={thread.id} />;
+  return (
+    <>
+      {thread.bookAgainHref ? (
+        <ButtonLink href={thread.bookAgainHref} variant="secondary" className="self-start">
+          Book again
+        </ButtonLink>
+      ) : null}
+      <Composer threadId={thread.id} />
+    </>
+  );
 }
