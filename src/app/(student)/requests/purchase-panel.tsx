@@ -5,11 +5,15 @@ import { useActionState, useState } from "react";
 import { Button, ButtonLink } from "@/components/button";
 import { Card } from "@/components/card";
 import { formatDay, formatTime } from "@/components/format";
-import { Money } from "@/components/money";
-import type { PackageKind, PackageOption } from "@/server/modules/billing/pricing";
+import type {
+  PackageKind,
+  PackageOption,
+  RequestedKind,
+} from "@/server/modules/billing/pricing";
 
 import { purchase, type ActionResult } from "../actions";
 import { MeetingSpot, StudentNoteField } from "../meeting-spot";
+import { PackageChoice } from "../package-choice";
 
 export type ExamChoice = {
   id: string;
@@ -25,6 +29,7 @@ export function PurchasePanel({
   slots,
   exams,
   options,
+  requestedKind,
 }: {
   requestId: string;
   tutorName: string;
@@ -32,12 +37,13 @@ export function PurchasePanel({
   slots: string[];
   exams: ExamChoice[];
   options: PackageOption[];
+  requestedKind: RequestedKind | null;
 }) {
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
     purchase,
     null,
   );
-  const [kind, setKind] = useState<PackageKind>("exam_anchored");
+  const [kind, setKind] = useState<PackageKind>(requestedKind ?? "exam_anchored");
   const [slot, setSlot] = useState<string>(slots.at(0) ?? "");
   const [showAllSlots, setShowAllSlots] = useState(false);
 
@@ -68,52 +74,33 @@ export function PurchasePanel({
   return (
     <form action={action} className="flex flex-col gap-6">
       <input type="hidden" name="requestId" value={requestId} />
-      <input type="hidden" name="kind" value={kind} />
+      {requestedKind ? null : <input type="hidden" name="kind" value={kind} />}
       <input type="hidden" name="anchorExamId" value={anchor?.id ?? ""} />
       <input type="hidden" name="slotStartsAt" value={slot} />
 
       <fieldset className="flex flex-col gap-2">
         <legend className="pb-2 text-sm font-semibold uppercase tracking-wide text-muted">
-          How many sessions
+          {requestedKind ? "The package you asked for" : "How many sessions"}
         </legend>
 
-        {options.map((option) => {
-          const selected = option.kind === kind;
-          const target =
-            option.kind === "through_final" ? exams.at(-1) : exams.at(0);
+        {options
+          .filter((option) => !requestedKind || option.kind === requestedKind)
+          .map((option) => {
+            const target =
+              option.kind === "through_final" ? exams.at(-1) : exams.at(0);
 
-          return (
-            <button
-              key={option.kind}
-              type="button"
-              onClick={() => setKind(option.kind)}
-              aria-pressed={selected}
-              className={`rounded-2xl border p-4 text-left transition-colors sm:p-5 ${
-                selected
-                  ? "border-accent bg-accent-soft"
-                  : "border-border bg-surface hover:bg-surface-sunken"
-              }`}
-            >
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="font-medium">
-                  {option.sessions} sessions
-                  {option.kind === "through_final" ? " — through the final" : ""}
-                </span>
-                <Money minor={option.priceMinor} className="font-semibold" />
-              </div>
-              <p className="pt-1 text-sm text-muted">
-                <Money minor={option.perSessionMinor} /> a session
-                {option.savingsMinor > 0 ? (
-                  <>
-                    {" · saves "}
-                    <Money minor={option.savingsMinor} />
-                  </>
-                ) : null}
-                {target ? ` · ready for ${target.name}, ${formatDay(target.occursOn)}` : ""}
-              </p>
-            </button>
-          );
-        })}
+            return (
+              <PackageChoice
+                key={option.kind}
+                option={option}
+                selected={option.kind === kind}
+                onSelect={requestedKind ? undefined : () => setKind(option.kind)}
+                extra={
+                  target ? ` · ready for ${target.name}, ${formatDay(target.occursOn)}` : ""
+                }
+              />
+            );
+          })}
       </fieldset>
 
       <fieldset className="flex flex-col gap-2">

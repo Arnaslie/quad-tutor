@@ -17,7 +17,7 @@ import {
   userBlock,
 } from "@/server/db/schema";
 import { tutorUser, type Executor } from "@/server/modules/engagements/access";
-import { topUpCandidates } from "@/server/modules/engagements/reads";
+import { bookAgain, bookAgainPath } from "@/server/modules/engagements/reads";
 import type { Actor } from "@/server/modules/identity/actor";
 import { displayName } from "@/server/modules/identity/display-name";
 
@@ -229,7 +229,7 @@ export async function threadView(actor: Actor, threadId: string): Promise<Thread
     open: thread.open,
     blocked: thread.blocked,
     blockedByMe,
-    bookAgainHref: side === "student" && !thread.open ? await bookAgainHref(actor, thread) : null,
+    bookAgainHref: side === "student" ? await bookAgainHref(actor, thread) : null,
     messages,
   };
 }
@@ -265,20 +265,10 @@ async function otherUserId(
 
 async function bookAgainHref(
   actor: Actor,
-  thread: Pick<ThreadRow, "studentProfileId" | "tutorCourseId">,
-): Promise<string> {
-  const pair = await db
-    .select({ id: engagement.id })
-    .from(engagement)
-    .where(
-      and(
-        eq(engagement.studentProfileId, thread.studentProfileId),
-        eq(engagement.tutorCourseId, thread.tutorCourseId),
-      ),
-    );
-  const ids = new Set(pair.map((row) => row.id));
-  const topUp = (await topUpCandidates(actor)).find((row) => ids.has(row.engagementId));
-  if (topUp) return `/sessions?topup=${topUp.engagementId}`;
+  thread: Pick<ThreadRow, "tutorCourseId" | "open">,
+): Promise<string | null> {
+  if (await bookAgain(actor, thread.tutorCourseId)) return bookAgainPath(thread.tutorCourseId);
+  if (thread.open) return null;
 
   const offering = await db
     .select({ id: matchRequest.courseOfferingId })
@@ -287,7 +277,8 @@ async function bookAgainHref(
     .innerJoin(term, eq(term.id, courseOffering.termId))
     .where(
       and(
-        eq(matchRequest.studentProfileId, thread.studentProfileId),
+        eq(matchRequest.studentProfileId, actor.studentProfileId),
+        eq(matchRequest.institutionId, actor.institutionId),
         eq(matchRequest.tutorCourseId, thread.tutorCourseId),
         gte(term.endsOn, sql`current_date`),
       ),

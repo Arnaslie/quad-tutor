@@ -25,12 +25,13 @@ import {
   sessionRatingAccess,
   studentProfile,
   term,
+  tutorAvailability,
   tutorCourse,
   tutorProfile,
   user,
 } from "@/server/db/schema";
 import { confirmAttendance } from "@/server/modules/engagements/confirmation";
-import { purchasePackage } from "@/server/modules/engagements/purchase";
+import { purchasePackage, slotsForRequest } from "@/server/modules/engagements/purchase";
 import type { Actor, OperatorActor, TutorActor } from "@/server/modules/identity/actor";
 import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
 import {
@@ -117,6 +118,9 @@ async function person(key: string, institutionId: string): Promise<Actor> {
 async function tutorFor(key: string, institutionId: string): Promise<TutorActor> {
   const base = await person(key, institutionId);
   const [profile] = await db.insert(tutorProfile).values({ userId: base.userId, institutionId }).returning({ id: tutorProfile.id });
+  await db.insert(tutorAvailability).values(
+    [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ tutorProfileId: profile.id, institutionId, weekday, startMinute: 8 * 60, endMinute: 20 * 60 })),
+  );
   return { ...base, tutorProfileId: profile.id };
 }
 
@@ -224,7 +228,7 @@ before(async () => {
   tutorCourseId = await claim(tutor, home.a.courseId);
   await claim(otherTutor, home.a.courseId);
 
-  await requestTutors({ actor: student, courseOfferingId: home.a.offeringId, tutorCourseIds: [tutorCourseId] });
+  await requestTutors({ actor: student, courseOfferingId: home.a.offeringId, tutorCourseIds: [tutorCourseId], kind: "exam_anchored" });
   const [request] = await db
     .select({ id: matchRequest.id })
     .from(matchRequest)
@@ -233,9 +237,8 @@ before(async () => {
   ({ engagementId } = await purchasePackage({
     actor: student,
     requestId: request.id,
-    kind: "exam_anchored",
     anchorExamId: null,
-    slotStartsAt: new Date(Date.now() + 3 * 86_400_000),
+    slotStartsAt: (await slotsForRequest({ actor: student, requestId: request.id }))[0],
   }));
   const [session] = await db.select({ id: sessionBooking.id }).from(sessionBooking).where(eq(sessionBooking.engagementId, engagementId));
   sessionId = session.id;
@@ -268,6 +271,7 @@ after(async () => {
   await db.delete(matchRequest).where(eq(matchRequest.courseOfferingId, home.a.offeringId));
   await db.delete(tutorCourse).where(inArray(tutorCourse.courseId, courseIds));
   await db.delete(operator).where(inArray(operator.userId, made.users));
+  await db.delete(tutorAvailability).where(inArray(tutorAvailability.institutionId, institutions));
   await db.delete(tutorProfile).where(inArray(tutorProfile.userId, made.users));
   await db.delete(studentProfile).where(inArray(studentProfile.userId, made.users));
   await db.delete(user).where(inArray(user.id, made.users));

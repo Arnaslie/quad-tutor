@@ -13,14 +13,16 @@ const INITIAL: RespondState = { status: "idle" };
 export function RequestActions({
   requestId,
   studentName,
+  packageLabel,
 }: {
   requestId: string;
   studentName: string;
+  packageLabel: string | null;
 }) {
   const [state, submit] = useActionState(respondToRequest, INITIAL);
 
   if (state.status !== "idle") {
-    return <Outcome state={state} studentName={studentName} />;
+    return <Outcome state={state} studentName={studentName} packageLabel={packageLabel} />;
   }
 
   return (
@@ -54,13 +56,21 @@ function Choices() {
   );
 }
 
-function Outcome({ state, studentName }: { state: RespondState; studentName: string }) {
+function Outcome({
+  state,
+  studentName,
+  packageLabel,
+}: {
+  state: RespondState;
+  studentName: string;
+  packageLabel: string | null;
+}) {
   if (state.status === "accepted") {
     return (
       <p className="flex items-start gap-2 text-sm text-foreground" role="status">
         <Icon name="check" className="mt-0.5 size-[18px] shrink-0 text-accent" />
         <span>
-          Accepted. {studentName} picks a time from your hours and pays — it shows up
+          {packageLabel ? `Accepted: ${packageLabel}.` : "Accepted."} {studentName} picks a time from your hours and pays — it shows up
           under Sessions once they do.
         </span>
       </p>

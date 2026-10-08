@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/empty-state";
 import { formatCountdown } from "@/components/format";
 import { Icon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
-import { packageOptions } from "@/server/modules/billing/pricing";
+import { packageOptions, packageSummary } from "@/server/modules/billing/pricing";
 import { upcomingExams } from "@/server/modules/catalog/courses";
 import { PurchaseError, slotsForRequest } from "@/server/modules/engagements/purchase";
 import { requireActor } from "@/server/modules/identity/actor";
@@ -83,6 +83,7 @@ export default async function RequestsPage(props: PageProps<"/requests">) {
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">{displayName(request.tutorName, "tutor")}</p>
                   <p className="truncate text-sm text-muted">{context(request)}</p>
+                  <PackageLine request={request} />
                 </div>
                 <span className="flex shrink-0 items-center gap-1.5 text-sm text-muted">
                   <Icon name="clock" className="size-4" />
@@ -127,6 +128,11 @@ function context(request: StudentRequest): string {
     .join(" · ");
 }
 
+function PackageLine({ request }: { request: StudentRequest }) {
+  if (!request.requestedKind) return null;
+  return <p className="text-sm text-muted">{packageSummary(request.requestedKind)}</p>;
+}
+
 function outcome(status: StudentRequest["status"]): string {
   switch (status) {
     case "declined":
@@ -161,10 +167,11 @@ function Accepted({ request }: { request: StudentRequest }) {
       <div className="flex flex-col gap-0.5">
         <p className="font-medium">{displayName(request.tutorName, "tutor")} said yes</p>
         <p className="text-sm text-muted">{context(request)}</p>
+        <PackageLine request={request} />
       </div>
       <div className="flex flex-wrap gap-2">
         <ButtonLink href={`/requests?buy=${request.id}`}>
-          Pick a package and a time
+          {request.requestedKind ? "Pick a time" : "Pick a package and a time"}
         </ButtonLink>
         <MessageLink threadId={request.threadId} />
       </div>
@@ -202,7 +209,11 @@ async function PurchaseStep({ actorRequest }: { actorRequest: StudentRequest }) 
       <PageHeader
         eyebrow={context(actorRequest)}
         title={`${displayName(actorRequest.tutorName, "tutor")} said yes`}
-        description="Pick how many sessions and when the first one is. This is the first time anything is charged."
+        description={
+          actorRequest.requestedKind
+            ? `They said yes to ${packageSummary(actorRequest.requestedKind).toLowerCase()}. Pick when the first one is. This is the first time anything is charged.`
+            : "Pick how many sessions and when the first one is. This is the first time anything is charged."
+        }
         action={
           <ButtonLink href="/requests" variant="secondary">
             Back
@@ -217,6 +228,7 @@ async function PurchaseStep({ actorRequest }: { actorRequest: StudentRequest }) 
         slots={slots.map((slot) => slot.toISOString())}
         exams={exams}
         options={packageOptions()}
+        requestedKind={actorRequest.requestedKind}
       />
     </div>
   );

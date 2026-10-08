@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, ne, not, or, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -7,6 +7,7 @@ import {
   courseOffering,
   engagement,
   exam,
+  matchRequest,
   professor,
   sessionBooking,
   studentProfile,
@@ -17,15 +18,18 @@ import {
 } from "@/server/db/schema";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import {
-  topUpOption,
-  topUpWindowOpen,
+  asRequestedKind,
+  bookAgainOpen,
   type PackageKind,
+  type RequestedKind,
 } from "@/server/modules/billing/pricing";
+import { blockedBetween } from "@/server/modules/messaging/blocks";
 
 import {
   onCampus,
   sessionContext,
   loadParticipation,
+  type Executor,
   type SessionContextRow,
 } from "./access";
 import { sessionEndsAt, viewerAction, type ViewerAction } from "./attendance";
@@ -212,34 +216,64 @@ const remainingCount = sql<number>`greatest(0, ${engagement.sessionsPurchased} -
     and ${sessionBooking.status} <> 'cancelled'
 ))`;
 
-export type TopUpCandidate = {
-  engagementId: string;
-  tutorLocation: string | null;
+export type BookAgain = {
+  tutorCourseId: string;
+  offeringId: string;
+  tutorProfileId: string;
   tutorName: string;
+  tutorLocation: string | null;
   courseCode: string | null;
   courseTitle: string;
-  priceMinor: number;
   currency: string;
   termEndsOn: string;
+  liveRequest: {
+    id: string;
+    status: "pending" | "accepted";
+    requestedKind: RequestedKind | null;
+  } | null;
 };
 
-export async function topUpCandidates(actor: Actor): Promise<TopUpCandidate[]> {
+export function bookAgainPath(tutorCourseId: string): string {
+  return `/sessions?again=${tutorCourseId}`;
+}
+
+function termEndMoment(endsOn: string): Date {
+  return new Date(`${endsOn}T12:00:00Z`);
+}
+
+export async function bookAgain(
+  actor: Actor,
+  tutorCourseId: string,
+  exec: Executor = db,
+): Promise<BookAgain | null> {
+  return (await bookAgainRows(exec, actor, tutorCourseId)).at(0) ?? null;
+}
+
+export async function bookAgainList(actor: Actor): Promise<BookAgain[]> {
+  return bookAgainRows(db, actor, null);
+}
+
+async function bookAgainRows(
+  exec: Executor,
+  actor: Actor,
+  tutorCourseId: string | null,
+): Promise<BookAgain[]> {
   const now = new Date();
 
-  const rows = await db
+  const pairs = await exec
     .select({
-      engagementId: engagement.id,
-      sessionsRemaining: remainingCount,
+      tutorCourseId: engagement.tutorCourseId,
+      offeringId: engagement.courseOfferingId,
+      sessionsRemaining: sql<number>`coalesce(sum(${remainingCount}) filter (where ${engagement.status} = 'active'), 0)::int`,
+      tutorProfileId: tutorProfile.id,
       tutorName: user.name,
       tutorLocation: tutorProfile.defaultLocation,
       courseCode: courseCodeAlias.code,
       courseTitle: course.title,
-      currency: engagement.currency,
+      currency: sql<string>`min(${engagement.currency})`,
       termEndsOn: term.endsOn,
     })
     .from(engagement)
-
-    .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
     .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
     .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
     .innerJoin(user, eq(user.id, tutorProfile.userId))
@@ -253,34 +287,84 @@ export async function topUpCandidates(actor: Actor): Promise<TopUpCandidate[]> {
     .where(
       and(
         eq(engagement.studentProfileId, actor.studentProfileId),
-
+        eq(engagement.institutionId, actor.institutionId),
+        eq(tutorProfile.institutionId, actor.institutionId),
+        tutorCourseId ? eq(engagement.tutorCourseId, tutorCourseId) : undefined,
         inArray(engagement.status, ["active", "completed"]),
-        onCampus(actor.institutionId),
+        gte(term.endsOn, sql`current_date`),
+        eq(tutorCourse.status, "active"),
+        ne(tutorProfile.userId, actor.userId),
+        not(blockedBetween(tutorProfile.userId, actor.userId)),
       ),
     )
-    .orderBy(desc(engagement.createdAt));
-
-  const option = topUpOption();
-
-  return rows
-    .filter((row) =>
-      topUpWindowOpen({
-        sessionsRemaining: row.sessionsRemaining,
-
-        termEndsOn: new Date(`${row.termEndsOn}T12:00:00Z`),
-        now,
-      }),
+    .groupBy(
+      engagement.tutorCourseId,
+      engagement.courseOfferingId,
+      tutorProfile.id,
+      user.name,
+      courseCodeAlias.code,
+      course.title,
+      term.endsOn,
     )
-    .map((row) => ({
-      engagementId: row.engagementId,
-      tutorName: row.tutorName,
-      tutorLocation: row.tutorLocation,
-      courseCode: row.courseCode,
-      courseTitle: row.courseTitle,
-      priceMinor: option.priceMinor,
-      currency: row.currency,
-      termEndsOn: row.termEndsOn,
-    }));
+    .orderBy(desc(sql`max(${engagement.createdAt})`));
+
+  const open = pairs.filter((pair) =>
+    bookAgainOpen({
+      sessionsRemaining: pair.sessionsRemaining,
+      termEndsOn: termEndMoment(pair.termEndsOn),
+      now,
+    }),
+  );
+  if (open.length === 0) return [];
+
+  const live = await exec
+    .select({
+      id: matchRequest.id,
+      tutorCourseId: matchRequest.tutorCourseId,
+      offeringId: matchRequest.courseOfferingId,
+      status: matchRequest.status,
+      requestedKind: matchRequest.requestedKind,
+    })
+    .from(matchRequest)
+    .leftJoin(engagement, eq(engagement.matchRequestId, matchRequest.id))
+    .where(
+      and(
+        eq(matchRequest.studentProfileId, actor.studentProfileId),
+        eq(matchRequest.institutionId, actor.institutionId),
+        inArray(
+          matchRequest.tutorCourseId,
+          open.map((pair) => pair.tutorCourseId),
+        ),
+        inArray(matchRequest.status, ["pending", "accepted"]),
+        or(ne(matchRequest.status, "pending"), gt(matchRequest.expiresAt, now)),
+        isNull(engagement.id),
+      ),
+    )
+    .orderBy(desc(matchRequest.createdAt));
+
+  return open.map((pair) => {
+    const request = live.find(
+      (row) => row.tutorCourseId === pair.tutorCourseId && row.offeringId === pair.offeringId,
+    );
+    return {
+      tutorCourseId: pair.tutorCourseId,
+      offeringId: pair.offeringId,
+      tutorProfileId: pair.tutorProfileId,
+      tutorName: pair.tutorName,
+      tutorLocation: pair.tutorLocation,
+      courseCode: pair.courseCode,
+      courseTitle: pair.courseTitle,
+      currency: pair.currency,
+      termEndsOn: pair.termEndsOn,
+      liveRequest: request
+        ? {
+            id: request.id,
+            status: request.status as "pending" | "accepted",
+            requestedKind: asRequestedKind(request.requestedKind),
+          }
+        : null,
+    };
+  });
 }
 
 export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]> {
@@ -328,6 +412,7 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
 
 export type SessionDetail = SessionListItem & {
   courseId: string;
+  tutorCourseId: string;
   termName: string;
 
   theirAnswer: Answer;
@@ -354,6 +439,7 @@ export async function sessionDetail(params: {
   return {
     ...toListItem(row, row.role, now),
     courseId: row.courseId,
+    tutorCourseId: row.tutorCourseId,
     termName: row.termName,
     theirAnswer: answerFor(row, otherSide(row.role)),
     denialNote: row.denialNote,

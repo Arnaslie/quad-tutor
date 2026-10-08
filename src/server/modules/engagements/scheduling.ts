@@ -11,7 +11,7 @@ import {
 } from "@/server/db/schema";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
-import { availableSlots, confirmationDeadline } from "./purchase";
+import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slots";
 import { SessionError, lockSession, loadParticipation, type Executor } from "./access";
 import {
   LATE_CANCEL_HOURS,
@@ -43,13 +43,14 @@ export async function sessionsRemaining(params: {
 async function loadBookablePackage(
   actor: Actor,
   engagementId: string,
+  lockIn?: Executor,
 ): Promise<{
   id: string;
   tutorProfileId: string;
   sessionsPurchased: number;
   defaultLocation: string | null;
 }> {
-  const context = await db
+  const query = (lockIn ?? db)
     .select({
       id: engagement.id,
       status: engagement.status,
@@ -70,6 +71,7 @@ async function loadBookablePackage(
       ),
     )
     .limit(1);
+  const context = lockIn ? await query.for("key share", { of: engagement }) : await query;
 
   const target = context.at(0);
   if (!target) throw new SessionError("That package does not exist.");
@@ -112,19 +114,17 @@ export async function bookSession(params: {
   slotStartsAt: Date;
   studentNote?: string | null;
 }): Promise<{ sessionId: string; remaining: number }> {
-  const target = await loadBookablePackage(params.actor, params.engagementId);
-
-  const slots = await availableSlots({
-    tutorProfileId: target.tutorProfileId,
-    institutionId: params.actor.institutionId,
-  });
-
-  const wanted = params.slotStartsAt.getTime();
-  if (!slots.some((slot) => slot.getTime() === wanted)) {
-    throw new SessionError("That time is no longer available.");
-  }
-
   return db.transaction(async (tx) => {
+    const target = await loadBookablePackage(params.actor, params.engagementId, tx);
+    await lockTutor(tx, target.tutorProfileId);
+
+    const open = await slotOpen(tx, {
+      tutorProfileId: target.tutorProfileId,
+      institutionId: params.actor.institutionId,
+      slotStartsAt: params.slotStartsAt,
+    });
+    if (!open) throw new SessionError("That time is no longer available.");
+
     const remaining = await sessionsRemaining({
       exec: tx,
       engagementId: target.id,
@@ -134,22 +134,6 @@ export async function bookSession(params: {
     if (remaining <= 0) {
       throw new SessionError("You have used every session in this package.");
     }
-
-    const clash = await tx
-      .select({ id: sessionBooking.id })
-      .from(sessionBooking)
-      .innerJoin(engagement, eq(engagement.id, sessionBooking.engagementId))
-      .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
-      .where(
-        and(
-          eq(tutorCourse.tutorProfileId, target.tutorProfileId),
-          eq(sessionBooking.scheduledAt, params.slotStartsAt),
-          ne(sessionBooking.status, "cancelled"),
-        ),
-      )
-      .limit(1);
-
-    if (clash.at(0)) throw new SessionError("That time was just taken.");
 
     const [created] = await tx
       .insert(sessionBooking)

@@ -385,6 +385,7 @@ export const matchRequest = pgTable(
       .references(() => courseOffering.id),
 
     status: matchRequestStatus("status").notNull().default("pending"),
+    requestedKind: packageKind("requested_kind"),
 
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 
@@ -399,6 +400,7 @@ export const matchRequest = pgTable(
     index("match_request_institution_idx").on(t.institutionId),
     index("match_request_student_idx").on(t.studentProfileId, t.status),
     index("match_request_tutor_course_idx").on(t.tutorCourseId, t.status),
+    check("match_request_requested_kind", sql`${t.requestedKind} <> 'top_up'`),
   ],
 );
 

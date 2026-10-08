@@ -5,7 +5,9 @@ import { useActionState, useState } from "react";
 import { Button } from "@/components/button";
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icons";
+import { Money } from "@/components/money";
 import { RatingLine } from "@/components/rating";
+import { packageOptions, packageSummary } from "@/server/modules/billing/pricing";
 import type { PublicRating } from "@/server/modules/ratings/rules";
 
 import { askTutors, type ActionResult } from "../../actions";
@@ -117,6 +119,28 @@ function Submit({
         <input key={id} type="hidden" name="tutorCourseId" value={id} />
       ))}
 
+      <fieldset className="flex flex-col gap-2">
+        <legend className="pb-2 text-sm font-semibold uppercase tracking-wide text-muted">
+          What you are asking for
+        </legend>
+        {packageOptions().map((option) => (
+          <label
+            key={option.kind}
+            className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2 text-sm transition-colors hover:bg-surface-sunken has-[:checked]:border-accent has-[:checked]:bg-accent-soft"
+          >
+            <input
+              type="radio"
+              name="kind"
+              value={option.kind}
+              defaultChecked={option.kind === "exam_anchored"}
+              className="accent-accent"
+            />
+            <span className="flex-1 font-medium">{packageSummary(option.kind)}</span>
+            <Money minor={option.priceMinor} className="text-muted" />
+          </label>
+        ))}
+      </fieldset>
+
       {state && !state.ok ? (
         <p role="alert" className="text-sm text-danger">
           {state.error}
@@ -133,8 +157,9 @@ function Submit({
               : `Ask ${selected.length} tutors`}
       </Button>
       <p className="text-center text-xs text-muted">
-        They have 12 hours to answer. The first to say yes is the one you get —
-        the rest drop off on their own. Nothing is charged until then.
+        They see the package before they answer, and have 12 hours to. The first
+        to say yes is the one you get — the rest drop off on their own. Nothing is
+        charged until then.
       </p>
     </>
   );

@@ -35,6 +35,7 @@ import {
   tutorProfile,
   user,
 } from "@/server/db/schema";
+import { asRequestedKind } from "@/server/modules/billing/pricing";
 import { tutorUser } from "@/server/modules/engagements/access";
 import { deliveredIfUnanswered } from "@/server/modules/engagements/answer-outcome";
 import { LATE_CANCEL_HOURS, reminderDueAt } from "@/server/modules/engagements/attendance";
@@ -214,6 +215,7 @@ export async function notifyPendingRequests(institutionId: string): Promise<numb
     .select({
       id: matchRequest.id,
       expiresAt: matchRequest.expiresAt,
+      requestedKind: matchRequest.requestedKind,
       tutorEmail: tutorUser.email,
       tutorName: tutorUser.name,
       studentName: user.name,
@@ -254,6 +256,7 @@ export async function notifyPendingRequests(institutionId: string): Promise<numb
             tutorName: displayName(row.tutorName, "tutor"),
             studentName: displayName(row.studentName, "student"),
             courseLabel: row.code ?? row.title,
+            requestedKind: asRequestedKind(row.requestedKind),
             expiresAt: row.expiresAt,
           }),
           idempotencyKey: `request-waiting/${row.id}`,

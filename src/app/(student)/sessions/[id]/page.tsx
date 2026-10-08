@@ -8,7 +8,12 @@ import { formatDay, formatDayTime, formatTime } from "@/components/format";
 import { Icon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
 import { SessionError } from "@/server/modules/engagements/access";
-import { sessionDetail, type SessionDetail } from "@/server/modules/engagements/reads";
+import {
+  bookAgain,
+  bookAgainPath,
+  sessionDetail,
+  type SessionDetail,
+} from "@/server/modules/engagements/reads";
 import { requireActor } from "@/server/modules/identity/actor";
 import { displayName } from "@/server/modules/identity/display-name";
 import { sessionRatingState, type SessionRatingState } from "@/server/modules/ratings/reads";
@@ -48,7 +53,10 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
   }
 
   const otherParty = displayName(session.otherPartyName, "tutor");
-  const rating = await sessionRatingState(actor, session.sessionId);
+  const [rating, canBookAgain] = await Promise.all([
+    sessionRatingState(actor, session.sessionId),
+    bookAgain(actor, session.tutorCourseId),
+  ]);
 
   const eyebrow = [
     session.courseCode,
@@ -89,7 +97,14 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
         </dl>
       </Card>
 
-      <MessageLink threadId={session.threadId} className="self-start" />
+      <div className="flex flex-wrap gap-2">
+        <MessageLink threadId={session.threadId} />
+        {canBookAgain ? (
+          <ButtonLink href={bookAgainPath(session.tutorCourseId)} variant="secondary">
+            Book again
+          </ButtonLink>
+        ) : null}
+      </div>
 
       <SessionActions
         sessionId={session.sessionId}

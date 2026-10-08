@@ -24,11 +24,8 @@ import {
   denyAttendance,
   releaseLapsedConfirmations,
 } from "@/server/modules/engagements/confirmation";
-import {
-  confirmationDeadline,
-  purchasePackage,
-  slotsForRequest,
-} from "@/server/modules/engagements/purchase";
+import { purchasePackage, slotsForRequest } from "@/server/modules/engagements/purchase";
+import { confirmationDeadline } from "@/server/modules/engagements/slots";
 import {
   sessionBoardForStudent,
   sessionBoardForTutor,
@@ -296,6 +293,7 @@ async function main(): Promise<void> {
     actor: student,
     courseOfferingId: target.courseOfferingId,
     tutorCourseIds: target.tutorCourseIds,
+    kind: "exam_anchored",
   });
   console.log(`${student.name} asked ${asked.created} tutors (cap ${asked.limit})`);
 
@@ -403,6 +401,7 @@ async function autoReleasedPackage(
     actor: student,
     courseOfferingId: target.courseOfferingId,
     tutorCourseIds: target.tutorCourseIds,
+    kind: "exam_anchored",
   });
 
   const pending = await db
