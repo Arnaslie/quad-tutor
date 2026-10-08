@@ -125,6 +125,7 @@ drift:
   | `bookSession` | `engagement` (for key share; re-read, refused unless `active`), then `tutor_profile` |
   | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update) |
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
+  | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation could hold (inside 12h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
 
   The rules behind it:
   - Student before request; tutor before request.
