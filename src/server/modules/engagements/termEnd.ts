@@ -1,4 +1,4 @@
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -9,9 +9,11 @@ import {
   term,
 } from "@/server/db/schema";
 import { record } from "@/server/modules/billing/ledger";
-import { perSessionMinor } from "@/server/modules/billing/pricing";
+import { unusedRefundMinor } from "@/server/modules/billing/pricing";
+import type { Actor } from "@/server/modules/identity/actor";
 
 import { SessionError } from "./access";
+import { END_BLOCK_MESSAGE, endBlock, type EndBlock } from "./attendance";
 
 export type TermEndRefund = {
   engagementId: string;
@@ -63,91 +65,132 @@ function refundShape(row: {
   currency: string;
   sessionsDelivered: number;
 }): TermEndRefund {
-  const rate = perSessionMinor(row);
   return {
     engagementId: row.engagementId,
     studentProfileId: row.studentProfileId,
     sessionsPurchased: row.sessionsPurchased,
     sessionsDelivered: row.sessionsDelivered,
-    refundMinor: Math.max(0, row.pricePaidMinor - row.sessionsDelivered * rate),
+    refundMinor: unusedRefundMinor(row),
     currency: row.currency,
   };
 }
 
-export async function refundUnusedSessions(
-  engagementId: string,
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export class EndPackageError extends SessionError {
+  constructor(readonly block: EndBlock) {
+    super(END_BLOCK_MESSAGE[block.reason]);
+  }
+}
+
+export async function closeWithRefund(
+  tx: Tx,
+  params: { engagementId: string; institutionId: string; endedBy?: Actor },
 ): Promise<TermEndRefund | null> {
+  const { engagementId, endedBy } = params;
   const now = new Date();
 
-  return db.transaction(async (tx) => {
-    const rows = await tx
-      .select({
-        engagementId: engagement.id,
-        studentProfileId: engagement.studentProfileId,
-        status: engagement.status,
-        sessionsPurchased: engagement.sessionsPurchased,
-        pricePaidMinor: engagement.pricePaidMinor,
-        currency: engagement.currency,
-        institutionId: studentProfile.institutionId,
-      })
-      .from(engagement)
-      .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
-      .where(eq(engagement.id, engagementId))
-      .for("update", { of: engagement })
-      .limit(1);
+  const rows = await tx
+    .select({
+      engagementId: engagement.id,
+      studentProfileId: engagement.studentProfileId,
+      status: engagement.status,
+      sessionsPurchased: engagement.sessionsPurchased,
+      pricePaidMinor: engagement.pricePaidMinor,
+      currency: engagement.currency,
+    })
+    .from(engagement)
+    .where(
+      and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)),
+    )
+    .for("update")
+    .limit(1);
 
-    const target = rows.at(0);
-    if (!target) throw new SessionError("That package does not exist.");
-    if (target.status !== "active") return null;
+  const target = rows.at(0);
+  if (!target) throw new SessionError("That package does not exist.");
+  if (endedBy && target.studentProfileId !== endedBy.studentProfileId) {
+    throw new SessionError("That package is not yours.");
+  }
+  if (target.status !== "active") return null;
 
-    await tx
-      .update(sessionBooking)
-      .set({ status: "cancelled" })
-      .where(
-        and(
-          eq(sessionBooking.engagementId, engagementId),
-          eq(sessionBooking.status, "scheduled"),
-        ),
-      );
-
-    const delivered = await tx
-      .select({ n: sql<number>`count(*)::int` })
+  if (endedBy) {
+    const sessions = await tx
+      .select({ status: sessionBooking.status, scheduledAt: sessionBooking.scheduledAt })
       .from(sessionBooking)
       .where(
         and(
           eq(sessionBooking.engagementId, engagementId),
-          eq(sessionBooking.status, "completed"),
+          inArray(sessionBooking.status, ["scheduled", "disputed"]),
         ),
       );
+    const block = endBlock(sessions, now);
+    if (block) throw new EndPackageError(block);
+  }
 
-    const refund = refundShape({
-      ...target,
-      sessionsDelivered: delivered.at(0)?.n ?? 0,
-    });
+  await tx
+    .update(sessionBooking)
+    .set(
+      endedBy
+        ? { status: "cancelled", cancelledAt: now, cancelledByUserId: endedBy.userId }
+        : { status: "cancelled" },
+    )
+    .where(
+      and(
+        eq(sessionBooking.engagementId, engagementId),
+        eq(sessionBooking.status, "scheduled"),
+      ),
+    );
 
-    if (refund.refundMinor > 0) {
-      // TODO(stripe): issue the refund here; `stripeReference` carries the id.
-      await record(tx, [
-        {
-          engagementId,
-          institutionId: target.institutionId,
-          type: "refund",
-          amountMinor: refund.refundMinor,
-          currency: target.currency,
-        },
-      ]);
-    }
+  const delivered = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(sessionBooking)
+    .where(
+      and(
+        eq(sessionBooking.engagementId, engagementId),
+        eq(sessionBooking.status, "completed"),
+      ),
+    );
 
-    await tx
-      .update(engagement)
-      .set({
-        status: refund.sessionsDelivered > 0 ? "completed" : "refunded",
-        completedAt: now,
-      })
-      .where(and(eq(engagement.id, engagementId), eq(engagement.status, "active")));
-
-    return refund;
+  const refund = refundShape({
+    ...target,
+    sessionsDelivered: delivered.at(0)?.n ?? 0,
   });
+
+  if (refund.refundMinor > 0) {
+    // TODO(stripe): issue the refund here; `stripeReference` carries the id.
+    await record(tx, [
+      {
+        engagementId,
+        institutionId: params.institutionId,
+        type: "refund",
+        amountMinor: refund.refundMinor,
+        currency: target.currency,
+      },
+    ]);
+  }
+
+  await tx
+    .update(engagement)
+    .set({
+      status: refund.sessionsDelivered > 0 ? "completed" : "refunded",
+      completedAt: now,
+    })
+    .where(and(eq(engagement.id, engagementId), eq(engagement.status, "active")));
+
+  return refund;
+}
+
+export async function endPackage(params: {
+  actor: Actor;
+  engagementId: string;
+}): Promise<TermEndRefund | null> {
+  return db.transaction((tx) =>
+    closeWithRefund(tx, {
+      engagementId: params.engagementId,
+      institutionId: params.actor.institutionId,
+      endedBy: params.actor,
+    }),
+  );
 }
 
 /** The whole sweep for one campus. Called by the cron route. */
@@ -158,7 +201,9 @@ export async function runTermEndRefunds(
   const done: TermEndRefund[] = [];
 
   for (const candidate of due) {
-    const refunded = await refundUnusedSessions(candidate.engagementId);
+    const refunded = await db.transaction((tx) =>
+      closeWithRefund(tx, { engagementId: candidate.engagementId, institutionId }),
+    );
     if (refunded) done.push(refunded);
   }
 

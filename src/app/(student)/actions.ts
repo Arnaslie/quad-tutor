@@ -18,12 +18,15 @@ import {
   cancelSessionInput,
   confirmAttendanceInput,
   denyAttendanceInput,
+  endPackageInput,
   engagementSlotInput,
   studentNote,
   topUpInput,
 } from "@/server/modules/engagements/input";
 import { SessionError } from "@/server/modules/engagements/access";
 import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
+import { endPackage } from "@/server/modules/engagements/termEnd";
+import { formatMinor } from "@/server/modules/billing/pricing";
 import {
   requestRenewalInput,
   requestTutorsInput,
@@ -298,6 +301,36 @@ export async function cancel(
     message: late
       ? "Cancelled. The session goes back in your package and you can rebook it."
       : "Cancelled. The session goes back in your package.",
+  };
+}
+
+export async function endEarly(
+  _previous: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const actor = await requireActor();
+
+  const parsed = endPackageInput.safeParse({ engagementId: formData.get("engagementId") });
+  if (!parsed.success) return { ok: false, error: "That package no longer exists." };
+
+  let refund: Awaited<ReturnType<typeof endPackage>>;
+  try {
+    refund = await endPackage({ actor, engagementId: parsed.data.engagementId });
+  } catch (error) {
+    return toResult(error);
+  }
+  if (!refund) return { ok: false, error: "That package is already closed." };
+
+  notifySessionChangesSoon(actor.institutionId);
+  revalidatePath("/sessions");
+  revalidatePath("/sessions/[id]", "page");
+
+  return {
+    ok: true,
+    message:
+      refund.refundMinor > 0
+        ? `Package ended. ${formatMinor(refund.refundMinor, refund.currency)} is on its way back to you.`
+        : "Package ended.",
   };
 }
 

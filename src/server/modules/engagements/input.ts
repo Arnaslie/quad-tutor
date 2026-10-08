@@ -18,6 +18,7 @@ export const engagementRef = z.object({ engagementId: z.uuid() });
 
 export const slotsForRequestInput = requestRef;
 export const slotsForEngagementInput = engagementRef;
+export const endPackageInput = engagementRef;
 
 export const tutorCourseRef = z.object({ tutorCourseId: z.uuid() });
 
@@ -54,4 +55,5 @@ export type ConfirmAttendanceInput = z.infer<typeof confirmAttendanceInput>;
 export type DenyAttendanceInput = z.infer<typeof denyAttendanceInput>;
 export type CancelSessionInput = z.infer<typeof cancelSessionInput>;
 export type SetSessionLocationInput = z.infer<typeof setSessionLocationInput>;
+export type EndPackageInput = z.infer<typeof endPackageInput>;
 export type ResolveDisputeInput = z.infer<typeof resolveDisputeInput>;
