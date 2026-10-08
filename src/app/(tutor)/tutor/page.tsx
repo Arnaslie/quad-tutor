@@ -184,6 +184,7 @@ function RequestCard({ request }: { request: TutorInboxItem }) {
       <RequestActions
         requestId={request.id}
         studentName={displayName(request.studentName, "student")}
+        packageLabel={request.requestedKind ? packageSummary(request.requestedKind) : null}
       />
     </Card>
   );
