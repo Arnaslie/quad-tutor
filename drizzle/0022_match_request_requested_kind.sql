@@ -1,0 +1,2 @@
+ALTER TABLE "match_request" ADD COLUMN "requested_kind" "package_kind";--> statement-breakpoint
+ALTER TABLE "match_request" ADD CONSTRAINT "match_request_requested_kind" CHECK ("match_request"."requested_kind" <> 'top_up');
