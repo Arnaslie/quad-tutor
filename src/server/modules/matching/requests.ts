@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, ne, not, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, ne, not, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -16,6 +16,9 @@ import {
   user,
 } from "@/server/db/schema";
 import { courseCodeAlias } from "@/server/db/schema";
+import { asRequestedKind, type RequestedKind } from "@/server/modules/billing/pricing";
+import type { Executor } from "@/server/modules/engagements/access";
+import { bookAgain } from "@/server/modules/engagements/reads";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 import { openThreads } from "@/server/modules/messaging/threads";
@@ -41,82 +44,143 @@ export async function standingFor(actor: Actor): Promise<Standing> {
   return standingFrom(facts);
 }
 
+type RequestResult = { created: number; limit: number };
+
 export async function requestTutors(params: {
   actor: Actor;
   courseOfferingId: string;
   tutorCourseIds: string[];
-}): Promise<{ created: number; limit: number }> {
+  kind: RequestedKind;
+}): Promise<RequestResult> {
   await expireStaleRequests();
-
   const standing = await standingFor(params.actor);
-  const expiresAt = new Date(Date.now() + REQUEST_EXPIRY_HOURS * 60 * 60 * 1000);
 
   return db.transaction(async (tx) => {
-    const pending = await tx
-      .select({ id: matchRequest.id, tutorCourseId: matchRequest.tutorCourseId })
-      .from(matchRequest)
-      .where(
-        and(
-          eq(matchRequest.studentProfileId, params.actor.studentProfileId),
-          eq(matchRequest.status, "pending"),
-        ),
-      )
-      .for("update");
+    await lockStudent(tx, params.actor);
+    return insertRequests(tx, standing, params);
+  });
+}
 
-    if (pending.length >= standing.parallelAskLimit) {
+export async function requestRenewal(params: {
+  actor: Actor;
+  tutorCourseId: string;
+  kind: RequestedKind;
+}): Promise<RequestResult> {
+  await expireStaleRequests();
+  const standing = await standingFor(params.actor);
+
+  return db.transaction(async (tx) => {
+    await lockStudent(tx, params.actor);
+
+    const gate = await bookAgain(params.actor, params.tutorCourseId, tx);
+    if (!gate) {
       throw new RequestError(
-        `You already have ${pending.length} requests out. Wait for one to come back.`,
+        "You can book again once nothing is left to book with this tutor, before the term ends.",
       );
     }
+    if (gate.liveRequest?.status === "pending") {
+      throw new RequestError("You already asked them. Their answer comes back within 12 hours.");
+    }
+    if (gate.liveRequest?.status === "accepted") {
+      throw new RequestError("They already said yes. Pick a time to check out.");
+    }
 
-    const alreadyAsked = new Set(pending.map((row) => row.tutorCourseId));
-    const room = standing.parallelAskLimit - pending.length;
-
-    const eligible = await tx
-      .select({ id: tutorCourse.id })
-      .from(tutorCourse)
-      .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
-      .innerJoin(courseOffering, eq(courseOffering.courseId, tutorCourse.courseId))
-      .where(
-        and(
-          inArray(tutorCourse.id, params.tutorCourseIds),
-          eq(tutorCourse.status, "active"),
-          eq(courseOffering.id, params.courseOfferingId),
-          eq(tutorProfile.institutionId, params.actor.institutionId),
-
-          ne(tutorProfile.userId, params.actor.userId),
-          not(blockedBetween(tutorProfile.userId, params.actor.userId)),
-        ),
-      );
-
-    const toCreate = eligible
-      .map((row) => row.id)
-      .filter((id) => !alreadyAsked.has(id))
-      .slice(0, room);
-
-    if (toCreate.length === 0) return { created: 0, limit: standing.parallelAskLimit };
-
-    await tx.insert(matchRequest).values(
-      toCreate.map((tutorCourseId) => ({
-        studentProfileId: params.actor.studentProfileId,
-        institutionId: params.actor.institutionId,
-        tutorCourseId,
-        courseOfferingId: params.courseOfferingId,
-        expiresAt,
-      })),
-    );
-
-    await openThreads(
-      tx,
-      toCreate.map((tutorCourseId) => ({
-        studentProfileId: params.actor.studentProfileId,
-        tutorCourseId,
-        institutionId: params.actor.institutionId,
-      })),
-    );
-
-    return { created: toCreate.length, limit: standing.parallelAskLimit };
+    const result = await insertRequests(tx, standing, {
+      actor: params.actor,
+      courseOfferingId: gate.offeringId,
+      tutorCourseIds: [params.tutorCourseId],
+      kind: params.kind,
+    });
+    if (result.created === 0) throw new RequestError("That tutor cannot take a request right now.");
+    return result;
   });
+}
+
+async function lockStudent(tx: Executor, actor: Actor): Promise<void> {
+  await tx
+    .select({ id: studentProfile.id })
+    .from(studentProfile)
+    .where(
+      and(
+        eq(studentProfile.id, actor.studentProfileId),
+        eq(studentProfile.institutionId, actor.institutionId),
+      ),
+    )
+    .for("no key update");
+}
+
+async function insertRequests(
+  tx: Executor,
+  standing: Standing,
+  params: { actor: Actor; courseOfferingId: string; tutorCourseIds: string[]; kind: RequestedKind },
+): Promise<RequestResult> {
+  const expiresAt = new Date(Date.now() + REQUEST_EXPIRY_HOURS * 60 * 60 * 1000);
+
+  const pending = await tx
+    .select({ id: matchRequest.id, tutorCourseId: matchRequest.tutorCourseId })
+    .from(matchRequest)
+    .where(
+      and(
+        eq(matchRequest.studentProfileId, params.actor.studentProfileId),
+        eq(matchRequest.status, "pending"),
+      ),
+    )
+    .for("update");
+
+  if (pending.length >= standing.parallelAskLimit) {
+    throw new RequestError(
+      `You already have ${pending.length} requests out. Wait for one to come back.`,
+    );
+  }
+
+  const alreadyAsked = new Set(pending.map((row) => row.tutorCourseId));
+  const room = standing.parallelAskLimit - pending.length;
+
+  const eligible = await tx
+    .select({ id: tutorCourse.id })
+    .from(tutorCourse)
+    .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .innerJoin(courseOffering, eq(courseOffering.courseId, tutorCourse.courseId))
+    .where(
+      and(
+        inArray(tutorCourse.id, params.tutorCourseIds),
+        eq(tutorCourse.status, "active"),
+        eq(courseOffering.id, params.courseOfferingId),
+        eq(tutorProfile.institutionId, params.actor.institutionId),
+
+        ne(tutorProfile.userId, params.actor.userId),
+        not(blockedBetween(tutorProfile.userId, params.actor.userId)),
+      ),
+    );
+
+  const toCreate = eligible
+    .map((row) => row.id)
+    .filter((id) => !alreadyAsked.has(id))
+    .slice(0, room);
+
+  if (toCreate.length === 0) return { created: 0, limit: standing.parallelAskLimit };
+
+  await tx.insert(matchRequest).values(
+    toCreate.map((tutorCourseId) => ({
+      studentProfileId: params.actor.studentProfileId,
+      institutionId: params.actor.institutionId,
+      tutorCourseId,
+      courseOfferingId: params.courseOfferingId,
+      requestedKind: params.kind,
+      expiresAt,
+    })),
+  );
+
+  await openThreads(
+    tx,
+    toCreate.map((tutorCourseId) => ({
+      studentProfileId: params.actor.studentProfileId,
+      tutorCourseId,
+      institutionId: params.actor.institutionId,
+    })),
+  );
+
+  return { created: toCreate.length, limit: standing.parallelAskLimit };
 }
 
 export async function acceptRequest(params: {
@@ -126,6 +190,23 @@ export async function acceptRequest(params: {
   await expireStaleRequests();
 
   return db.transaction(async (tx) => {
+    const student = await tx
+      .select({ studentProfileId: matchRequest.studentProfileId })
+      .from(matchRequest)
+      .where(
+        and(
+          eq(matchRequest.id, params.requestId),
+          eq(matchRequest.institutionId, params.tutor.institutionId),
+        ),
+      )
+      .limit(1);
+    if (!student.at(0)) throw new RequestError("That request no longer exists.");
+    await tx
+      .select({ id: studentProfile.id })
+      .from(studentProfile)
+      .where(eq(studentProfile.id, student[0].studentProfileId))
+      .for("no key update");
+
     const rows = await tx
       .select({
         id: matchRequest.id,
@@ -140,7 +221,7 @@ export async function acceptRequest(params: {
       .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
       .innerJoin(studentProfile, eq(studentProfile.id, matchRequest.studentProfileId))
       .where(eq(matchRequest.id, params.requestId))
-      .for("update")
+      .for("update", { of: matchRequest })
       .limit(1);
 
     const request = rows.at(0);
@@ -162,11 +243,13 @@ export async function acceptRequest(params: {
     const winner = await tx
       .select({ id: matchRequest.id })
       .from(matchRequest)
+      .leftJoin(engagement, eq(engagement.matchRequestId, matchRequest.id))
       .where(
         and(
           eq(matchRequest.studentProfileId, request.studentProfileId),
           eq(matchRequest.courseOfferingId, request.courseOfferingId),
           eq(matchRequest.status, "accepted"),
+          isNull(engagement.id),
         ),
       )
       .limit(1);
@@ -230,6 +313,7 @@ export type StudentRequest = {
   offeringId: string;
   section: string | null;
   professorName: string | null;
+  requestedKind: RequestedKind | null;
 
   expiresInMinutes: number;
 
@@ -253,6 +337,7 @@ export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]
       offeringId: matchRequest.courseOfferingId,
       section: courseOffering.section,
       professorName: professor.name,
+      requestedKind: matchRequest.requestedKind,
       engagementId: engagement.id,
       threadId: messageThread.id,
     })
@@ -275,7 +360,11 @@ export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]
     .orderBy(sql`${matchRequest.createdAt} desc`)
     .limit(50);
 
-  return rows.map((row) => ({ ...row, expiresInMinutes: minutesUntil(row.expiresAt, now) }));
+  return rows.map((row) => ({
+    ...row,
+    requestedKind: asRequestedKind(row.requestedKind),
+    expiresInMinutes: minutesUntil(row.expiresAt, now),
+  }));
 }
 
 const pairThread = and(
@@ -295,6 +384,7 @@ export type TutorInboxItem = {
   courseTitle: string;
   section: string | null;
   professorName: string | null;
+  requestedKind: RequestedKind | null;
 
   takenTermName: string;
   gradeEarned: string;
@@ -318,6 +408,7 @@ export async function inboxForTutor(tutor: TutorActor): Promise<TutorInboxItem[]
       courseTitle: course.title,
       section: courseOffering.section,
       professorName: professor.name,
+      requestedKind: matchRequest.requestedKind,
       takenTermName: takenTerm.name,
       gradeEarned: tutorCourse.gradeEarned,
       threadId: messageThread.id,
@@ -341,5 +432,9 @@ export async function inboxForTutor(tutor: TutorActor): Promise<TutorInboxItem[]
     )
     .orderBy(matchRequest.expiresAt);
 
-  return rows.map((row) => ({ ...row, expiresInMinutes: minutesUntil(row.expiresAt, now) }));
+  return rows.map((row) => ({
+    ...row,
+    requestedKind: asRequestedKind(row.requestedKind),
+    expiresInMinutes: minutesUntil(row.expiresAt, now),
+  }));
 }

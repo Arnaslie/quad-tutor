@@ -20,11 +20,20 @@ import {
   denyAttendanceInput,
   engagementSlotInput,
   studentNote,
+  topUpInput,
 } from "@/server/modules/engagements/input";
 import { SessionError } from "@/server/modules/engagements/access";
 import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
-import { requestTutorsInput } from "@/server/modules/matching/input";
-import { RequestError, requestTutors } from "@/server/modules/matching/requests";
+import {
+  requestRenewalInput,
+  requestTutorsInput,
+  requestedKind,
+} from "@/server/modules/matching/input";
+import {
+  RequestError,
+  requestRenewal,
+  requestTutors,
+} from "@/server/modules/matching/requests";
 import { requireActor } from "@/server/modules/identity/actor";
 import { outcomeOf, type AnswerOutcome } from "@/server/modules/engagements/answer-outcome";
 import { notifySessionChangesSoon } from "@/server/modules/notifications/soon";
@@ -65,6 +74,7 @@ export async function askTutors(
   const parsed = requestTutorsInput.safeParse({
     courseOfferingId: formData.get("offeringId"),
     tutorCourseIds: formData.getAll("tutorCourseId"),
+    kind: formData.get("kind") ?? undefined,
   });
 
   if (!parsed.success) {
@@ -83,6 +93,7 @@ export async function askTutors(
       actor,
       courseOfferingId: parsed.data.courseOfferingId,
       tutorCourseIds: parsed.data.tutorCourseIds,
+      kind: parsed.data.kind,
     });
     created = result.created;
   } catch (error) {
@@ -123,7 +134,7 @@ export async function notifyWhenCovered(
 
 const purchaseSchema = z.object({
   requestId: z.uuid(),
-  kind: z.enum(["exam_anchored", "through_final"]),
+  kind: requestedKind.optional(),
   anchorExamId: z.uuid().nullable(),
   slotStartsAt: z.coerce.date(),
   studentNote,
@@ -143,7 +154,7 @@ export async function purchase(
   const anchor = formData.get("anchorExamId");
   const parsed = purchaseSchema.safeParse({
     requestId: formData.get("requestId"),
-    kind: formData.get("kind"),
+    kind: formData.get("kind") ?? undefined,
     anchorExamId: typeof anchor === "string" && anchor.length > 0 ? anchor : null,
     slotStartsAt: formData.get("slotStartsAt"),
     studentNote: noteFrom(formData),
@@ -180,8 +191,8 @@ export async function topUp(
 ): Promise<ActionResult> {
   const actor = await requireActor();
 
-  const parsed = engagementSlotInput.safeParse({
-    engagementId: formData.get("engagementId"),
+  const parsed = topUpInput.safeParse({
+    tutorCourseId: formData.get("tutorCourseId"),
     slotStartsAt: formData.get("slotStartsAt"),
     studentNote: noteFrom(formData),
   });
@@ -192,7 +203,7 @@ export async function topUp(
   try {
     const result = await purchaseTopUp({
       actor,
-      engagementId: parsed.data.engagementId,
+      tutorCourseId: parsed.data.tutorCourseId,
       slotStartsAt: parsed.data.slotStartsAt,
       studentNote: parsed.data.studentNote,
     });
@@ -204,6 +215,30 @@ export async function topUp(
   notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   redirect(`/sessions?package=${engagementId}`);
+}
+
+export async function askAgain(
+  _previous: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const actor = await requireActor();
+
+  const parsed = requestRenewalInput.safeParse({
+    tutorCourseId: formData.get("tutorCourseId"),
+    kind: formData.get("kind"),
+  });
+  if (!parsed.success) return { ok: false, error: "Pick a package." };
+
+  try {
+    await requestRenewal({ actor, ...parsed.data });
+  } catch (error) {
+    return toResult(error);
+  }
+
+  revalidateStanding();
+  revalidatePath("/requests");
+  revalidatePath("/sessions");
+  redirect("/requests");
 }
 
 export async function book(

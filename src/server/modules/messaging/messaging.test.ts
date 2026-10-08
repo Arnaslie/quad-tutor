@@ -23,12 +23,18 @@ import {
   sessionBooking,
   studentProfile,
   term,
+  tutorAvailability,
   tutorCourse,
   tutorProfile,
   user,
   userBlock,
 } from "@/server/db/schema";
-import { purchasePackage, purchaseTopUp } from "@/server/modules/engagements/purchase";
+import {
+  purchasePackage,
+  purchaseTopUp,
+  slotsForRequest,
+  slotsForTopUp,
+} from "@/server/modules/engagements/purchase";
 import type { Actor, OperatorActor, TutorActor } from "@/server/modules/identity/actor";
 import { buildDeck } from "@/server/modules/matching/candidates";
 import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
@@ -110,6 +116,15 @@ async function tutorFor(key: string, place: { institutionId: string; courseId: s
     .insert(tutorProfile)
     .values({ userId: base.userId, institutionId: place.institutionId })
     .returning({ id: tutorProfile.id });
+  await db.insert(tutorAvailability).values(
+    [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
+      tutorProfileId: profile.id,
+      institutionId: place.institutionId,
+      weekday,
+      startMinute: 8 * 60,
+      endMinute: 20 * 60,
+    })),
+  );
   await db.insert(tutorCourse).values({
     tutorProfileId: profile.id,
     institutionId: place.institutionId,
@@ -174,6 +189,7 @@ before(async () => {
     tutorCourseIds: (
       await db.select({ id: tutorCourse.id }).from(tutorCourse).where(eq(tutorCourse.courseId, place.courseId))
     ).map((row) => row.id),
+    kind: "exam_anchored",
   });
   assert.equal(asked.created, 2);
   threadId = await threadOf(tutor);
@@ -218,6 +234,7 @@ after(async () => {
   await db.delete(demandSignal).where(inArray(demandSignal.courseOfferingId, [home.offeringId]));
   await db.delete(tutorCourse).where(inArray(tutorCourse.courseId, courseIds));
   await db.delete(operator).where(inArray(operator.userId, made.users));
+  await db.delete(tutorAvailability).where(inArray(tutorAvailability.institutionId, institutions));
   await db.delete(tutorProfile).where(inArray(tutorProfile.userId, made.users));
   await db.delete(studentProfile).where(inArray(studentProfile.userId, made.users));
   await db.delete(user).where(inArray(user.id, made.users));
@@ -318,13 +335,14 @@ test("a withdrawn tutor keeps a read-only thread", async () => {
   assert.equal((await threadView(student, threadId)).open, true, "accepted and not yet bought stays open");
 });
 
-test("a closed thread offers booking and refuses a send; buying reopens it", async () => {
+test("a closed thread offers booking again and refuses a send; a refill reopens it", async () => {
+  const request = await requestId(tutor);
+  const [slot] = await slotsForRequest({ actor: student, requestId: request });
   const { engagementId } = await purchasePackage({
     actor: student,
-    requestId: await requestId(tutor),
-    kind: "exam_anchored",
+    requestId: request,
     anchorExamId: null,
-    slotStartsAt: new Date(Date.now() + 3 * 86_400_000),
+    slotStartsAt: slot,
   });
   assert.equal((await threadView(student, threadId)).open, true);
 
@@ -335,11 +353,16 @@ test("a closed thread offers booking and refuses a send; buying reopens it", asy
 
   const closed = await threadView(student, threadId);
   assert.equal(closed.open, false);
-  assert.equal(closed.bookAgainHref, `/sessions?topup=${engagementId}`);
+  const [{ tutorCourseId }] = await db
+    .select({ tutorCourseId: messageThread.tutorCourseId })
+    .from(messageThread)
+    .where(eq(messageThread.id, threadId));
+  assert.equal(closed.bookAgainHref, `/sessions?again=${tutorCourseId}`);
   await assert.rejects(sendMessage({ actor: student, threadId, body: "hello?" }), MessagingError);
   assert.equal(closed.messages.length, 0);
 
-  await purchaseTopUp({ actor: student, engagementId, slotStartsAt: new Date(Date.now() + 4 * 86_400_000) });
+  const [refillSlot] = await slotsForTopUp({ actor: student, tutorCourseId });
+  await purchaseTopUp({ actor: student, tutorCourseId, slotStartsAt: refillSlot });
   assert.equal((await threadView(student, threadId)).open, true);
   await sendMessage({ actor: student, threadId, body: "Booked again" });
 });

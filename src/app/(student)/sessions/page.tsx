@@ -10,12 +10,14 @@ import { Money } from "@/components/money";
 import { PageHeader } from "@/components/page-header";
 import { SessionError } from "@/server/modules/engagements/access";
 import {
+  bookAgainList,
+  bookAgainPath,
   packagesForStudent,
   sessionBoardForStudent,
-  topUpCandidates,
+  type BookAgain,
   type StudentPackage,
-  type TopUpCandidate,
 } from "@/server/modules/engagements/reads";
+import { topUpOption } from "@/server/modules/billing/pricing";
 import { PurchaseError, slotsForTopUp } from "@/server/modules/engagements/purchase";
 import { slotsForEngagement } from "@/server/modules/engagements/scheduling";
 import { requireActor } from "@/server/modules/identity/actor";
@@ -28,7 +30,7 @@ import { displayName } from "@/server/modules/identity/display-name";
 export const metadata: Metadata = { title: "Sessions" };
 
 const bookParam = z.uuid();
-const topUpParam = z.uuid();
+const againParam = z.uuid();
 
 export default async function SessionsPage(props: PageProps<"/sessions">) {
   const actor = await requireActor();
@@ -40,12 +42,10 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
     return <BookingStep engagementId={booking.data} />;
   }
 
-  const rawTopUp = searchParams.topup;
-  const topping = topUpParam.safeParse(
-    Array.isArray(rawTopUp) ? rawTopUp[0] : rawTopUp,
-  );
-  if (topping.success) {
-    return <TopUpStep engagementId={topping.data} />;
+  const rawAgain = searchParams.again;
+  const again = againParam.safeParse(Array.isArray(rawAgain) ? rawAgain[0] : rawAgain);
+  if (again.success) {
+    return <TopUpStep tutorCourseId={again.data} />;
   }
 
   const justPurchased = Boolean(searchParams.package);
@@ -53,7 +53,7 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
   const [board, packages, topUps] = await Promise.all([
     sessionBoardForStudent(actor),
     packagesForStudent(actor),
-    topUpCandidates(actor),
+    bookAgainList(actor),
   ]);
 
   const empty =
@@ -108,10 +108,10 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
       {topUps.length > 0 ? (
         <section className="flex flex-col gap-2" aria-label="One more session">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-            One more before finals?
+            Book again
           </h2>
           {topUps.map((candidate) => (
-            <TopUpCard key={candidate.engagementId} candidate={candidate} />
+            <TopUpCard key={candidate.tutorCourseId} candidate={candidate} />
           ))}
         </section>
       ) : null}
@@ -127,7 +127,7 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
   );
 }
 
-function TopUpCard({ candidate }: { candidate: TopUpCandidate }) {
+function TopUpCard({ candidate }: { candidate: BookAgain }) {
   const tutor = displayName(candidate.tutorName, "tutor");
   const course = candidate.courseCode ?? candidate.courseTitle;
 
@@ -138,15 +138,15 @@ function TopUpCard({ candidate }: { candidate: TopUpCandidate }) {
           {course} · {tutor}
         </p>
         <p className="text-sm text-muted">
-          Your package is finished and the term ends {formatDay(candidate.termEndsOn)}.
+          Nothing left to book, and the term ends {formatDay(candidate.termEndsOn)}.
           Add a single session for{" "}
-          <Money minor={candidate.priceMinor} currency={candidate.currency} /> —
+          <Money minor={topUpOption().priceMinor} currency={candidate.currency} /> —
           same tutor, no new request.
         </p>
       </div>
 
       <ButtonLink
-        href={`/sessions?topup=${candidate.engagementId}`}
+        href={bookAgainPath(candidate.tutorCourseId)}
         variant="secondary"
       >
         Add a session
@@ -155,17 +155,17 @@ function TopUpCard({ candidate }: { candidate: TopUpCandidate }) {
   );
 }
 
-async function TopUpStep({ engagementId }: { engagementId: string }) {
+async function TopUpStep({ tutorCourseId }: { tutorCourseId: string }) {
   const actor = await requireActor();
 
-  const candidates = await topUpCandidates(actor);
-  const candidate = candidates.find((row) => row.engagementId === engagementId);
+  const candidates = await bookAgainList(actor);
+  const candidate = candidates.find((row) => row.tutorCourseId === tutorCourseId);
 
   let slots: Date[] = [];
   let problem: string | null = null;
 
   try {
-    slots = await slotsForTopUp({ actor, engagementId });
+    slots = await slotsForTopUp({ actor, tutorCourseId });
   } catch (error) {
     if (error instanceof PurchaseError) problem = error.message;
     else throw error;
@@ -209,10 +209,10 @@ async function TopUpStep({ engagementId }: { engagementId: string }) {
         />
       ) : (
         <TopUp
-          engagementId={candidate.engagementId}
+          tutorCourseId={candidate.tutorCourseId}
           tutorName={tutor}
           location={candidate.tutorLocation}
-          priceMinor={candidate.priceMinor}
+          priceMinor={topUpOption().priceMinor}
           currency={candidate.currency}
           slots={slots.map((slot) => slot.toISOString())}
         />

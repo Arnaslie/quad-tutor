@@ -11,7 +11,7 @@ import {
 } from "@/server/db/schema";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
-import { availableSlots, confirmationDeadline } from "./purchase";
+import { availableSlots, confirmationDeadline, holdSlot } from "./slots";
 import { SessionError, lockSession, loadParticipation, type Executor } from "./access";
 import {
   LATE_CANCEL_HOURS,
@@ -114,17 +114,14 @@ export async function bookSession(params: {
 }): Promise<{ sessionId: string; remaining: number }> {
   const target = await loadBookablePackage(params.actor, params.engagementId);
 
-  const slots = await availableSlots({
-    tutorProfileId: target.tutorProfileId,
-    institutionId: params.actor.institutionId,
-  });
-
-  const wanted = params.slotStartsAt.getTime();
-  if (!slots.some((slot) => slot.getTime() === wanted)) {
-    throw new SessionError("That time is no longer available.");
-  }
-
   return db.transaction(async (tx) => {
+    const slotOpen = await holdSlot(tx, {
+      tutorProfileId: target.tutorProfileId,
+      institutionId: params.actor.institutionId,
+      slotStartsAt: params.slotStartsAt,
+    });
+    if (!slotOpen) throw new SessionError("That time is no longer available.");
+
     const remaining = await sessionsRemaining({
       exec: tx,
       engagementId: target.id,
@@ -134,22 +131,6 @@ export async function bookSession(params: {
     if (remaining <= 0) {
       throw new SessionError("You have used every session in this package.");
     }
-
-    const clash = await tx
-      .select({ id: sessionBooking.id })
-      .from(sessionBooking)
-      .innerJoin(engagement, eq(engagement.id, sessionBooking.engagementId))
-      .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
-      .where(
-        and(
-          eq(tutorCourse.tutorProfileId, target.tutorProfileId),
-          eq(sessionBooking.scheduledAt, params.slotStartsAt),
-          ne(sessionBooking.status, "cancelled"),
-        ),
-      )
-      .limit(1);
-
-    if (clash.at(0)) throw new SessionError("That time was just taken.");
 
     const [created] = await tx
       .insert(sessionBooking)

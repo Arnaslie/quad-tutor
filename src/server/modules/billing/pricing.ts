@@ -11,6 +11,15 @@ export const TOP_UP_SESSIONS = 1;
 
 export type PackageKind = "exam_anchored" | "through_final" | "top_up";
 
+export const REQUESTABLE_KINDS = ["exam_anchored", "through_final"] as const;
+export type RequestedKind = (typeof REQUESTABLE_KINDS)[number];
+
+export function asRequestedKind(kind: PackageKind | null): RequestedKind | null {
+  return kind === "exam_anchored" || kind === "through_final" ? kind : null;
+}
+
+export const BOOK_AGAIN_ORDER = ["through_final", "exam_anchored", "top_up"] as const;
+
 export type PackageOption = {
   kind: PackageKind;
   sessions: number;
@@ -66,18 +75,19 @@ export function packageOption(kind: PackageKind): PackageOption {
   return option;
 }
 
-export function topUpWindowOpen(params: {
+export function bookAgainOpen(params: {
   sessionsRemaining: number;
   termEndsOn: Date;
   now: Date;
 }): boolean {
-  if (params.sessionsRemaining > 0) return false;
+  return params.sessionsRemaining === 0 && params.termEndsOn.getTime() > params.now.getTime();
+}
 
-  const msLeft = params.termEndsOn.getTime() - params.now.getTime();
-  if (msLeft <= 0) return false;
-
-  const weeksLeft = msLeft / (7 * 24 * 60 * 60 * 1000);
-  return weeksLeft < EXAM_ANCHORED_SESSIONS;
+export function packageSummary(kind: PackageKind): string {
+  const { sessions } = packageOption(kind);
+  if (kind === "through_final") return `${sessions} sessions, through the final`;
+  if (kind === "exam_anchored") return `${sessions} sessions, up to the next exam`;
+  return "One session";
 }
 
 export function perSessionMinor(engagement: {

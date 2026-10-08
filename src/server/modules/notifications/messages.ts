@@ -1,5 +1,6 @@
 import { formatDayTime } from "@/components/format";
 
+import { packageSummary, type RequestedKind } from "@/server/modules/billing/pricing";
 import { lapseCopy } from "@/server/modules/engagements/answer-outcome";
 
 import type { Email } from "./email";
@@ -16,6 +17,7 @@ export function requestWaiting(params: {
   tutorName: string;
   studentName: string;
   courseLabel: string;
+  requestedKind: RequestedKind | null;
   expiresAt: Date;
 }): Email {
   return {
@@ -25,6 +27,9 @@ export function requestWaiting(params: {
       `${params.tutorName},`,
       "",
       `${params.studentName} is looking for help with ${params.courseLabel} and asked you.`,
+      ...(params.requestedKind
+        ? [`They asked for ${packageSummary(params.requestedKind)}.`]
+        : []),
       "",
       `Answer by ${formatDayTime(params.expiresAt)}.`,
       "",
