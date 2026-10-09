@@ -134,9 +134,11 @@ The take meter never reaches Stripe. The platform keeps what it does not transfe
 the transfer is `Σ tutor_payout`, so past the cap a tutor is sent the full session price
 and processing is the platform's cost, as decided.
 
-Renaming `tutor_payout → tutor_accrued` is still worth it ("payout" is a specific Stripe
-object, connected balance → bank); call sites `confirmation.ts:67`, `earnings.ts:51`,
-`ledger.ts:75`. Reviewer's call.
+`tutor_payout` is renamed `tutor_accrued` in item 1 (decided). In Stripe a payout moves a
+connected balance to a bank; this row only records pay owed, so the old name invites
+summing it as money sent. The migration is one `ALTER TYPE ... RENAME VALUE` plus the call
+sites `confirmation.ts:67`, `earnings.ts:51` and `ledger.ts:75`. This doc uses today's
+name elsewhere.
 
 ## 3. Stripe calls and locks, payouts, refunds
 
@@ -340,7 +342,7 @@ reviews items 2, 4 and 6 (idempotency, webhook, after-commit calls, sweeps).
 | # | Item | Owner | Runnable result |
 |---|---|---|---|
 | 0 | DB-only invariant check (§7) as a script and a test helper | backend | Green on `db:demo` today |
-| 1 | Migration: `engagement_status += pending_payment`; `session_status += held`; `engagement.stripe_checkout_session_id` (unique), `checkout_expires_at`; partial unique on `match_request_id`; ledger types `+= processor_fee, tutor_transfer, transfer_reversal`; rename `tutor_payout → tutor_accrued` if approved; unique partial index on `stripe_reference` | database | Migrations apply, behaviour unchanged |
+| 1 | Migration: `engagement_status += pending_payment`; `session_status += held`; `engagement.stripe_checkout_session_id` (unique), `checkout_expires_at`; partial unique on `match_request_id`; ledger types `+= processor_fee, tutor_transfer, transfer_reversal`; rename `tutor_payout → tutor_accrued` (enum value and its 3 call sites); unique partial index on `stripe_reference` | database | Migrations apply, behaviour unchanged |
 | 2a | Domain: pending purchase in `purchasePackage` and `purchaseTopUp`, `fulfilCheckout`, release, the three "is this request bought?" checks, `bookAgain` and `stats.ts` status filters, buy-and-pay test helper, `db:demo` | backend | Tests green with the fake |
 | 2b | Gateway module (real + fake), `stripe` SDK, Checkout create/expire, `syncCheckout` and `syncPendingCheckouts`, webhook route (checkout events), `/api/dev/checkout` | payments | Full buy flow locally with `STRIPE_FAKE=1`, or test keys + `stripe listen` |
 | 3 | Checkout UI: purchase panel and Book again redirect copy, "confirming payment" on return, cancel page, expired state | web | Polished flow on phone and desktop |
@@ -380,7 +382,8 @@ Never paste keys into chat or commits; nobody on the team handles them.
    `payment_failed` fact. A dispute can be fraud on a stolen card, a bank error or a real
    complaint, and an automatic fact could not be told apart from a genuine one.
 
-The `tutor_payout → tutor_accrued` rename is the reviewer's call.
+5. **Ledger naming:** `tutor_payout` becomes `tutor_accrued` in item 1, so "payout"
+   keeps its Stripe meaning (§2).
 
 ---
 
