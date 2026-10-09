@@ -183,28 +183,12 @@ accrual, and nothing claws session 1 back any more.
 *Alternative: transfer inline on confirm.* Rejected: a Stripe call in the settle
 transaction, and auto-release happens in the sweep anyway.
 
-**Bank payouts** (connected balance → bank): **daily automatic, plus Instant Payouts the
-tutor pays for** (decided). Cash is immediate, so pay that waits a week is a reason to go
-off-platform.
-
-- The schedule is set to `daily` at account creation. Funds reach the bank about two
-  business days after they are available. The platform absorbs the standard Connect payout
-  fee, as decisions.md already says for Connect fees.
-- Instant Payouts send the available balance to an eligible debit card in about 30
-  minutes. The tutor starts it from the Express Dashboard (a login link from
-  `/tutor/payouts`), so we build no payout UI or Payouts API call. The fee (about 1%,
-  $0.50 minimum, from third-party sources) is charged to the tutor's connected account
-  through Stripe's platform pricing tools, not absorbed. Item 5 verifies the current fee,
-  that the Express Dashboard offers Instant Payouts for our accounts, and that the fee
-  can be set per connected account. If either check fails, item 5 adds a "Cash out" action
-  that calls `payouts.create({ method: "instant" })` on the connected account and
-  records the tutor's fee as a separate application fee. That fallback is a decision to
-  bring back, not to build silently.
-- Only the available balance can be paid out instantly. A transfer with
-  `source_transaction` becomes available when its charge settles, about two days after
-  purchase. Packages are paid up front, so in practice this delays only a first session
-  held within two days of purchase. `/tutor/payouts` shows the available and pending
-  amounts as Stripe reports them.
+**Bank payouts** (connected balance → bank): **daily automatic** (decided). Cash is
+immediate, so pay that waits a week is a reason to go off-platform. The schedule is set to
+`daily` at account creation. Funds reach the bank about two business days after they are
+available. The platform absorbs the standard Connect payout fee, as decisions.md already
+says for Connect fees. Instant Payouts were considered and dropped: daily is fast enough,
+and Instant adds a per-payout fee and a pricing setup.
 
 Transfer reversals are an ops tool only; no code path issues one.
 
@@ -361,7 +345,7 @@ reviews items 2, 4 and 6 (idempotency, webhook, after-commit calls, sweeps).
 | 2b | Gateway module (real + fake), `stripe` SDK, Checkout create/expire, `syncCheckout` and `syncPendingCheckouts`, webhook route (checkout events), `/api/dev/checkout` | payments | Full buy flow locally with `STRIPE_FAKE=1`, or test keys + `stripe listen` |
 | 3 | Checkout UI: purchase panel and Book again redirect copy, "confirming payment" on return, cancel page, expired state | web | Polished flow on phone and desktop |
 | 4 | Refunds through Stripe: after-commit issue and stamp for `closeWithRefund`, `charge.refunded` backstop, `processor_fee` | payments | End-early and term-end refunds visible in the test dashboard |
-| 5 | Connect: account creation, Account Link, pure KYC mapping + tests, `account.updated`, Connect secret, daily payout schedule at creation, Instant Payouts enabled with the tutor-paid fee, Express Dashboard login link, `/tutor/payouts` route | payments | Tutor can onboard with Stripe test data |
+| 5 | Connect: account creation, Account Link, pure KYC mapping + tests, `account.updated`, Connect secret, daily payout schedule at creation, `/tutor/payouts` route | payments | Tutor can onboard with Stripe test data |
 | 6 | Transfer sweep, `earnings.transferredMinor`, `transfer.created`/`transfer.reversed`, dispute events and pause | payments, with backend for `earnings.ts` | Owed → transferred after a confirmed session, past the cap too |
 | 7 | Onboarding UI: post-accept prompt, `/tutor/payouts` page, owed-but-unverified and restricted banners on `/tutor/sessions` | web | End-to-end tutor money path |
 | 8 | Reconciliation: `money_discrepancy` table (database), daily reconciliation (payments), `/ops` money list (web) | database → payments → web | Divergence visible and pauses transfers |
@@ -375,8 +359,7 @@ Never paste keys into chat or commits; nobody on the team handles them.
 
 1. Create a Stripe account (test mode needs no business verification).
 2. In test mode, enable **Connect**, choose **Express** accounts with the platform handling
-   pricing, and set the Express branding tutors see during onboarding. Enable Instant
-   Payouts for Express accounts.
+   pricing, and set the Express branding tutors see during onboarding.
 3. Copy the **test** secret key (`sk_test_…`) into `.env.local` as `STRIPE_SECRET_KEY`.
 4. Install the Stripe CLI (`brew install stripe/stripe-cli/stripe`), `stripe login`, run
    the `stripe listen` command from §6 and put the printed `whsec_…` into `.env.local` as
@@ -390,7 +373,7 @@ Never paste keys into chat or commits; nobody on the team handles them.
 
 ## Decisions taken
 
-1. **Bank payouts:** daily automatic, plus Instant Payouts at the tutor's cost (§3).
+1. **Bank payouts:** daily automatic; no Instant Payouts (§3).
 2. **Unverified tutors:** an accept is never blocked (§4).
 3. **`stripe-smoke` job:** yes, after item 7 (item 9).
 4. **Chargebacks:** recorded with timestamps; transfers pause; ops decides. No automatic
@@ -432,7 +415,7 @@ Technical:*
 > **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 > Transfers go per engagement once the tutor is verified and the engagement has no open
 > discrepancy or dispute. Refunds return only undelivered sessions, so none needs a
-> reversal. Bank payouts are daily; Instant Payouts are available and the tutor pays their fee. Reversals are an ops tool.
+> reversal. Bank payouts are daily. Reversals are an ops tool.
 
 > **KYC never blocks an accept.** An unverified tutor's pay accrues and
 > waits, and the student's sessions proceed. Hiding unverified tutors from decks was
