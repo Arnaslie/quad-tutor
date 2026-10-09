@@ -41,6 +41,8 @@ export async function GET(request: Request) {
 
     let refunded = 0;
     let refundedMinor = 0;
+    let refundsHeld = 0;
+    let refundsFailed = 0;
     let notified = 0;
     let purgedProofs = 0;
     let releasedRatings = 0;
@@ -55,7 +57,12 @@ export async function GET(request: Request) {
         console.error(`[cron] proof purge for ${campus.slug} failed`, error);
         return 0;
       });
-      const refunds = await runTermEndRefunds(campus.id);
+      const { refunds, held, failed } = await runTermEndRefunds(campus.id).catch((error) => {
+        console.error(`[cron] term-end refunds for ${campus.slug} failed`, error);
+        return { refunds: [], held: 0, failed: 1 };
+      });
+      refundsHeld += held;
+      refundsFailed += failed;
       refunded += refunds.length;
       refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
       notified += await runNotifications(campus.id);
@@ -70,6 +77,8 @@ export async function GET(request: Request) {
       released,
       refunded,
       refundedMinor,
+      refundsHeld,
+      refundsFailed,
       notified,
       purgedProofs,
       releasedRatings,

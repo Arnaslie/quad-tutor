@@ -6,7 +6,6 @@ import {
   courseOffering,
   engagement,
   sessionBooking,
-  studentProfile,
   term,
 } from "@/server/db/schema";
 import { record } from "@/server/modules/billing/ledger";
@@ -28,6 +27,7 @@ export type TermEndRefund = {
 const deliveredCount = sql<number>`(
   select count(*)::int from ${sessionBooking}
   where ${sessionBooking.engagementId} = ${engagement.id}
+    and ${sessionBooking.institutionId} = ${engagement.institutionId}
     and ${sessionBooking.status} = 'completed'
 )`;
 
@@ -44,13 +44,12 @@ export async function engagementsDueForTermEndRefund(
       sessionsDelivered: deliveredCount,
     })
     .from(engagement)
-    .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
     .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
     .innerJoin(term, eq(term.id, courseOffering.termId))
     .where(
       and(
         eq(engagement.status, "active"),
-        eq(studentProfile.institutionId, institutionId),
+        eq(engagement.institutionId, institutionId),
         lt(term.endsOn, sql`current_date`),
       ),
     );
@@ -114,19 +113,19 @@ export async function closeWithRefund(
   }
   if (target.status !== "active") return null;
 
-  if (endedBy) {
-    const sessions = await tx
-      .select({ status: sessionBooking.status, scheduledAt: sessionBooking.scheduledAt })
-      .from(sessionBooking)
-      .where(
-        and(
-          eq(sessionBooking.engagementId, engagementId),
-          eq(sessionBooking.institutionId, params.institutionId),
-          inArray(sessionBooking.status, ["scheduled", "disputed"]),
-        ),
-      );
-    const block = endBlock(sessions, now);
-    if (block) throw new EndPackageError(block);
+  const sessions = await tx
+    .select({ status: sessionBooking.status, scheduledAt: sessionBooking.scheduledAt })
+    .from(sessionBooking)
+    .where(
+      and(
+        eq(sessionBooking.engagementId, engagementId),
+        eq(sessionBooking.institutionId, params.institutionId),
+        inArray(sessionBooking.status, ["scheduled", "disputed"]),
+      ),
+    );
+  const block = endBlock(sessions, now);
+  if (block && (endedBy || block.reason !== "late_cancel_window")) {
+    throw new EndPackageError(block);
   }
 
   await tx
@@ -197,19 +196,33 @@ export async function endPackage(params: {
   );
 }
 
+export type TermEndSweep = { refunds: TermEndRefund[]; held: number; failed: number };
+
 /** The whole sweep for one campus. Called by the cron route. */
 export async function runTermEndRefunds(
   institutionId: string,
-): Promise<TermEndRefund[]> {
+): Promise<TermEndSweep> {
   const due = await engagementsDueForTermEndRefund(institutionId);
-  const done: TermEndRefund[] = [];
+  const refunds: TermEndRefund[] = [];
+  let held = 0;
+  let failed = 0;
 
   for (const candidate of due) {
-    const refunded = await db.transaction((tx) =>
-      closeWithRefund(tx, { engagementId: candidate.engagementId, institutionId }),
-    );
-    if (refunded) done.push(refunded);
+    try {
+      const refunded = await db.transaction((tx) =>
+        closeWithRefund(tx, { engagementId: candidate.engagementId, institutionId }),
+      );
+      if (refunded) refunds.push(refunded);
+    } catch (error) {
+      if (error instanceof EndPackageError) {
+        held += 1;
+        console.warn(`[term-end] ${candidate.engagementId} held (${error.block.reason})`);
+      } else {
+        failed += 1;
+        console.error(`[term-end] ${candidate.engagementId} failed`, error);
+      }
+    }
   }
 
-  return done;
+  return { refunds, held, failed };
 }

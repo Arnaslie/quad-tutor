@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before, test } from "node:test";
+import { after, before, mock, test } from "node:test";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { PgDatabase } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
 import { isLocalHost } from "@/server/db/local-host.mjs";
@@ -13,6 +14,7 @@ import {
   engagement,
   institution,
   ledgerEntry,
+  matchRequest,
   messageThread,
   reliabilityEvent,
   sessionBooking,
@@ -29,9 +31,11 @@ import { refreshScores } from "@/server/modules/scoring/stats";
 
 import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
+import { purchasePackage, slotsForRequest } from "./purchase";
+import { availableSlots } from "./slots";
 import { packagesForStudent } from "./reads";
 import { bookSession, slotsForEngagement } from "./scheduling";
-import { EndPackageError, closeWithRefund, endPackage } from "./termEnd";
+import { EndPackageError, closeWithRefund, endPackage, runTermEndRefunds } from "./termEnd";
 
 const databaseHost = new URL(process.env.DATABASE_URL ?? "postgres://unset").hostname;
 if (!isLocalHost(databaseHost)) {
@@ -46,6 +50,7 @@ let home: Campus;
 let away: Campus;
 let tutor: TutorActor;
 let tutorCourseId: string;
+let endedOfferingId: string;
 
 const hours = (h: number) => new Date(Date.now() + h * 3_600_000);
 
@@ -90,7 +95,7 @@ async function tutorWithClaim(): Promise<{ actor: TutorActor; claimId: string }>
 
 async function pkg(
   student: Actor,
-  options: { kind?: "exam_anchored" | "through_final"; claimId?: string } = {},
+  options: { kind?: "exam_anchored" | "through_final"; claimId?: string; offeringId?: string } = {},
 ): Promise<string> {
   const through = options.kind === "through_final";
   const [row] = await db
@@ -99,7 +104,7 @@ async function pkg(
       institutionId: home.institutionId,
       studentProfileId: student.studentProfileId,
       tutorCourseId: options.claimId ?? tutorCourseId,
-      courseOfferingId: home.offeringId,
+      courseOfferingId: options.offeringId ?? home.offeringId,
       kind: options.kind ?? "exam_anchored",
       sessionsPurchased: through ? 8 : 4,
       pricePaidMinor: through ? 25_200 : 14_000,
@@ -153,6 +158,12 @@ before(async () => {
   home = await campus("home");
   away = await campus("away");
   ({ actor: tutor, claimId: tutorCourseId } = await tutorWithClaim());
+  const [ended] = await db.insert(term).values({ institutionId: home.institutionId, name: "Last", startsOn: "2026-01-10", endsOn: "2026-05-10" }).returning({ id: term.id });
+  const [offering] = await db
+    .insert(courseOffering)
+    .values({ institutionId: home.institutionId, courseId: home.courseId, termId: ended.id, section: "002" })
+    .returning({ id: courseOffering.id });
+  endedOfferingId = offering.id;
 });
 
 after(async () => {
@@ -164,6 +175,7 @@ after(async () => {
     await db.delete(sessionBooking).where(inArray(sessionBooking.engagementId, engagements));
     await db.delete(engagement).where(inArray(engagement.id, engagements));
   }
+  await db.delete(matchRequest).where(inArray(matchRequest.institutionId, institutions));
   await db.delete(messageThread).where(inArray(messageThread.institutionId, institutions));
   await db.delete(tutorAvailability).where(inArray(tutorAvailability.institutionId, institutions));
   await db.delete(tutorCourse).where(inArray(tutorCourse.institutionId, institutions));
@@ -347,4 +359,102 @@ test("ending while the last session is being confirmed: the confirmation lands, 
     assert.equal(rows.filter((row) => row.type === "refund").length, 0);
     assert.equal(rows.filter((row) => row.type === "session_earned").length, 1);
   }
+});
+
+test("the sweep holds a package with an unanswered past session and refunds it once the session settles", async () => {
+  const student = await person(home.institutionId);
+  const id = await pkg(student, { offeringId: endedOfferingId });
+  const past = await session(id, hours(-3), { studentConfirmedAt: new Date() });
+  const future = await session(id, hours(5));
+
+  assert.equal((await runTermEndRefunds(home.institutionId)).held, 1);
+  assert.equal(await statusOf(id), "active");
+  assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
+
+  await confirmAttendance({ actor: tutor, sessionId: past });
+  const { refunds, held } = await runTermEndRefunds(home.institutionId);
+  assert.equal(held, 0);
+  assert.deepEqual(refunds.map((row) => [row.engagementId, row.refundMinor]), [[id, 10_500]]);
+  assert.equal(await statusOf(id), "completed");
+  const [cancelled] = await db.select({ status: sessionBooking.status, by: sessionBooking.cancelledByUserId }).from(sessionBooking).where(eq(sessionBooking.id, future));
+  assert.deepEqual(cancelled, { status: "cancelled", by: null }, "a future session at term end is cancelled even inside 12h, with no canceller");
+  assert.deepEqual(await facts(student), [{ type: "attended" }]);
+});
+
+test("the sweep holds a package while a session is disputed", async () => {
+  const student = await person(home.institutionId);
+  const id = await pkg(student);
+  await session(id, hours(-100), { status: "disputed", resolution: "disputed" });
+  await assert.rejects(sweep(id), EndPackageError);
+  assert.equal(await statusOf(id), "active");
+  assert.equal((await ledger(id)).filter((row) => row.type === "refund").length, 0);
+});
+
+test("the sweep racing a confirmation of the last session: no deadlock, the session is paid, nothing refunded", async () => {
+  for (const headStartMs of [0, 2, 4, 8]) {
+    const student = await person(home.institutionId);
+    const id = await pkg(student);
+    await db.update(engagement).set({ sessionsPurchased: 1, pricePaidMinor: 3_500 }).where(eq(engagement.id, id));
+    const last = await session(id, hours(-2), { studentConfirmedAt: new Date() });
+
+    const results = await Promise.allSettled([
+      new Promise((resolve) => setTimeout(resolve, headStartMs)).then(() => sweep(id)),
+      confirmAttendance({ actor: tutor, sessionId: last }),
+    ]);
+    assert.equal(results[1].status, "fulfilled", String(results[1].status === "rejected" && results[1].reason));
+    if (results[0].status === "fulfilled") assert.equal(results[0].value, null);
+    else assert.ok(results[0].reason instanceof EndPackageError, String(results[0].reason));
+
+    assert.equal(await statusOf(id), "completed");
+    const rows = await ledger(id);
+    assert.equal(rows.filter((row) => row.type === "refund").length, 0);
+    assert.equal(rows.filter((row) => row.type === "session_earned").length, 1);
+  }
+});
+
+test("one package failing does not stop the sweep: the rest refund and the failure is counted", async () => {
+  const ids = [];
+  for (let i = 0; i < 2; i += 1) ids.push(await pkg(await person(home.institutionId), { offeringId: endedOfferingId }));
+
+  const transaction = PgDatabase.prototype.transaction;
+  let calls = 0;
+  const failing = mock.method(PgDatabase.prototype, "transaction", function (this: PgDatabase<never>, ...args: Parameters<typeof transaction>) {
+    return (calls += 1) === 1 ? Promise.reject(new Error("boom")) : transaction.apply(this, args);
+  });
+  const silenced = mock.method(console, "error", () => {});
+  try {
+    const result = await runTermEndRefunds(home.institutionId);
+    assert.equal(result.failed, 1);
+    assert.equal(result.held, 0);
+    assert.equal(result.refunds.length, 1);
+  } finally {
+    failing.mock.restore();
+    silenced.mock.restore();
+  }
+  assert.deepEqual((await Promise.all(ids.map(statusOf))).sort(), ["active", "refunded"]);
+
+  assert.equal((await runTermEndRefunds(home.institutionId)).refunds.length, 1, "the failed one is retried next run");
+  assert.deepEqual(await Promise.all(ids.map(statusOf)), ["refunded", "refunded"]);
+});
+
+test("a package whose term has ended takes no new bookings", async () => {
+  const student = await person(home.institutionId);
+  const id = await pkg(student, { offeringId: endedOfferingId });
+  await assert.rejects(slotsForEngagement({ actor: student, engagementId: id }), /term has ended/);
+  await assert.rejects(bookSession({ actor: student, engagementId: id, slotStartsAt: hours(24) }), /term has ended/);
+  assert.equal(await scheduledLeft(id), 0);
+  await sweep(id);
+});
+
+test("an accepted request for a term that has ended can no longer be bought", async () => {
+  const student = await person(home.institutionId);
+  const [request] = await db
+    .insert(matchRequest)
+    .values({ institutionId: home.institutionId, studentProfileId: student.studentProfileId, tutorCourseId, courseOfferingId: endedOfferingId, status: "accepted", requestedKind: "exam_anchored", expiresAt: hours(1) })
+    .returning({ id: matchRequest.id });
+  await assert.rejects(slotsForRequest({ actor: student, requestId: request.id }), /term has ended/);
+  const [slot] = await availableSlots({ tutorProfileId: tutor.tutorProfileId, institutionId: home.institutionId });
+  await assert.rejects(purchasePackage({ actor: student, requestId: request.id, anchorExamId: null, slotStartsAt: slot }), /term has ended/);
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(engagement).where(eq(engagement.studentProfileId, student.studentProfileId));
+  assert.equal(n, 0);
 });
