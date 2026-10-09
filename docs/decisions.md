@@ -606,11 +606,50 @@ second Expo/React Native client would mean a second auth integration, JSON endpo
 in place of server actions, and roughly double the first-draft time, to reach students
 who are already on the web app.
 
-**Stripe is settled for the MVP but absent from the first draft.** Package purchase
-writes real double-entry ledger rows now — deferred on purchase, recognised per
-delivered session, tutor pay held until earned — with a single marked seam in
-`engagements/purchase.ts` where the PaymentIntent goes. The money invariants are the
-part that outlives any payment provider, so they get built and exercised first.
+**Stripe is wired through hosted Checkout, and a purchase is pending until paid.**
+Buying a package, a renewal or one more session writes an engagement in
+`pending_payment` and a `held` session that blocks the slot, and no ledger row. One
+idempotent fulfilment, reached from the webhook or from asking Stripe (the return page,
+the student's reads, the sweep), flips both live and writes `package_purchase` against
+the PaymentIntent. A redirect is never proof of payment. A checkout is released only
+after Stripe says it is dead, so a payment can never land on a released slot. A released
+checkout is `cancelled` and counts as nothing: not a purchase, not a trial, not a
+renewal. The ledger is typed single-sided rows summed by type, not double-entry.
+
+**Separate charges and transfers, each transfer bound to its charge.** Destination
+charges need an onboarded tutor at charge time, KYC is deferred past the first accept,
+and the take is only known per session at recognition. Transfers carry
+`source_transaction` and `transfer_group = engagement_id` and send `Σ tutor_accrued`; the
+take meter never reaches Stripe. The ledger owns what is owed; Stripe owns what moved;
+`stripe_reference` is unique. The pay-owed row is `tutor_accrued`, not `tutor_payout`:
+in Stripe a payout moves a connected balance to a bank, and this row moves nothing.
+
+**No Stripe call holds a row lock.** The locked transaction writes the ledger row with
+no reference; the call follows the commit with the row id as its idempotency key; the
+reference is stamped once, conditionally. That stamp is the only update a ledger row
+ever takes. Lock order adds: fulfil and release take the engagement (for update), then
+its held sessions; the transfer sweep takes the engagement (no key update) alone.
+
+**Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
+Transfers go per engagement once the tutor is verified and the engagement has no open
+discrepancy or dispute. Refunds return only undelivered sessions, so none needs a
+reversal. Bank payouts are daily. Reversals are an ops tool.
+
+**KYC never blocks an accept.** An unverified tutor's pay accrues and
+waits, and the student's sessions proceed. Hiding unverified tutors from decks was
+rejected: they would never get the accept that triggers onboarding.
+
+**A chargeback is recorded, not judged.** It pauses that engagement's
+transfers and goes to ops; it writes no reliability fact on its own.
+
+**CI and local dev run on a signed fake, not Stripe.** One gateway module is the only
+importer of `stripe`. Its fake signs real webhook events with the configured secret, so
+verification and idempotency are tested with no Stripe secret in CI. It is refused in
+production, like the email and proof-store fallbacks.
+
+**Ledger and Stripe are reconciled daily and never auto-corrected.** A divergence pauses
+transfers for that engagement and goes to `/ops`. It is fixed by appending a row that
+references the Stripe object.
 
 **Campus membership is gated on `crimson.ua.edu`**, the UA *student* domain, matched
 against `institution.email_domain`. One domain per institution: supporting several

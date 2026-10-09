@@ -1,6 +1,6 @@
 # Proposal: wiring Stripe (test mode first)
 
-Status: **awaiting approval.** Nothing here is built. Refreshed 2026-10-09 against
+Status: **approved 2026-10-09.** Entries copied into `docs/decisions.md`; build per the checklist. Refreshed 2026-10-09 against
 `main` at 213b6f6; it replaces the 2026-10-02 draft. Once approved, the entries in
 [Draft decisions.md entries](#draft-decisionsmd-entries) are copied into
 `docs/decisions.md` and the checklist below becomes one branch/PR per item.
