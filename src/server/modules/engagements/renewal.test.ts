@@ -432,7 +432,12 @@ test("a booking against a package refunded while it waits is refused", async () 
       (error: unknown) => error,
     );
     await new Promise((resolve) => setTimeout(resolve, 300));
-    await tx.update(engagement).set({ status: "refunded", completedAt: new Date() }).where(eq(engagement.id, engagementId));
+    const [{ pricePaidMinor }] = await tx
+      .update(engagement)
+      .set({ status: "refunded", completedAt: new Date() })
+      .where(eq(engagement.id, engagementId))
+      .returning({ pricePaidMinor: engagement.pricePaidMinor });
+    await tx.insert(ledgerEntry).values({ engagementId, institutionId: home.institutionId, type: "refund", amountMinor: pricePaidMinor });
   });
 
   assert.ok((await booking) instanceof SessionError);
