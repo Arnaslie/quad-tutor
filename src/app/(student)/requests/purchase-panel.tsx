@@ -156,8 +156,8 @@ export function PurchasePanel({
           {pending ? "Booking…" : "Pay and book"}
         </Button>
         <p className="text-center text-xs text-muted">
-          Your first session is covered by a refund guarantee, self-serve, no
-          questions. Sessions you do not use refund at the end of term.
+          Sessions you do not use are refunded at the end of term, or when you end
+          the package.
         </p>
       </div>
     </form>

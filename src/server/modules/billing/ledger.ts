@@ -75,18 +75,3 @@ export async function balanceFor(engagementId: string): Promise<EngagementBalanc
     tutorOwedMinor: by("tutor_payout"),
   };
 }
-
-export async function guaranteeAbsorbed(engagementId: string): Promise<boolean> {
-  const rows = await db
-    .select({ id: ledgerEntry.id })
-    .from(ledgerEntry)
-    .where(
-      and(
-        eq(ledgerEntry.engagementId, engagementId),
-        eq(ledgerEntry.type, "guarantee_absorbed"),
-      ),
-    )
-    .limit(1);
-
-  return rows.at(0) !== undefined;
-}

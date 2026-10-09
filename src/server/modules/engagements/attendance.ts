@@ -73,6 +73,37 @@ export function isLateCancel(scheduledAt: Date, now: Date): boolean {
   return scheduledAt.getTime() - now.getTime() < LATE_CANCEL_HOURS * 60 * 60 * 1000;
 }
 
+export type EndBlock = {
+  reason: "late_cancel_window" | "awaiting_answer" | "disputed";
+  scheduledAt: Date;
+};
+
+export function endBlock(
+  sessions: { status: "scheduled" | "completed" | "cancelled" | "disputed"; scheduledAt: Date }[],
+  now: Date,
+): EndBlock | null {
+  const scheduled = sessions.filter((session) => session.status === "scheduled");
+  return (
+    first("disputed", sessions.filter((session) => session.status === "disputed")) ??
+    first("awaiting_answer", scheduled.filter((session) => now >= session.scheduledAt)) ??
+    first("late_cancel_window", scheduled.filter((session) => isLateCancel(session.scheduledAt, now)))
+  );
+}
+
+function first(reason: EndBlock["reason"], hits: { scheduledAt: Date }[]): EndBlock | null {
+  const hit = hits.at(0);
+  return hit ? { reason, scheduledAt: hit.scheduledAt } : null;
+}
+
+export const END_BLOCK_MESSAGE: Record<EndBlock["reason"], (when: string) => string> = {
+  late_cancel_window: (when) =>
+    `Your session on ${when} is less than ${LATE_CANCEL_HOURS} hours away. You can end the package after it.`,
+  awaiting_answer: (when) =>
+    `Your session on ${when} is still being confirmed. You can end the package once it settles.`,
+  disputed: (when) =>
+    `Your session on ${when} is under review. You can end the package once it is settled.`,
+};
+
 export function sessionEndsAt(scheduledAt: Date, durationMinutes: number): Date {
   return new Date(scheduledAt.getTime() + durationMinutes * 60 * 1000);
 }

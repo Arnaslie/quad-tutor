@@ -200,7 +200,7 @@ test("a released batch moves the star term, smoothed toward 4.0", async () => {
   assert.deepEqual(await fields(rated), { ...prior, scoreSampleCount: 5, scorePosteriorMean: 3_750 });
 });
 
-test("a renewal is a trial and a success; a lone guarantee refund fails unless the pair bought again; an active first package is no trial", async () => {
+test("a renewal is a trial and a success; a lone historical guarantee refund fails unless the pair bought again; an active first package is no trial", async () => {
   const renewed = await student(home);
   await buy(home, home.b.offeringId, renewing, renewed, "completed");
   await buy(home, home.b.offeringId, renewing, renewed, "active");

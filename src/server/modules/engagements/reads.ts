@@ -22,6 +22,7 @@ import {
   bookAgainOpen,
   type PackageKind,
   type RequestedKind,
+  unusedRefundMinor,
 } from "@/server/modules/billing/pricing";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 
@@ -32,7 +33,13 @@ import {
   type Executor,
   type SessionContextRow,
 } from "./access";
-import { sessionEndsAt, viewerAction, type ViewerAction } from "./attendance";
+import {
+  endBlock,
+  sessionEndsAt,
+  viewerAction,
+  type EndBlock,
+  type ViewerAction,
+} from "./attendance";
 import { releaseLapsedConfirmations } from "./confirmation";
 import { sessionsRemaining } from "./scheduling";
 
@@ -202,6 +209,13 @@ export type StudentPackage = {
   professorName: string | null;
   anchorExamName: string | null;
   anchorExamOccursOn: string | null;
+  ending: PackageEnding;
+};
+
+export type PackageEnding = {
+  refundMinor: number;
+  cancels: Date[];
+  blocked: EndBlock | null;
 };
 
 const deliveredCount = sql<number>`(
@@ -368,7 +382,7 @@ async function bookAgainRows(
 }
 
 export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]> {
-  return db
+  const packages = await db
     .select({
       engagementId: engagement.id,
       kind: engagement.kind,
@@ -408,6 +422,41 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
       ),
     )
     .orderBy(asc(exam.occursOn), desc(engagement.createdAt));
+  if (packages.length === 0) return [];
+
+  const open = await db
+    .select({
+      engagementId: sessionBooking.engagementId,
+      status: sessionBooking.status,
+      scheduledAt: sessionBooking.scheduledAt,
+    })
+    .from(sessionBooking)
+    .where(
+      and(
+        inArray(
+          sessionBooking.engagementId,
+          packages.map((pkg) => pkg.engagementId),
+        ),
+        eq(sessionBooking.institutionId, actor.institutionId),
+        inArray(sessionBooking.status, ["scheduled", "disputed"]),
+      ),
+    )
+    .orderBy(asc(sessionBooking.scheduledAt));
+
+  const now = new Date();
+  return packages.map((pkg) => {
+    const sessions = open.filter((row) => row.engagementId === pkg.engagementId);
+    return {
+      ...pkg,
+      ending: {
+        refundMinor: unusedRefundMinor(pkg),
+        cancels: sessions
+          .filter((row) => row.status === "scheduled")
+          .map((row) => row.scheduledAt),
+        blocked: endBlock(sessions, now),
+      },
+    };
+  });
 }
 
 export type SessionDetail = SessionListItem & {

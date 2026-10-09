@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -276,85 +276,5 @@ export async function purchaseTopUp(params: {
     ]);
 
     return { engagementId: created.id };
-  });
-}
-
-export async function claimGuarantee(params: {
-  actor: Actor;
-  engagementId: string;
-}): Promise<void> {
-  await db.transaction(async (tx) => {
-    const rows = await tx
-      .select({
-        id: engagement.id,
-        studentProfileId: engagement.studentProfileId,
-        status: engagement.status,
-        pricePaidMinor: engagement.pricePaidMinor,
-        guaranteeUsed: engagement.guaranteeUsed,
-      })
-      .from(engagement)
-      .where(eq(engagement.id, params.engagementId))
-      .for("update")
-      .limit(1);
-
-    const target = rows.at(0);
-    if (!target) throw new PurchaseError("That package no longer exists.");
-    if (target.studentProfileId !== params.actor.studentProfileId) {
-      throw new PurchaseError("That package is not yours.");
-    }
-    if (target.status !== "active") {
-      throw new PurchaseError("That package is already closed.");
-    }
-
-    const delivered = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(sessionBooking)
-      .where(
-        and(
-          eq(sessionBooking.engagementId, target.id),
-          eq(sessionBooking.status, "completed"),
-        ),
-      );
-
-    if ((delivered.at(0)?.n ?? 0) !== 1) {
-      throw new PurchaseError(
-        "The guarantee covers your first session — claim it before booking a second.",
-      );
-    }
-
-    const termUsage = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(engagement)
-      .where(
-        and(
-          eq(engagement.studentProfileId, target.studentProfileId),
-          eq(engagement.guaranteeUsed, true),
-        ),
-      );
-
-    if ((termUsage.at(0)?.n ?? 0) > 0) {
-      throw new PurchaseError("You have already used your guarantee this term.");
-    }
-
-    // TODO(stripe): issue the refund here; `stripeReference` carries the id.
-    await record(tx, [
-      {
-        engagementId: target.id,
-        institutionId: params.actor.institutionId,
-        type: "refund",
-        amountMinor: target.pricePaidMinor,
-      },
-      {
-        engagementId: target.id,
-        institutionId: params.actor.institutionId,
-        type: "guarantee_absorbed",
-        amountMinor: target.pricePaidMinor,
-      },
-    ]);
-
-    await tx
-      .update(engagement)
-      .set({ status: "refunded", guaranteeUsed: true, completedAt: new Date() })
-      .where(eq(engagement.id, target.id));
   });
 }
