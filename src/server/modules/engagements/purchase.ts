@@ -27,6 +27,9 @@ import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slo
 
 export class PurchaseError extends Error {}
 
+const termEnded = sql<boolean>`${term.endsOn} < current_date`;
+const TERM_ENDED = "The term has ended, so this package can no longer be bought.";
+
 export async function slotsForRequest(params: {
   actor: Actor;
   requestId: string;
@@ -36,10 +39,13 @@ export async function slotsForRequest(params: {
       status: matchRequest.status,
       studentProfileId: matchRequest.studentProfileId,
       tutorProfileId: tutorProfile.id,
+      termEnded,
     })
     .from(matchRequest)
     .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
     .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .innerJoin(courseOffering, eq(courseOffering.id, matchRequest.courseOfferingId))
+    .innerJoin(term, eq(term.id, courseOffering.termId))
     .where(
       and(
         eq(matchRequest.id, params.requestId),
@@ -56,6 +62,7 @@ export async function slotsForRequest(params: {
   if (request.status !== "accepted") {
     throw new PurchaseError("That request has not been accepted yet.");
   }
+  if (request.termEnded) throw new PurchaseError(TERM_ENDED);
 
   return availableSlots({
     tutorProfileId: request.tutorProfileId,
@@ -97,7 +104,7 @@ export async function purchasePackage(params: {
         tutorProfileId: tutorCourse.tutorProfileId,
         tutorUserId: tutorProfile.userId,
         defaultLocation: tutorProfile.defaultLocation,
-        termEnded: sql<boolean>`${term.endsOn} < current_date`,
+        termEnded,
       })
       .from(matchRequest)
       .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
@@ -125,9 +132,7 @@ export async function purchasePackage(params: {
     if (request.tutorUserId === params.actor.userId) {
       throw new PurchaseError("You cannot buy a package from yourself.");
     }
-    if (request.termEnded) {
-      throw new PurchaseError("The term has ended, so this package can no longer be bought.");
-    }
+    if (request.termEnded) throw new PurchaseError(TERM_ENDED);
 
     const existing = await tx
       .select({ id: engagement.id })

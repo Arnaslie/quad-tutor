@@ -32,6 +32,7 @@ import { refreshScores } from "@/server/modules/scoring/stats";
 import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
 import { purchasePackage, slotsForRequest } from "./purchase";
+import { availableSlots } from "./slots";
 import { packagesForStudent } from "./reads";
 import { bookSession, slotsForEngagement } from "./scheduling";
 import { EndPackageError, closeWithRefund, endPackage, runTermEndRefunds } from "./termEnd";
@@ -451,7 +452,8 @@ test("an accepted request for a term that has ended can no longer be bought", as
     .insert(matchRequest)
     .values({ institutionId: home.institutionId, studentProfileId: student.studentProfileId, tutorCourseId, courseOfferingId: endedOfferingId, status: "accepted", requestedKind: "exam_anchored", expiresAt: hours(1) })
     .returning({ id: matchRequest.id });
-  const [slot] = await slotsForRequest({ actor: student, requestId: request.id });
+  await assert.rejects(slotsForRequest({ actor: student, requestId: request.id }), /term has ended/);
+  const [slot] = await availableSlots({ tutorProfileId: tutor.tutorProfileId, institutionId: home.institutionId });
   await assert.rejects(purchasePackage({ actor: student, requestId: request.id, anchorExamId: null, slotStartsAt: slot }), /term has ended/);
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(engagement).where(eq(engagement.studentProfileId, student.studentProfileId));
   assert.equal(n, 0);
