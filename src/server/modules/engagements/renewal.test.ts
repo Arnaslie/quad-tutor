@@ -36,6 +36,8 @@ import {
 } from "@/server/modules/matching/requests";
 import { requestWaiting } from "@/server/modules/notifications/messages";
 
+import { assertMoneyInvariants } from "@/server/modules/billing/invariants";
+
 import { SessionError } from "./access";
 import {
   PurchaseError,
@@ -443,4 +445,8 @@ test("the request email names the package the tutor would commit to", () => {
   assert.match(email.text, /They asked for 8 sessions, through the final\./);
   const legacy = requestWaiting({ to: "t@example.test", tutorName: "Tutor", studentName: "Student", courseLabel: "REN 1", requestedKind: null, expiresAt: new Date() });
   assert.doesNotMatch(legacy.text, /They asked for/);
+});
+
+test("the ledger keeps its money invariants across every scenario above", async () => {
+  for (const institutionId of made.institutions) await assertMoneyInvariants(institutionId);
 });
