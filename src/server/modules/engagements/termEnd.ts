@@ -114,19 +114,19 @@ export async function closeWithRefund(
   }
   if (target.status !== "active") return null;
 
-  if (endedBy) {
-    const sessions = await tx
-      .select({ status: sessionBooking.status, scheduledAt: sessionBooking.scheduledAt })
-      .from(sessionBooking)
-      .where(
-        and(
-          eq(sessionBooking.engagementId, engagementId),
-          eq(sessionBooking.institutionId, params.institutionId),
-          inArray(sessionBooking.status, ["scheduled", "disputed"]),
-        ),
-      );
-    const block = endBlock(sessions, now);
-    if (block) throw new EndPackageError(block);
+  const sessions = await tx
+    .select({ status: sessionBooking.status, scheduledAt: sessionBooking.scheduledAt })
+    .from(sessionBooking)
+    .where(
+      and(
+        eq(sessionBooking.engagementId, engagementId),
+        eq(sessionBooking.institutionId, params.institutionId),
+        inArray(sessionBooking.status, ["scheduled", "disputed"]),
+      ),
+    );
+  const block = endBlock(sessions, now);
+  if (block && (endedBy || block.reason !== "late_cancel_window")) {
+    throw new EndPackageError(block);
   }
 
   await tx
@@ -200,16 +200,22 @@ export async function endPackage(params: {
 /** The whole sweep for one campus. Called by the cron route. */
 export async function runTermEndRefunds(
   institutionId: string,
-): Promise<TermEndRefund[]> {
+): Promise<{ refunds: TermEndRefund[]; held: number }> {
   const due = await engagementsDueForTermEndRefund(institutionId);
-  const done: TermEndRefund[] = [];
+  const refunds: TermEndRefund[] = [];
+  let held = 0;
 
   for (const candidate of due) {
-    const refunded = await db.transaction((tx) =>
-      closeWithRefund(tx, { engagementId: candidate.engagementId, institutionId }),
-    );
-    if (refunded) done.push(refunded);
+    try {
+      const refunded = await db.transaction((tx) =>
+        closeWithRefund(tx, { engagementId: candidate.engagementId, institutionId }),
+      );
+      if (refunded) refunds.push(refunded);
+    } catch (error) {
+      if (!(error instanceof EndPackageError)) throw error;
+      held += 1;
+    }
   }
 
-  return done;
+  return { refunds, held };
 }
