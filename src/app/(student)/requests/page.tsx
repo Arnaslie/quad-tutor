@@ -17,6 +17,7 @@ import {
   type StudentRequest,
 } from "@/server/modules/matching/requests";
 
+import { CheckoutCancelled } from "../sessions/checkout-notice";
 import { PurchasePanel } from "./purchase-panel";
 import { displayName } from "@/server/modules/identity/display-name";
 
@@ -51,6 +52,8 @@ export default async function RequestsPage(props: PageProps<"/requests">) {
         title="Your asks"
         description="Up to three tutors at once. The first to say yes is the one you get; the rest drop off on their own."
       />
+
+      {searchParams.cancelled ? <CheckoutCancelled /> : null}
 
       {requests.length === 0 ? (
         <EmptyState

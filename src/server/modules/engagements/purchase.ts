@@ -1,4 +1,5 @@
 import { and, eq, isNull, ne, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
 import {
@@ -8,6 +9,7 @@ import {
   engagement,
   matchRequest,
   sessionBooking,
+  studentProfile,
   term,
   tutorCourse,
   tutorProfile,
@@ -39,6 +41,7 @@ export type Checkout = {
   amountMinor: number;
   currency: string;
   description: string;
+  customerEmail: string;
   expiresAt: Date;
   stripeCheckoutSessionId: string | null;
 };
@@ -49,10 +52,12 @@ export type PurchaseResult =
   | { outcome: "paid"; engagementId: string }
   | { outcome: "other_checkout_open"; engagementId: string; stripeCheckoutSessionId: string | null };
 
-export async function checkoutFor(
+const student = alias(user, "student_user");
+
+export async function checkoutDetails(
   exec: Executor,
   params: { engagementId: string; institutionId: string },
-): Promise<PurchaseResult> {
+): Promise<{ status: (typeof engagement.$inferSelect)["status"]; checkout: Checkout | null } | null> {
   const rows = await exec
     .select({
       engagementId: engagement.id,
@@ -66,11 +71,14 @@ export async function checkoutFor(
       courseCode: courseCodeAlias.code,
       courseTitle: course.title,
       tutorName: user.name,
+      customerEmail: student.email,
     })
     .from(engagement)
     .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
     .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
     .innerJoin(user, eq(user.id, tutorProfile.userId))
+    .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
+    .innerJoin(student, eq(student.id, studentProfile.userId))
     .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
     .innerJoin(course, eq(course.id, courseOffering.courseId))
     .leftJoin(
@@ -86,26 +94,36 @@ export async function checkoutFor(
     .limit(1);
 
   const row = rows.at(0);
-  const { engagementId } = params;
-  if (row && row.status !== "pending_payment" && row.status !== "cancelled") {
-    return { outcome: "paid", engagementId };
-  }
-  if (!row?.expiresAt || row.status === "cancelled") {
-    throw new PurchaseError("That checkout is no longer open.");
-  }
-  if (row.expiresAt.getTime() <= Date.now()) {
-    return { outcome: "expired", engagementId, stripeCheckoutSessionId: row.stripeCheckoutSessionId };
-  }
-
-  const checkout = {
+  if (!row) return null;
+  const checkout = row.expiresAt && {
     engagementId: row.engagementId,
     institutionId: row.institutionId,
     amountMinor: row.amountMinor,
     currency: row.currency,
     description: `${row.courseCode ?? row.courseTitle} with ${displayName(row.tutorName, "tutor")}: ${packageSummary(row.kind)}`,
+    customerEmail: row.customerEmail,
     expiresAt: row.expiresAt,
     stripeCheckoutSessionId: row.stripeCheckoutSessionId,
   };
+  return { status: row.status, checkout };
+}
+
+export async function checkoutFor(
+  exec: Executor,
+  params: { engagementId: string; institutionId: string },
+): Promise<PurchaseResult> {
+  const found = await checkoutDetails(exec, params);
+  const { engagementId } = params;
+  if (found && found.status !== "pending_payment" && found.status !== "cancelled") {
+    return { outcome: "paid", engagementId };
+  }
+  if (!found?.checkout || found.status === "cancelled") {
+    throw new PurchaseError("That checkout is no longer open.");
+  }
+  const { checkout } = found;
+  if (checkout.expiresAt.getTime() <= Date.now()) {
+    return { outcome: "expired", engagementId, stripeCheckoutSessionId: checkout.stripeCheckoutSessionId };
+  }
   return { outcome: "checkout", engagementId, checkout };
 }
 

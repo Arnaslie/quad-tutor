@@ -26,6 +26,7 @@ import {
 import { SessionError } from "@/server/modules/engagements/access";
 import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
 import { endPackage } from "@/server/modules/engagements/termEnd";
+import { checkoutRedirect } from "@/server/modules/billing/checkout-session";
 import { formatMinor } from "@/server/modules/billing/pricing";
 import {
   requestRenewalInput,
@@ -167,25 +168,25 @@ export async function purchase(
     return { ok: false, error: "Pick a package and a time before checking out." };
   }
 
-  let engagementId: string;
+  let target: string;
   try {
-    const result = await purchasePackage({
-      actor,
-      requestId: parsed.data.requestId,
-      kind: parsed.data.kind,
-      anchorExamId: parsed.data.anchorExamId,
-      slotStartsAt: parsed.data.slotStartsAt,
-      studentNote: parsed.data.studentNote,
-    });
-    engagementId = result.engagementId;
+    target = await checkoutRedirect(actor.institutionId, () =>
+      purchasePackage({
+        actor,
+        requestId: parsed.data.requestId,
+        kind: parsed.data.kind,
+        anchorExamId: parsed.data.anchorExamId,
+        slotStartsAt: parsed.data.slotStartsAt,
+        studentNote: parsed.data.studentNote,
+      }),
+    );
   } catch (error) {
     return toResult(error);
   }
 
-  notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/requests");
   revalidatePath("/sessions");
-  redirect(`/sessions?package=${engagementId}`);
+  redirect(target);
 }
 
 export async function topUp(
@@ -202,22 +203,22 @@ export async function topUp(
 
   if (!parsed.success) return { ok: false, error: "Pick a time for this session." };
 
-  let engagementId: string;
+  let target: string;
   try {
-    const result = await purchaseTopUp({
-      actor,
-      tutorCourseId: parsed.data.tutorCourseId,
-      slotStartsAt: parsed.data.slotStartsAt,
-      studentNote: parsed.data.studentNote,
-    });
-    engagementId = result.engagementId;
+    target = await checkoutRedirect(actor.institutionId, () =>
+      purchaseTopUp({
+        actor,
+        tutorCourseId: parsed.data.tutorCourseId,
+        slotStartsAt: parsed.data.slotStartsAt,
+        studentNote: parsed.data.studentNote,
+      }),
+    );
   } catch (error) {
     return toResult(error);
   }
 
-  notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
-  redirect(`/sessions?package=${engagementId}`);
+  redirect(target);
 }
 
 export async function askAgain(
