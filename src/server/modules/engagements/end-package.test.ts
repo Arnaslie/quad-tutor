@@ -29,6 +29,10 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { notifyCancelledSessions } from "@/server/modules/notifications/dispatch";
 import { refreshScores } from "@/server/modules/scoring/stats";
 
+import { assertMoneyInvariants } from "@/server/modules/billing/invariants";
+import { feeChargedThisTermMinor } from "@/server/modules/billing/ledger";
+import { perSessionMinor, splitMinor } from "@/server/modules/billing/pricing";
+
 import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
 import { purchasePackage, slotsForRequest } from "./purchase";
@@ -95,9 +99,10 @@ async function tutorWithClaim(): Promise<{ actor: TutorActor; claimId: string }>
 
 async function pkg(
   student: Actor,
-  options: { kind?: "exam_anchored" | "through_final"; claimId?: string; offeringId?: string } = {},
+  options: { kind?: "exam_anchored" | "through_final" | "top_up"; claimId?: string; offeringId?: string } = {},
 ): Promise<string> {
   const through = options.kind === "through_final";
+  const single = options.kind === "top_up";
   const [row] = await db
     .insert(engagement)
     .values({
@@ -106,8 +111,8 @@ async function pkg(
       tutorCourseId: options.claimId ?? tutorCourseId,
       courseOfferingId: options.offeringId ?? home.offeringId,
       kind: options.kind ?? "exam_anchored",
-      sessionsPurchased: through ? 8 : 4,
-      pricePaidMinor: through ? 25_200 : 14_000,
+      sessionsPurchased: through ? 8 : single ? 1 : 4,
+      pricePaidMinor: through ? 25_200 : single ? 3_500 : 14_000,
     })
     .returning({ id: engagement.id, pricePaidMinor: engagement.pricePaidMinor });
   await db.insert(ledgerEntry).values({ engagementId: row.id, institutionId: home.institutionId, type: "package_purchase", amountMinor: row.pricePaidMinor });
@@ -124,6 +129,30 @@ async function session(
     .values({ engagementId, institutionId: home.institutionId, scheduledAt: at, confirmationWindowEndsAt: new Date(at.getTime() + 25 * 3_600_000), ...fields })
     .returning({ id: sessionBooking.id });
   return row.id;
+}
+
+async function delivered(engagementId: string, at: Date): Promise<void> {
+  const sessionId = await session(engagementId, at, { status: "completed", resolution: "both_confirmed" });
+  const [pkgRow] = await db
+    .select({
+      pricePaidMinor: engagement.pricePaidMinor,
+      sessionsPurchased: engagement.sessionsPurchased,
+      tutorProfileId: tutorCourse.tutorProfileId,
+      termId: courseOffering.termId,
+    })
+    .from(engagement)
+    .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
+    .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
+    .where(eq(engagement.id, engagementId));
+  const sessionMinor = perSessionMinor(pkgRow);
+  const charged = await feeChargedThisTermMinor(db, { ...pkgRow, institutionId: home.institutionId });
+  const { tutorMinor, platformMinor } = splitMinor(sessionMinor, charged);
+  const row = { engagementId, sessionId, institutionId: home.institutionId };
+  await db.insert(ledgerEntry).values([
+    { ...row, type: "session_earned", amountMinor: sessionMinor },
+    { ...row, type: "tutor_payout", amountMinor: tutorMinor },
+    { ...row, type: "platform_fee", amountMinor: platformMinor },
+  ]);
 }
 
 async function ledger(engagementId: string) {
@@ -196,18 +225,16 @@ test("ending refunds what the sweep would for the same state, as one refund row 
   const mine = await pkg(ended, { kind: "through_final" });
   const theirs = await pkg(swept, { kind: "through_final" });
   for (const id of [mine, theirs]) {
-    for (const h of [-300, -200, -100]) await session(id, hours(h), { status: "completed", resolution: "both_confirmed" });
+    for (const h of [-300, -200, -100]) await delivered(id, hours(h));
     await session(id, hours(48));
   }
 
+  const before = await ledger(mine);
   const viaEnd = await endPackage({ actor: ended, engagementId: mine });
   const viaSweep = await sweep(theirs);
   assert.equal(viaEnd?.refundMinor, 25_200 - 3 * 3_150, "floor rounding: through the final at $31.50 refunds to the cent");
   assert.equal(viaEnd?.refundMinor, viaSweep?.refundMinor);
-  assert.deepEqual(await ledger(mine), [
-    { type: "package_purchase", amountMinor: 25_200 },
-    { type: "refund", amountMinor: 15_750 },
-  ]);
+  assert.deepEqual(await ledger(mine), [...before, { type: "refund", amountMinor: 15_750 }]);
   assert.deepEqual(await facts(ended), []);
 });
 
@@ -263,7 +290,7 @@ test("nothing delivered ends refunded, one delivered ends completed, and only th
   const emptyId = await pkg(empty, { claimId });
   const used = await person(home.institutionId);
   const usedId = await pkg(used, { claimId });
-  await session(usedId, hours(-100), { status: "completed", resolution: "both_confirmed" });
+  await delivered(usedId, hours(-100));
 
   assert.equal((await endPackage({ actor: empty, engagementId: emptyId }))?.refundMinor, 14_000);
   assert.equal((await endPackage({ actor: used, engagementId: usedId }))?.refundMinor, 10_500);
@@ -329,7 +356,7 @@ test("ending and the term-end sweep at once write one refund row", async () => {
   for (let round = 0; round < 8; round += 1) {
     const student = await person(home.institutionId);
     const id = await pkg(student);
-    await session(id, hours(-100), { status: "completed", resolution: "both_confirmed" });
+    await delivered(id, hours(-100));
     await session(id, hours(48));
 
     const results = await Promise.allSettled([endPackage({ actor: student, engagementId: id }), sweep(id)]);
@@ -342,8 +369,7 @@ test("ending and the term-end sweep at once write one refund row", async () => {
 test("ending while the last session is being confirmed: the confirmation lands, nothing is refunded", async () => {
   for (const headStartMs of [0, 2, 4, 8]) {
     const student = await person(home.institutionId);
-    const id = await pkg(student);
-    await db.update(engagement).set({ sessionsPurchased: 1, pricePaidMinor: 3_500 }).where(eq(engagement.id, id));
+    const id = await pkg(student, { kind: "top_up" });
     const last = await session(id, hours(-2), { studentConfirmedAt: new Date() });
 
     const results = await Promise.allSettled([
@@ -393,8 +419,7 @@ test("the sweep holds a package while a session is disputed", async () => {
 test("the sweep racing a confirmation of the last session: no deadlock, the session is paid, nothing refunded", async () => {
   for (const headStartMs of [0, 2, 4, 8]) {
     const student = await person(home.institutionId);
-    const id = await pkg(student);
-    await db.update(engagement).set({ sessionsPurchased: 1, pricePaidMinor: 3_500 }).where(eq(engagement.id, id));
+    const id = await pkg(student, { kind: "top_up" });
     const last = await session(id, hours(-2), { studentConfirmedAt: new Date() });
 
     const results = await Promise.allSettled([
@@ -457,4 +482,8 @@ test("an accepted request for a term that has ended can no longer be bought", as
   await assert.rejects(purchasePackage({ actor: student, requestId: request.id, anchorExamId: null, slotStartsAt: slot }), /term has ended/);
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(engagement).where(eq(engagement.studentProfileId, student.studentProfileId));
   assert.equal(n, 0);
+});
+
+test("the ledger keeps its money invariants across every scenario above", async () => {
+  for (const institutionId of made.institutions) await assertMoneyInvariants(institutionId);
 });

@@ -298,9 +298,10 @@ account). Needs a `STRIPE_TEST_SECRET_KEY` GitHub secret.
 - **Stripe is the truth for what moved; the ledger is the truth for what is owed.**
 - **Database-only invariants** (CI and the daily sweep), per engagement: one
   `package_purchase` per non-pending, non-released engagement and none on the others;
-  `refund ≤ package_purchase`; deferred `≥ 0`, and `0` once closed by a refund; per
-  session, `session_earned = tutor_payout + platform_fee`; `tutor_transfer ≤ tutor_payout`.
-  Per tutor and term, `Σ platform_fee ≤ 10000`.
+  `refund ≤ package_purchase`; deferred `≥ 0`, and `0` once closed;
+  `tutor_transfer − transfer_reversal ≤ tutor_payout`. Per session, one `session_earned`,
+  `session_earned = tutor_payout + platform_fee` and `platform_fee ≤ ⌊session_earned × take
+  rate⌋`. Per tutor and term, `Σ platform_fee ≤ 10000`.
 - **Stripe reconciliation**, daily, for engagements with ledger activity in the last 7
   days or still pending: `package_purchase − refund` vs. the charge's `amount_captured −
   amount_refunded`; stamped `tutor_transfer − transfer_reversal` vs. `transfers.list({
