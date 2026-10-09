@@ -180,6 +180,8 @@ function Row({ label, value }: { label: string; value: string }) {
 
 function statusLine(session: SessionDetail, otherParty: string): string {
   switch (session.status) {
+    case "held":
+      return "Confirming payment";
     case "scheduled":
       switch (session.action) {
         case "confirm_or_deny":

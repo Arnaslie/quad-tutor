@@ -64,7 +64,7 @@ async function recognise(
       engagementId: session.engagementId,
       institutionId: session.institutionId,
       sessionId: session.sessionId,
-      type: "tutor_payout",
+      type: "tutor_accrued",
       amountMinor: tutorMinor,
       currency: session.currency,
     },

@@ -48,7 +48,7 @@ export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings
       and(
         eq(tutorProfile.id, tutor.tutorProfileId),
         eq(tutorProfile.institutionId, tutor.institutionId),
-        eq(ledgerEntry.type, "tutor_payout"),
+        eq(ledgerEntry.type, "tutor_accrued"),
       ),
     );
 

@@ -23,7 +23,7 @@ export function lapseCopy(delivered: boolean, packageOwner: string): string {
   return delivered ? "it counts as delivered" : `it goes back into ${packageOwner} package`;
 }
 
-export function outcomeOf(status: "scheduled" | "completed" | "cancelled" | "disputed"): AnswerOutcome {
+export function outcomeOf(status: "held" | "scheduled" | "completed" | "cancelled" | "disputed"): AnswerOutcome {
   if (status === "disputed") return "disputed";
   if (status === "scheduled") return "awaiting_other";
   return status === "completed" ? "attended" : "not_attended";
