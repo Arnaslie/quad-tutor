@@ -1,7 +1,9 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
+  course,
+  courseCodeAlias,
   courseOffering,
   engagement,
   matchRequest,
@@ -9,9 +11,10 @@ import {
   term,
   tutorCourse,
   tutorProfile,
+  user,
 } from "@/server/db/schema";
 import type { Actor } from "@/server/modules/identity/actor";
-import { record } from "@/server/modules/billing/ledger";
+import { displayName } from "@/server/modules/identity/display-name";
 
 import {
   packageOption,
@@ -26,6 +29,111 @@ import { bookAgain } from "./reads";
 import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slots";
 
 export class PurchaseError extends Error {}
+
+export const CHECKOUT_HOLD_MINUTES = 30;
+
+export type Checkout = {
+  engagementId: string;
+  institutionId: string;
+  amountMinor: number;
+  currency: string;
+  description: string;
+  expiresAt: Date;
+  stripeCheckoutSessionId: string | null;
+};
+
+export type PurchaseResult = { engagementId: string; checkout: Checkout | null };
+
+export async function checkoutFor(
+  exec: Executor,
+  params: { engagementId: string; institutionId: string },
+): Promise<Checkout> {
+  const rows = await exec
+    .select({
+      engagementId: engagement.id,
+      institutionId: engagement.institutionId,
+      kind: engagement.kind,
+      amountMinor: engagement.pricePaidMinor,
+      currency: engagement.currency,
+      expiresAt: engagement.checkoutExpiresAt,
+      stripeCheckoutSessionId: engagement.stripeCheckoutSessionId,
+      courseCode: courseCodeAlias.code,
+      courseTitle: course.title,
+      tutorName: user.name,
+    })
+    .from(engagement)
+    .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
+    .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .innerJoin(user, eq(user.id, tutorProfile.userId))
+    .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
+    .innerJoin(course, eq(course.id, courseOffering.courseId))
+    .leftJoin(
+      courseCodeAlias,
+      and(eq(courseCodeAlias.courseId, course.id), isNull(courseCodeAlias.validToTermId)),
+    )
+    .where(
+      and(
+        eq(engagement.id, params.engagementId),
+        eq(engagement.institutionId, params.institutionId),
+        eq(engagement.status, "pending_payment"),
+      ),
+    )
+    .limit(1);
+
+  const row = rows.at(0);
+  if (!row?.expiresAt) throw new PurchaseError("That checkout is no longer open.");
+
+  return {
+    engagementId: row.engagementId,
+    institutionId: row.institutionId,
+    amountMinor: row.amountMinor,
+    currency: row.currency,
+    description: `${row.courseCode ?? row.courseTitle} with ${displayName(row.tutorName, "tutor")}: ${packageSummary(row.kind)}`,
+    expiresAt: row.expiresAt,
+    stripeCheckoutSessionId: row.stripeCheckoutSessionId,
+  };
+}
+
+async function pending(
+  exec: Executor,
+  engagementId: string,
+  institutionId: string,
+): Promise<PurchaseResult> {
+  return { engagementId, checkout: await checkoutFor(exec, { engagementId, institutionId }) };
+}
+
+async function hold(
+  tx: Executor,
+  params: {
+    engagement: Omit<typeof engagement.$inferInsert, "status" | "checkoutExpiresAt">;
+    slotStartsAt: Date;
+    location: string | null;
+    studentNote: string | null | undefined;
+  },
+): Promise<PurchaseResult> {
+  const [created] = await tx
+    .insert(engagement)
+    .values({
+      ...params.engagement,
+      status: "pending_payment",
+      checkoutExpiresAt: new Date(Date.now() + CHECKOUT_HOLD_MINUTES * 60 * 1000),
+    })
+    .returning({ id: engagement.id });
+
+  await tx.insert(sessionBooking).values({
+    engagementId: created.id,
+    institutionId: params.engagement.institutionId,
+    status: "held",
+    scheduledAt: params.slotStartsAt,
+    durationMinutes: SESSION_MINUTES,
+    location: params.location,
+    studentNote: params.studentNote ?? null,
+    confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
+    remindedAt: remindedAtForNewBooking(params.slotStartsAt),
+  });
+
+  return pending(tx, created.id, params.engagement.institutionId);
+}
 
 const termEnded = sql<boolean>`${term.endsOn} < current_date`;
 const TERM_ENDED = "The term has ended, so this package can no longer be bought.";
@@ -77,7 +185,7 @@ export async function purchasePackage(params: {
   anchorExamId: string | null;
   slotStartsAt: Date;
   studentNote?: string | null;
-}): Promise<{ engagementId: string }> {
+}): Promise<PurchaseResult> {
   return db.transaction(async (tx) => {
     const tutorOf = await tx
       .select({ tutorProfileId: tutorCourse.tutorProfileId })
@@ -135,13 +243,16 @@ export async function purchasePackage(params: {
     if (request.termEnded) throw new PurchaseError(TERM_ENDED);
 
     const existing = await tx
-      .select({ id: engagement.id })
+      .select({ id: engagement.id, status: engagement.status })
       .from(engagement)
-      .where(eq(engagement.matchRequestId, request.id))
+      .where(and(eq(engagement.matchRequestId, request.id), ne(engagement.status, "cancelled")))
       .limit(1);
 
     const already = existing.at(0);
-    if (already) return { engagementId: already.id };
+    if (already?.status === "pending_payment") {
+      return pending(tx, already.id, params.actor.institutionId);
+    }
+    if (already) return { engagementId: already.id, checkout: null };
 
     const kind = request.requestedKind ?? params.kind;
     if (!kind || kind === "top_up") throw new PurchaseError("Pick a package.");
@@ -157,11 +268,8 @@ export async function purchasePackage(params: {
     });
     if (!open) throw new PurchaseError("That time is no longer available.");
 
-    // TODO(stripe): take payment here, before any row is written. A failed
-
-    const [created] = await tx
-      .insert(engagement)
-      .values({
+    return hold(tx, {
+      engagement: {
         studentProfileId: request.studentProfileId,
         institutionId: params.actor.institutionId,
         tutorCourseId: request.tutorCourseId,
@@ -171,30 +279,11 @@ export async function purchasePackage(params: {
         anchorExamId: params.anchorExamId,
         sessionsPurchased: option.sessions,
         pricePaidMinor: option.priceMinor,
-      })
-      .returning({ id: engagement.id });
-
-    await tx.insert(sessionBooking).values({
-      engagementId: created.id,
-      institutionId: params.actor.institutionId,
-      scheduledAt: params.slotStartsAt,
-      durationMinutes: SESSION_MINUTES,
-      location: request.defaultLocation,
-      studentNote: params.studentNote ?? null,
-      confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
-      remindedAt: remindedAtForNewBooking(params.slotStartsAt),
-    });
-
-    await record(tx, [
-      {
-        engagementId: created.id,
-        institutionId: params.actor.institutionId,
-        type: "package_purchase",
-        amountMinor: option.priceMinor,
       },
-    ]);
-
-    return { engagementId: created.id };
+      slotStartsAt: params.slotStartsAt,
+      location: request.defaultLocation,
+      studentNote: params.studentNote,
+    });
   });
 }
 
@@ -225,7 +314,7 @@ export async function purchaseTopUp(params: {
   tutorCourseId: string;
   slotStartsAt: Date;
   studentNote?: string | null;
-}): Promise<{ engagementId: string }> {
+}): Promise<PurchaseResult> {
   const option = topUpOption();
 
   return db.transaction(async (tx) => {
@@ -244,6 +333,25 @@ export async function purchaseTopUp(params: {
 
     const gate = await refillGate(tx, params);
 
+    const resumable = await tx
+      .select({ id: engagement.id })
+      .from(engagement)
+      .innerJoin(sessionBooking, eq(sessionBooking.engagementId, engagement.id))
+      .where(
+        and(
+          eq(engagement.studentProfileId, params.actor.studentProfileId),
+          eq(engagement.institutionId, params.actor.institutionId),
+          eq(engagement.tutorCourseId, gate.tutorCourseId),
+          eq(engagement.kind, "top_up"),
+          eq(engagement.status, "pending_payment"),
+          eq(sessionBooking.status, "held"),
+          eq(sessionBooking.scheduledAt, params.slotStartsAt),
+        ),
+      )
+      .limit(1);
+    const resumed = resumable.at(0);
+    if (resumed) return pending(tx, resumed.id, params.actor.institutionId);
+
     const open = await slotOpen(tx, {
       tutorProfileId: gate.tutorProfileId,
       institutionId: params.actor.institutionId,
@@ -251,43 +359,20 @@ export async function purchaseTopUp(params: {
     });
     if (!open) throw new PurchaseError("That time is no longer available.");
 
-    // TODO(stripe): take payment here, before any row is written, same as
-
-    const [created] = await tx
-      .insert(engagement)
-      .values({
+    return hold(tx, {
+      engagement: {
         studentProfileId: params.actor.studentProfileId,
         institutionId: params.actor.institutionId,
         tutorCourseId: gate.tutorCourseId,
         courseOfferingId: gate.offeringId,
         kind: "top_up",
-
         anchorExamId: null,
         sessionsPurchased: option.sessions,
         pricePaidMinor: option.priceMinor,
-      })
-      .returning({ id: engagement.id });
-
-    await tx.insert(sessionBooking).values({
-      engagementId: created.id,
-      institutionId: params.actor.institutionId,
-      scheduledAt: params.slotStartsAt,
-      durationMinutes: SESSION_MINUTES,
-      location: gate.tutorLocation,
-      studentNote: params.studentNote ?? null,
-      confirmationWindowEndsAt: confirmationDeadline(params.slotStartsAt),
-      remindedAt: remindedAtForNewBooking(params.slotStartsAt),
-    });
-
-    await record(tx, [
-      {
-        engagementId: created.id,
-        institutionId: params.actor.institutionId,
-        type: "package_purchase",
-        amountMinor: option.priceMinor,
       },
-    ]);
-
-    return { engagementId: created.id };
+      slotStartsAt: params.slotStartsAt,
+      location: gate.tutorLocation,
+      studentNote: params.studentNote,
+    });
   });
 }
