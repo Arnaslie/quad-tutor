@@ -1,5 +1,5 @@
 import { syncCheckout, type SyncOutcome } from "./checkout-session";
-import { stripeGateway, verifyWebhook } from "./stripe";
+import { GatewayError, stripeGateway, verifyWebhook } from "./stripe";
 
 export type WebhookResult =
   | { status: 400; reason: string }
@@ -12,8 +12,15 @@ export async function handleStripeWebhook(payload: string, signature: string | n
   if (!event) return { status: 400, reason: "bad signature" };
   if (event.livemode !== stripeGateway().livemode) return { status: 400, reason: "livemode mismatch" };
 
-  if (!CHECKOUT_EVENTS.has(event.type) || !event.objectId) {
+  if (event.account || !CHECKOUT_EVENTS.has(event.type) || !event.objectId) {
     return { status: 200, outcome: "ignored", institutionId: null };
   }
-  return { status: 200, ...(await syncCheckout(event.objectId)) };
+  try {
+    return { status: 200, ...(await syncCheckout(event.objectId)) };
+  } catch (error) {
+    if (error instanceof GatewayError && error.missing) {
+      return { status: 200, outcome: "foreign", institutionId: null };
+    }
+    throw error;
+  }
 }

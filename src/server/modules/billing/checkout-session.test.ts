@@ -38,7 +38,7 @@ import {
   syncPendingCheckouts,
 } from "./checkout-session";
 import { assertMoneyInvariants } from "./invariants";
-import { fakeStripe, signWebhookPayload, stripeGateway } from "./stripe";
+import { GatewayError, fakeStripe, signWebhookPayload, stripeGateway, type Gateway } from "./stripe";
 import { handleStripeWebhook } from "./webhook";
 
 process.env.STRIPE_FAKE = "1";
@@ -122,6 +122,24 @@ const paidState = {
 async function deliver(sessionId: string) {
   const { payload, signature } = await fakeStripe.event(sessionId);
   return handleStripeWebhook(payload, signature);
+}
+
+async function discrepancies(engagementId: string) {
+  return db
+    .select({ kind: moneyDiscrepancy.kind, stripeReference: moneyDiscrepancy.stripeReference, refundReference: moneyDiscrepancy.refundReference })
+    .from(moneyDiscrepancy)
+    .where(eq(moneyDiscrepancy.engagementId, engagementId));
+}
+
+async function patched<K extends keyof Gateway>(name: K, replacement: Gateway[K], work: () => Promise<void>) {
+  const gateway = stripeGateway();
+  const original = gateway[name];
+  gateway[name] = replacement;
+  try {
+    await work();
+  } finally {
+    gateway[name] = original;
+  }
 }
 
 async function expireRow(engagementId: string) {
@@ -326,7 +344,7 @@ test("an amount mismatch refunds and stamps the discrepancy", async () => {
   assert.deepEqual(await state(engagementId), { status: "cancelled", sessions: ["cancelled"], ledger: [] });
 });
 
-test("a payment whose charge is already in the ledger releases the hold and is refunded", async () => {
+test("a payment whose charge clashes with another engagement's fee row is released and refunded", async () => {
   const first = await opened();
   await fakeStripe.pay(first.sessionId);
   await syncCheckout(first.sessionId);
@@ -343,6 +361,53 @@ test("a payment whose charge is already in the ledger releases the hold and is r
   assert.equal((await fakeStripe.refunds(sessionId)).length, 1);
   assert.deepEqual(await state(engagementId), { status: "cancelled", sessions: ["cancelled"], ledger: [] });
   await db.delete(ledgerEntry).where(eq(ledgerEntry.id, clash.id));
+});
+
+test("a PaymentIntent already bought on another engagement is not refunded, and is flagged", async () => {
+  const first = await opened();
+  await fakeStripe.pay(first.sessionId);
+  await syncCheckout(first.sessionId);
+
+  const { engagementId, sessionId } = await opened();
+  const { paymentIntentId } = await fakeStripe.pay(sessionId);
+  const [clash] = await db
+    .insert(ledgerEntry)
+    .values({ engagementId: first.engagementId, institutionId: home.institutionId, type: "package_purchase", amountMinor: 0, stripeReference: paymentIntentId })
+    .returning({ id: ledgerEntry.id });
+
+  assert.equal((await syncCheckout(sessionId)).outcome, "settled");
+  assert.deepEqual(await fakeStripe.refunds(sessionId), []);
+  assert.deepEqual(await state(engagementId), { status: "cancelled", sessions: ["cancelled"], ledger: [] });
+  assert.deepEqual(await discrepancies(engagementId), [{ kind: "ledger_vs_stripe_charge", stripeReference: paymentIntentId, refundReference: null }]);
+  await db.delete(ledgerEntry).where(eq(ledgerEntry.id, clash.id));
+});
+
+test("a mismatch whose refund failed is refunded by a later sweep", async () => {
+  const { engagementId, sessionId } = await opened();
+  await fakeStripe.pay(sessionId, { amountTotal: 100 });
+  await patched("refund", async () => { throw new GatewayError("Stripe is down", { status: 500 }); }, async () => {
+    await assert.rejects(syncCheckout(sessionId), /down/);
+  });
+  assert.equal((await discrepancies(engagementId))[0].refundReference, null);
+
+  await syncPendingCheckouts(home.institutionId);
+  const [refund] = await fakeStripe.refunds(sessionId);
+  assert.equal((await discrepancies(engagementId))[0].refundReference, refund.id);
+});
+
+test("the fee is fetched only for a pending engagement, and a page render never waits for it", async () => {
+  const { actor, engagementId, sessionId } = await opened();
+  await fakeStripe.pay(sessionId);
+  await patched("chargeFee", async () => null, async () => {
+    assert.equal(await syncOwnCheckouts(actor), false);
+    assert.equal((await state(engagementId)).status, "pending_payment");
+    await assert.rejects(syncCheckout(sessionId), /no balance transaction/);
+  });
+  assert.equal((await syncCheckout(sessionId)).outcome, "fulfilled");
+  await patched("chargeFee", async () => { throw new Error("must not be called"); }, async () => {
+    assert.equal((await syncCheckout(sessionId)).outcome, "settled");
+  });
+  assert.deepEqual(await state(engagementId), paidState);
 });
 
 test("the sweep expires open Sessions past the hold and releases them", async () => {
@@ -383,20 +448,90 @@ test("an unstamped row recovers its Session by replaying create, then expires an
   const { engagementId, sessionId } = await opened();
   await db.update(engagement).set({ stripeCheckoutSessionId: null }).where(eq(engagement.id, engagementId));
 
-  assert.equal(await settleCheckout({ engagementId, institutionId: home.institutionId, sessionId: null }), "released");
+  assert.equal(await settleCheckout({ engagementId, institutionId: home.institutionId }), "released");
   assert.equal((await stripeGateway().retrieveCheckout(sessionId)).status, "expired");
   const [row] = await db.select({ sessionId: engagement.stripeCheckoutSessionId }).from(engagement).where(eq(engagement.id, engagementId));
   assert.equal(row.sessionId, sessionId);
   assert.deepEqual(await state(engagementId), { status: "cancelled", sessions: ["cancelled"], ledger: [] });
 });
 
-test("an unstamped row with no Session to recover is released at once", async () => {
+test("an unstamped row with no Session and no payment is released and flagged", async () => {
   const actor = await person();
   const { requestId, slots } = await accepted(actor);
   const { engagementId } = await purchasePackage({ actor, requestId, anchorExamId: null, slotStartsAt: slots[0] });
   await expireRow(engagementId);
   await syncPendingCheckouts(home.institutionId);
   assert.deepEqual(await state(engagementId), { status: "cancelled", sessions: ["cancelled"], ledger: [] });
+  assert.deepEqual(await discrepancies(engagementId), [{ kind: "unstamped_reference", stripeReference: null, refundReference: null }]);
+});
+
+test("an unstamped row whose create is refused but whose Session was paid is fulfilled, not released", async () => {
+  const { engagementId, sessionId } = await opened();
+  await fakeStripe.pay(sessionId);
+  await db.update(engagement).set({ stripeCheckoutSessionId: null }).where(eq(engagement.id, engagementId));
+  await expireRow(engagementId);
+
+  await syncPendingCheckouts(home.institutionId);
+  assert.deepEqual(await state(engagementId), paidState);
+  assert.deepEqual(await discrepancies(engagementId), []);
+});
+
+test("a transient create error leaves an unstamped row for the next sweep", async () => {
+  const actor = await person();
+  const { requestId, slots } = await accepted(actor);
+  const { engagementId } = await purchasePackage({ actor, requestId, anchorExamId: null, slotStartsAt: slots[0] });
+  await expireRow(engagementId);
+  await patched("createCheckout", async () => { throw new GatewayError("timeout", {}); }, async () => {
+    await assert.rejects(settleCheckout({ engagementId, institutionId: home.institutionId }), /timeout/);
+    await assert.rejects(
+      settleCheckout({ engagementId, institutionId: home.institutionId }),
+      /timeout/,
+      "cancel takes the same path",
+    );
+  });
+  assert.equal((await state(engagementId)).status, "pending_payment");
+  await syncPendingCheckouts(home.institutionId);
+  assert.equal((await state(engagementId)).status, "cancelled");
+});
+
+test("a stamped Session Stripe does not know is released and flagged, and its events are foreign", async () => {
+  const { engagementId, sessionId } = await opened();
+  const ghost = `cs_${run}_ghost`;
+  await db.update(engagement).set({ stripeCheckoutSessionId: ghost }).where(eq(engagement.id, engagementId));
+
+  const { payload } = await fakeStripe.event(sessionId);
+  const event = JSON.stringify({ ...JSON.parse(payload), data: { object: { ...JSON.parse(payload).data.object, id: ghost } } });
+  assert.deepEqual(await handleStripeWebhook(event, signWebhookPayload(event)), { status: 200, outcome: "foreign", institutionId: null });
+
+  await expireRow(engagementId);
+  const swept = await syncPendingCheckouts(home.institutionId);
+  assert.equal(swept.failed, 0);
+  assert.deepEqual(await state(engagementId), { status: "cancelled", sessions: ["cancelled"], ledger: [] });
+  assert.deepEqual(await discrepancies(engagementId), [{ kind: "ledger_vs_stripe_charge", stripeReference: ghost, refundReference: null }]);
+});
+
+test("Connect events are ignored", async () => {
+  const { engagementId, sessionId } = await opened();
+  await fakeStripe.pay(sessionId);
+  const { payload } = await fakeStripe.event(sessionId);
+  const connect = JSON.stringify({ ...JSON.parse(payload), account: "acct_123" });
+  assert.deepEqual(await handleStripeWebhook(connect, signWebhookPayload(connect)), { status: 200, outcome: "ignored", institutionId: null });
+  assert.equal((await state(engagementId)).status, "pending_payment");
+  await syncCheckout(sessionId);
+});
+
+test("an unstamped hold with under 30 minutes left is settled and held afresh", async () => {
+  const actor = await person();
+  const { requestId, slots } = await accepted(actor);
+  const buy = () => purchasePackage({ actor, requestId, anchorExamId: null, slotStartsAt: slots[0] });
+  const { engagementId } = await buy();
+  await db.update(engagement).set({ checkoutExpiresAt: new Date(Date.now() + 20 * 60 * 1000) }).where(eq(engagement.id, engagementId));
+
+  const url = await checkoutRedirect(home.institutionId, buy);
+  const fresh = await pending(actor);
+  assert.notEqual(fresh.id, engagementId);
+  assert.equal(url, (await stripeGateway().retrieveCheckout(fresh.sessionId!)).url);
+  assert.equal((await state(engagementId)).status, "cancelled");
 });
 
 test("a different choice expires the open checkout and opens a new one", async () => {
@@ -426,27 +561,22 @@ test("an expired or nearly expired hold is settled and bought fresh", async () =
 test("a Session that loses the stamp is expired and never redirected to", async () => {
   const actor = await person();
   const { requestId, slots } = await accepted(actor);
-  const gateway = stripeGateway();
-  const create = gateway.createCheckout;
-  let created: string | null = null;
-  gateway.createCheckout = async (params) => {
+  const created: string[] = [];
+  const create = stripeGateway().createCheckout;
+  await patched("createCheckout", async (params) => {
     const session = await create(params);
-    created = session.id;
-    await db.update(engagement).set({ stripeCheckoutSessionId: `cs_${run}_raced` }).where(eq(engagement.id, params.engagementId));
+    created.push(session.id);
+    await db.update(engagement).set({ stripeCheckoutSessionId: `cs_${run}_raced_${created.length}` }).where(eq(engagement.id, params.engagementId));
     return session;
-  };
-  try {
+  }, async () => {
     await assert.rejects(
       checkoutRedirect(home.institutionId, () => purchasePackage({ actor, requestId, anchorExamId: null, slotStartsAt: slots[0] })),
       PurchaseError,
     );
-  } finally {
-    gateway.createCheckout = create;
-  }
-  assert.equal((await gateway.retrieveCheckout(created!)).status, "expired");
-  const row = await pending(actor);
-  await db.update(engagement).set({ stripeCheckoutSessionId: null }).where(eq(engagement.id, row.id));
-  await releaseCheckout({ engagementId: row.id, institutionId: home.institutionId, checkoutSessionId: null });
+  });
+  assert.ok(created.length > 0);
+  for (const id of created) assert.equal((await stripeGateway().retrieveCheckout(id)).status, "expired");
+  assert.equal(await pending(actor), undefined);
 });
 
 test("cancel and reads only touch the viewer's own checkouts", async () => {

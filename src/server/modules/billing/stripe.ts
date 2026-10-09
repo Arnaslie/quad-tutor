@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,8 +8,28 @@ import Stripe from "stripe";
 const API_VERSION = "2026-09-30.endive";
 const MIN_EXPIRY_SECONDS = 30 * 60;
 const MAX_EXPIRY_SECONDS = 24 * 60 * 60;
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
-export class GatewayError extends Error {}
+type ErrorFacts = { status?: number; code?: string; param?: string; idempotency?: boolean };
+
+export class GatewayError extends Error {
+  readonly status?: number;
+  readonly code?: string;
+  readonly param?: string;
+  readonly idempotency: boolean;
+
+  constructor(message: string, facts: ErrorFacts = {}, options?: ErrorOptions) {
+    super(message, options);
+    this.status = facts.status;
+    this.code = facts.code;
+    this.param = facts.param;
+    this.idempotency = facts.idempotency ?? false;
+  }
+
+  get missing(): boolean {
+    return this.code === "resource_missing";
+  }
+}
 
 export type NewCheckout = {
   engagementId: string;
@@ -40,13 +60,21 @@ export type ChargeFee = { feeMinor: number; balanceTransactionId: string } | nul
 
 export type Refund = { id: string; status: string | null };
 
-export type WebhookEvent = { id: string; type: string; livemode: boolean; objectId: string | null };
+export type WebhookEvent = {
+  id: string;
+  type: string;
+  livemode: boolean;
+  account: string | null;
+  objectId: string | null;
+};
 
 export type Gateway = {
   livemode: boolean;
   createCheckout(params: NewCheckout): Promise<CheckoutSession>;
   retrieveCheckout(id: string): Promise<CheckoutSession>;
   expireCheckout(id: string): Promise<CheckoutSession>;
+  /** A paid Checkout Session for this engagement, found through its PaymentIntents' metadata. */
+  findPaidCheckout(engagementId: string): Promise<CheckoutSession | null>;
   chargeFee(paymentIntentId: string): Promise<ChargeFee>;
   listRefunds(paymentIntentId: string): Promise<Refund[]>;
   refund(params: { paymentIntentId: string; engagementId: string; institutionId: string }): Promise<Refund>;
@@ -72,7 +100,19 @@ async function call<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (error) {
-    throw new GatewayError(error instanceof Error ? error.message : String(error), { cause: error });
+    if (!(error instanceof Stripe.errors.StripeError)) {
+      throw new GatewayError(error instanceof Error ? error.message : String(error), {}, { cause: error });
+    }
+    throw new GatewayError(
+      error.message,
+      {
+        status: error.statusCode,
+        code: error.code,
+        param: error.param,
+        idempotency: error instanceof Stripe.errors.StripeIdempotencyError && error.statusCode === 400,
+      },
+      { cause: error },
+    );
   }
 }
 
@@ -117,6 +157,19 @@ function realGateway(): Gateway {
       }),
     retrieveCheckout: (id) => call(async () => sessionView(await stripe.checkout.sessions.retrieve(id))),
     expireCheckout: (id) => call(async () => sessionView(await stripe.checkout.sessions.expire(id))),
+    findPaidCheckout: (engagementId) =>
+      call(async () => {
+        const intents = await stripe.paymentIntents.search({
+          query: `metadata['engagement_id']:'${engagementId}' AND status:'succeeded'`,
+          limit: 10,
+        });
+        for (const intent of intents.data) {
+          const sessions = await stripe.checkout.sessions.list({ payment_intent: intent.id, limit: 1 });
+          const session = sessions.data.at(0);
+          if (session) return sessionView(session);
+        }
+        return null;
+      }),
     chargeFee: (paymentIntentId) =>
       call(async () => {
         const intent = await stripe.paymentIntents.retrieve(paymentIntentId, {
@@ -166,12 +219,29 @@ async function fakeRead<T>(name: string): Promise<T | null> {
 
 async function fakeWrite(name: string, value: unknown): Promise<void> {
   await mkdir(fakeDir(), { recursive: true });
-  await writeFile(fakeFile(name), JSON.stringify(value));
+  const temp = `${fakeFile(name)}.${randomUUID()}.tmp`;
+  await writeFile(temp, JSON.stringify(value));
+  await rename(temp, fakeFile(name));
 }
+
+const fakeLocks = new Map<string, Promise<unknown>>();
+
+function locked<T>(name: string, work: () => Promise<T>): Promise<T> {
+  const previous = fakeLocks.get(name) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(work);
+  fakeLocks.set(name, next);
+  void next.finally(() => {
+    if (fakeLocks.get(name) === next) fakeLocks.delete(name);
+  }).catch(() => undefined);
+  return next;
+}
+
+const missing = (object: string, id: string) =>
+  new GatewayError(`No such ${object}: '${id}'`, { status: 404, code: "resource_missing" });
 
 async function fakeRecord(id: string): Promise<FakeRecord> {
   const record = await fakeRead<FakeRecord>(id);
-  if (!record) throw new GatewayError(`No such checkout.session: '${id}'`);
+  if (!record) throw missing("checkout.session", id);
   if (record.session.status === "open" && record.expiresAt * 1000 <= Date.now()) {
     record.session = { ...record.session, status: "expired", url: null };
     await fakeWrite(id, record);
@@ -189,58 +259,80 @@ function assertNotProduction(): void {
 
 const fakeGateway: Gateway = {
   livemode: false,
-  async createCheckout(params) {
+  createCheckout(params) {
     const key = `idem-checkout:${params.engagementId}`;
-    const replay = await fakeRead<{ sessionId: string; params: string }>(key);
-    const sent = JSON.stringify(params);
-    if (replay) {
-      if (replay.params !== sent) {
-        throw new GatewayError("Keys for idempotent requests can only be used with the same parameters.");
+    return locked(key, async () => {
+      const replay = await fakeRead<{ sessionId: string; params: string; at: number }>(key);
+      const sent = JSON.stringify(params);
+      if (replay && Date.now() - replay.at < IDEMPOTENCY_TTL_MS) {
+        if (replay.params !== sent) {
+          throw new GatewayError(
+            "Keys for idempotent requests can only be used with the same parameters they were first used with.",
+            { status: 400, idempotency: true },
+          );
+        }
+        return publicView(await fakeRecord(replay.sessionId));
       }
-      return publicView(await fakeRecord(replay.sessionId));
-    }
-    const expiresAt = Math.floor(params.expiresAt.getTime() / 1000);
-    const now = Math.floor(Date.now() / 1000);
-    if (expiresAt < now + MIN_EXPIRY_SECONDS || expiresAt > now + MAX_EXPIRY_SECONDS) {
-      throw new GatewayError("expires_at must be between 30 minutes and 24 hours from now.");
-    }
-    const id = `cs_fake_${randomUUID().replaceAll("-", "")}`;
-    const record: FakeRecord = {
-      session: {
-        id,
-        url: `${new URL(params.successUrl).origin}/api/dev/checkout/${id}`,
-        status: "open",
-        paymentStatus: "unpaid",
-        paymentIntentId: null,
-        amountTotal: params.amountMinor,
-        currency: params.currency,
-        engagementId: params.engagementId,
-        institutionId: params.institutionId,
-        successUrl: params.successUrl,
-      },
-      expiresAt,
-      params,
-      refunds: [],
-    };
-    await fakeWrite(id, record);
-    await fakeWrite(key, { sessionId: id, params: sent });
-    return publicView(record);
+      const expiresAt = Math.floor(params.expiresAt.getTime() / 1000);
+      const now = Math.floor(Date.now() / 1000);
+      if (expiresAt < now + MIN_EXPIRY_SECONDS || expiresAt > now + MAX_EXPIRY_SECONDS) {
+        throw new GatewayError("expires_at must be between 30 minutes and 24 hours from now.", {
+          status: 400,
+          code: "parameter_invalid_integer",
+          param: "expires_at",
+        });
+      }
+      const id = `cs_fake_${randomUUID().replaceAll("-", "")}`;
+      const record: FakeRecord = {
+        session: {
+          id,
+          url: `${new URL(params.successUrl).origin}/api/dev/checkout/${id}`,
+          status: "open",
+          paymentStatus: "unpaid",
+          paymentIntentId: null,
+          amountTotal: params.amountMinor,
+          currency: params.currency,
+          engagementId: params.engagementId,
+          institutionId: params.institutionId,
+          successUrl: params.successUrl,
+        },
+        expiresAt,
+        params,
+        refunds: [],
+      };
+      await fakeWrite(id, record);
+      await fakeWrite(key, { sessionId: id, params: sent, at: Date.now() });
+      return publicView(record);
+    });
   },
   async retrieveCheckout(id) {
     return publicView(await fakeRecord(id));
   },
-  async expireCheckout(id) {
-    const record = await fakeRecord(id);
-    if (record.session.status !== "open") {
-      throw new GatewayError(`Only Checkout Sessions with a status of open can be expired: '${id}' is ${record.session.status}.`);
+  expireCheckout(id) {
+    return locked(id, async () => {
+      const record = await fakeRecord(id);
+      if (record.session.status !== "open") {
+        throw new GatewayError(
+          `Only Checkout Sessions with a status in ["open"] can be expired: '${id}' is ${record.session.status}.`,
+          { status: 400, code: "checkout_session_not_open" },
+        );
+      }
+      record.session = { ...record.session, status: "expired", url: null };
+      await fakeWrite(id, record);
+      return publicView(record);
+    });
+  },
+  async findPaidCheckout(engagementId) {
+    const paid = await fakeRead<string[]>(`paid-${engagementId}`);
+    for (const sessionId of paid ?? []) {
+      const record = await fakeRead<FakeRecord>(sessionId);
+      if (record?.session.status === "complete") return publicView(record);
     }
-    record.session = { ...record.session, status: "expired", url: null };
-    await fakeWrite(id, record);
-    return publicView(record);
+    return null;
   },
   async chargeFee(paymentIntentId) {
     const payment = await fakeRead<{ sessionId: string; amountMinor: number }>(paymentIntentId);
-    if (!payment) throw new GatewayError(`No such payment_intent: '${paymentIntentId}'`);
+    if (!payment) throw missing("payment_intent", paymentIntentId);
     return {
       feeMinor: Math.round((payment.amountMinor * 29) / 1000) + 30,
       balanceTransactionId: `txn_${paymentIntentId}`,
@@ -248,43 +340,50 @@ const fakeGateway: Gateway = {
   },
   async listRefunds(paymentIntentId) {
     const payment = await fakeRead<{ sessionId: string }>(paymentIntentId);
-    if (!payment) throw new GatewayError(`No such payment_intent: '${paymentIntentId}'`);
+    if (!payment) throw missing("payment_intent", paymentIntentId);
     return (await fakeRecord(payment.sessionId)).refunds;
   },
   async refund({ paymentIntentId }) {
     const payment = await fakeRead<{ sessionId: string }>(paymentIntentId);
-    if (!payment) throw new GatewayError(`No such payment_intent: '${paymentIntentId}'`);
-    const record = await fakeRecord(payment.sessionId);
-    const existing = record.refunds.at(0);
-    if (existing) return existing;
-    const refund = { id: `re_fake_${randomUUID().replaceAll("-", "")}`, status: "succeeded" };
-    record.refunds.push(refund);
-    await fakeWrite(payment.sessionId, record);
-    return refund;
+    if (!payment) throw missing("payment_intent", paymentIntentId);
+    return locked(payment.sessionId, async () => {
+      const record = await fakeRecord(payment.sessionId);
+      const existing = record.refunds.at(0);
+      if (existing) return existing;
+      const refund = { id: `re_fake_${randomUUID().replaceAll("-", "")}`, status: "succeeded" };
+      record.refunds.push(refund);
+      await fakeWrite(payment.sessionId, record);
+      return refund;
+    });
   },
 };
 
 export const fakeStripe = {
   /** Plays the student paying on the hosted page; `amountTotal`/`currency` let tests fake a mismatch. */
-  async pay(id: string, paid: { amountTotal?: number; currency?: string } = {}): Promise<CheckoutSession> {
+  pay(id: string, paid: { amountTotal?: number; currency?: string } = {}): Promise<CheckoutSession> {
     assertNotProduction();
-    const record = await fakeRecord(id);
-    if (record.session.status !== "open") {
-      throw new GatewayError(`This Checkout Session is ${record.session.status}.`);
-    }
-    const paymentIntentId = `pi_fake_${randomUUID().replaceAll("-", "")}`;
-    record.session = {
-      ...record.session,
-      status: "complete",
-      paymentStatus: "paid",
-      paymentIntentId,
-      url: null,
-      amountTotal: paid.amountTotal ?? record.session.amountTotal,
-      currency: paid.currency ?? record.session.currency,
-    };
-    await fakeWrite(id, record);
-    await fakeWrite(paymentIntentId, { sessionId: id, amountMinor: record.session.amountTotal });
-    return publicView(record);
+    return locked(id, async () => {
+      const record = await fakeRecord(id);
+      if (record.session.status !== "open") {
+        throw new GatewayError(`This Checkout Session is ${record.session.status}.`, { status: 400 });
+      }
+      const paymentIntentId = `pi_fake_${randomUUID().replaceAll("-", "")}`;
+      record.session = {
+        ...record.session,
+        status: "complete",
+        paymentStatus: "paid",
+        paymentIntentId,
+        url: null,
+        amountTotal: paid.amountTotal ?? record.session.amountTotal,
+        currency: paid.currency ?? record.session.currency,
+      };
+      await fakeWrite(id, record);
+      await fakeWrite(paymentIntentId, { sessionId: id, amountMinor: record.session.amountTotal });
+      const engagementId = record.params.engagementId;
+      const paidBefore = (await fakeRead<string[]>(`paid-${engagementId}`)) ?? [];
+      await fakeWrite(`paid-${engagementId}`, [...paidBefore, id]);
+      return publicView(record);
+    });
   },
   async refunds(id: string): Promise<Refund[]> {
     return (await fakeRecord(id)).refunds;
@@ -342,6 +441,7 @@ export function verifyWebhook(payload: string, signature: string | null): Webhoo
         id: event.id,
         type: event.type,
         livemode: event.livemode,
+        account: event.account ?? null,
         objectId: typeof object.id === "string" ? object.id : null,
       };
     } catch (error) {
