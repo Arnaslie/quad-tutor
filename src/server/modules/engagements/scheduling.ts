@@ -2,10 +2,12 @@ import { and, eq, ne, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
+  courseOffering,
   engagement,
   reliabilityEvent,
   sessionBooking,
   studentProfile,
+  term,
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
@@ -58,11 +60,14 @@ async function loadBookablePackage(
       sessionsPurchased: engagement.sessionsPurchased,
       tutorProfileId: tutorProfile.id,
       defaultLocation: tutorProfile.defaultLocation,
+      termEnded: sql<boolean>`${term.endsOn} < current_date`,
     })
     .from(engagement)
     .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
     .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
     .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
+    .innerJoin(term, eq(term.id, courseOffering.termId))
     .where(
       and(
         eq(engagement.id, engagementId),
@@ -79,6 +84,9 @@ async function loadBookablePackage(
     throw new SessionError("That package is not yours.");
   }
   if (target.status !== "active") throw new SessionError("That package is closed.");
+  if (target.termEnded) {
+    throw new SessionError("The term has ended, so this package can no longer be booked.");
+  }
 
   return {
     id: target.id,

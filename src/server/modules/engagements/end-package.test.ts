@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before, test } from "node:test";
+import { after, before, mock, test } from "node:test";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { PgDatabase } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
 import { isLocalHost } from "@/server/db/local-host.mjs";
@@ -362,7 +363,7 @@ test("the sweep holds a package with an unanswered past session and refunds it o
   const past = await session(id, hours(-3), { studentConfirmedAt: new Date() });
   const future = await session(id, hours(5));
 
-  assert.deepEqual((await runTermEndRefunds(home.institutionId)).held, 1);
+  assert.equal((await runTermEndRefunds(home.institutionId)).held, 1);
   assert.equal(await statusOf(id), "active");
   assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
 
@@ -405,4 +406,38 @@ test("the sweep racing a confirmation of the last session: no deadlock, the sess
     assert.equal(rows.filter((row) => row.type === "refund").length, 0);
     assert.equal(rows.filter((row) => row.type === "session_earned").length, 1);
   }
+});
+
+test("one package failing does not stop the sweep: the rest refund and the failure is counted", async () => {
+  const ids = [];
+  for (let i = 0; i < 2; i += 1) ids.push(await pkg(await person(home.institutionId), { offeringId: endedOfferingId }));
+
+  const transaction = PgDatabase.prototype.transaction;
+  let calls = 0;
+  const failing = mock.method(PgDatabase.prototype, "transaction", function (this: PgDatabase<never>, ...args: Parameters<typeof transaction>) {
+    return (calls += 1) === 1 ? Promise.reject(new Error("boom")) : transaction.apply(this, args);
+  });
+  const silenced = mock.method(console, "error", () => {});
+  try {
+    const result = await runTermEndRefunds(home.institutionId);
+    assert.equal(result.failed, 1);
+    assert.equal(result.held, 0);
+    assert.equal(result.refunds.length, 1);
+  } finally {
+    failing.mock.restore();
+    silenced.mock.restore();
+  }
+  assert.deepEqual((await Promise.all(ids.map(statusOf))).sort(), ["active", "refunded"]);
+
+  assert.equal((await runTermEndRefunds(home.institutionId)).refunds.length, 1, "the failed one is retried next run");
+  assert.deepEqual(await Promise.all(ids.map(statusOf)), ["refunded", "refunded"]);
+});
+
+test("a package whose term has ended takes no new bookings", async () => {
+  const student = await person(home.institutionId);
+  const id = await pkg(student, { offeringId: endedOfferingId });
+  await assert.rejects(slotsForEngagement({ actor: student, engagementId: id }), /term has ended/);
+  await assert.rejects(bookSession({ actor: student, engagementId: id, slotStartsAt: hours(24) }), /term has ended/);
+  assert.equal(await scheduledLeft(id), 0);
+  await sweep(id);
 });

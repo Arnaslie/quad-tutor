@@ -6,7 +6,6 @@ import {
   courseOffering,
   engagement,
   sessionBooking,
-  studentProfile,
   term,
 } from "@/server/db/schema";
 import { record } from "@/server/modules/billing/ledger";
@@ -28,6 +27,7 @@ export type TermEndRefund = {
 const deliveredCount = sql<number>`(
   select count(*)::int from ${sessionBooking}
   where ${sessionBooking.engagementId} = ${engagement.id}
+    and ${sessionBooking.institutionId} = ${engagement.institutionId}
     and ${sessionBooking.status} = 'completed'
 )`;
 
@@ -44,13 +44,12 @@ export async function engagementsDueForTermEndRefund(
       sessionsDelivered: deliveredCount,
     })
     .from(engagement)
-    .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
     .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
     .innerJoin(term, eq(term.id, courseOffering.termId))
     .where(
       and(
         eq(engagement.status, "active"),
-        eq(studentProfile.institutionId, institutionId),
+        eq(engagement.institutionId, institutionId),
         lt(term.endsOn, sql`current_date`),
       ),
     );
@@ -197,13 +196,16 @@ export async function endPackage(params: {
   );
 }
 
+export type TermEndSweep = { refunds: TermEndRefund[]; held: number; failed: number };
+
 /** The whole sweep for one campus. Called by the cron route. */
 export async function runTermEndRefunds(
   institutionId: string,
-): Promise<{ refunds: TermEndRefund[]; held: number }> {
+): Promise<TermEndSweep> {
   const due = await engagementsDueForTermEndRefund(institutionId);
   const refunds: TermEndRefund[] = [];
   let held = 0;
+  let failed = 0;
 
   for (const candidate of due) {
     try {
@@ -212,10 +214,15 @@ export async function runTermEndRefunds(
       );
       if (refunded) refunds.push(refunded);
     } catch (error) {
-      if (!(error instanceof EndPackageError)) throw error;
-      held += 1;
+      if (error instanceof EndPackageError) {
+        held += 1;
+        console.warn(`[term-end] ${candidate.engagementId} held (${error.block.reason})`);
+      } else {
+        failed += 1;
+        console.error(`[term-end] ${candidate.engagementId} failed`, error);
+      }
     }
   }
 
-  return { refunds, held };
+  return { refunds, held, failed };
 }
