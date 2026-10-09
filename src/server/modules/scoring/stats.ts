@@ -1,7 +1,8 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { engagement, sessionRating, tutorCourse } from "@/server/db/schema";
+import { bought } from "@/server/modules/engagements/access";
 import { ratingCounted } from "@/server/modules/ratings/window";
 
 import {
@@ -49,7 +50,7 @@ export async function refreshScores(institutionId: string): Promise<number> {
         .where(
           and(
             eq(engagement.institutionId, institutionId),
-            inArray(engagement.status, ["active", "completed", "refunded"]),
+            bought,
           ),
         ),
     );

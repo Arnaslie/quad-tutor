@@ -28,6 +28,7 @@ import { blockedBetween } from "@/server/modules/messaging/blocks";
 
 import {
   bought,
+  liveEngagement,
   onCampus,
   sessionContext,
   loadParticipation,
@@ -281,7 +282,7 @@ async function bookAgainRows(
     .select({
       tutorCourseId: engagement.tutorCourseId,
       offeringId: engagement.courseOfferingId,
-      sessionsRemaining: sql<number>`coalesce(sum(${remainingCount}) filter (where ${engagement.status} in ('active', 'pending_payment')), 0)::int`,
+      sessionsRemaining: sql<number>`coalesce(sum(${remainingCount}) filter (where ${liveEngagement}), 0)::int`,
       tutorProfileId: tutorProfile.id,
       tutorName: user.name,
       tutorLocation: tutorProfile.defaultLocation,
@@ -307,7 +308,7 @@ async function bookAgainRows(
         eq(engagement.institutionId, actor.institutionId),
         eq(tutorProfile.institutionId, actor.institutionId),
         tutorCourseId ? eq(engagement.tutorCourseId, tutorCourseId) : undefined,
-        inArray(engagement.status, ["pending_payment", "active", "completed"]),
+        or(liveEngagement, eq(engagement.status, "completed")),
         gte(term.endsOn, sql`current_date`),
         eq(tutorCourse.status, "active"),
         ne(tutorProfile.userId, actor.userId),

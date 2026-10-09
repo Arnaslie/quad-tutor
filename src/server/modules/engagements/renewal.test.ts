@@ -11,6 +11,7 @@ import {
   courseCodeAlias,
   courseOffering,
   engagement,
+  exam,
   institution,
   ledgerEntry,
   matchRequest,
@@ -36,6 +37,7 @@ import {
   requestsForStudent,
 } from "@/server/modules/matching/requests";
 import { requestWaiting } from "@/server/modules/notifications/messages";
+import { setDefaultLocation } from "@/server/modules/tutoring/location";
 
 import { assertMoneyInvariants } from "@/server/modules/billing/invariants";
 
@@ -191,6 +193,7 @@ after(async () => {
   await db.delete(tutorProfile).where(inArray(tutorProfile.userId, made.users));
   await db.delete(studentProfile).where(inArray(studentProfile.userId, made.users));
   await db.delete(user).where(inArray(user.id, made.users));
+  await db.delete(exam).where(inArray(exam.institutionId, institutions));
   await db.delete(courseOffering).where(inArray(courseOffering.institutionId, institutions));
   await db.delete(courseCodeAlias).where(inArray(courseCodeAlias.institutionId, institutions));
   await db.delete(course).where(inArray(course.institutionId, institutions));
@@ -473,6 +476,60 @@ test("a checkout past its expiry is returned as expired, not reopened", async ()
   assert.deepEqual(await purchasePackage(params), { outcome: "expired", engagementId, stripeCheckoutSessionId: `cs_${run}_expired` });
   assert.deepEqual(await releaseCheckout({ engagementId, institutionId: home.institutionId, checkoutSessionId: `cs_${run}_expired` }), { outcome: "released" });
   assert.equal(opened(await purchasePackage(params)).amountMinor, 14_000, "released, the request opens a fresh checkout");
+});
+
+test("an open package checkout is resumed only for the same slot, package and exam", async () => {
+  const student = await person(home.institutionId);
+  const [legacy] = await db
+    .insert(matchRequest)
+    .values({ institutionId: home.institutionId, studentProfileId: student.studentProfileId, tutorCourseId, courseOfferingId: home.offeringId, status: "accepted", expiresAt: new Date(Date.now() + 3_600_000) })
+    .returning({ id: matchRequest.id });
+  const [slot, next] = await slotsForRequest({ actor: student, requestId: legacy.id });
+  const params = { actor: student, requestId: legacy.id, kind: "exam_anchored" as const, anchorExamId: null, slotStartsAt: slot };
+  const { engagementId } = await purchasePackage(params);
+  await db.update(engagement).set({ stripeCheckoutSessionId: `cs_${run}_open` }).where(eq(engagement.id, engagementId));
+
+  const other = { outcome: "other_checkout_open", engagementId, stripeCheckoutSessionId: `cs_${run}_open` };
+  assert.deepEqual(await purchasePackage({ ...params, slotStartsAt: next }), other);
+  assert.deepEqual(await purchasePackage({ ...params, kind: "through_final" }), other);
+  const [midterm] = await db
+    .insert(exam)
+    .values({ institutionId: home.institutionId, courseOfferingId: home.offeringId, name: `Midterm ${run}`, occursOn: inDays(20) })
+    .returning({ id: exam.id });
+  assert.deepEqual(await purchasePackage({ ...params, anchorExamId: midterm.id }), other);
+  assert.equal(opened(await purchasePackage(params)).engagementId, engagementId);
+  assert.deepEqual(await state(engagementId), { status: "pending_payment", sessions: ["held"], ledger: [] });
+});
+
+test("a pair holds at most one refill checkout at a time", async () => {
+  const { student } = await finishedPair();
+  const [slot, next] = await slotsForTopUp({ actor: student, tutorCourseId });
+  const { engagementId } = await purchaseTopUp({ actor: student, tutorCourseId, slotStartsAt: slot });
+
+  assert.deepEqual(await purchaseTopUp({ actor: student, tutorCourseId, slotStartsAt: next }), {
+    outcome: "other_checkout_open",
+    engagementId,
+    stripeCheckoutSessionId: null,
+  });
+  assert.equal(await topUps(student), 1);
+  assert.ok((await slotsForTopUp({ actor: student, tutorCourseId })).some((open) => open.getTime() === next.getTime()));
+
+  await releaseCheckout({ engagementId, institutionId: home.institutionId, checkoutSessionId: null });
+  assert.equal(opened(await purchaseTopUp({ actor: student, tutorCourseId, slotStartsAt: next })).amountMinor, 3_500);
+});
+
+test("a tutor's new default location fills a held session too", async () => {
+  const { actor: placeless, claimId } = await tutorWithClaim();
+  const student = await person(home.institutionId);
+  await requestTutors({ actor: student, courseOfferingId: home.offeringId, tutorCourseIds: [claimId], kind: "exam_anchored" });
+  const requestId = await pendingRequest(student, claimId);
+  await acceptRequest({ tutor: placeless, requestId });
+  const [slot] = await slotsForRequest({ actor: student, requestId });
+  const { engagementId } = await purchasePackage({ actor: student, requestId, anchorExamId: null, slotStartsAt: slot });
+
+  assert.deepEqual(await setDefaultLocation({ tutor: placeless, location: "Gorgas 301" }), { filled: 1 });
+  const [held] = await db.select({ location: sessionBooking.location, status: sessionBooking.status }).from(sessionBooking).where(eq(sessionBooking.engagementId, engagementId));
+  assert.deepEqual(held, { location: "Gorgas 301", status: "held" });
 });
 
 test("one PaymentIntent cannot fulfil two checkouts", async () => {

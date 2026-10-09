@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -20,6 +20,7 @@ import {
   packageOption,
   packageSummary,
   topUpOption,
+  type PackageKind,
   type RequestedKind,
 } from "@/server/modules/billing/pricing";
 
@@ -45,7 +46,8 @@ export type Checkout = {
 export type PurchaseResult =
   | { outcome: "checkout"; engagementId: string; checkout: Checkout }
   | { outcome: "expired"; engagementId: string; stripeCheckoutSessionId: string | null }
-  | { outcome: "paid"; engagementId: string };
+  | { outcome: "paid"; engagementId: string }
+  | { outcome: "other_checkout_open"; engagementId: string; stripeCheckoutSessionId: string | null };
 
 export async function checkoutFor(
   exec: Executor,
@@ -105,6 +107,45 @@ export async function checkoutFor(
     stripeCheckoutSessionId: row.stripeCheckoutSessionId,
   };
   return { outcome: "checkout", engagementId, checkout };
+}
+
+function openCheckouts(exec: Executor, where: SQL | undefined) {
+  return exec
+    .select({
+      id: engagement.id,
+      status: engagement.status,
+      kind: engagement.kind,
+      anchorExamId: engagement.anchorExamId,
+      stripeCheckoutSessionId: engagement.stripeCheckoutSessionId,
+      slot: sessionBooking.scheduledAt,
+    })
+    .from(engagement)
+    .leftJoin(
+      sessionBooking,
+      and(eq(sessionBooking.engagementId, engagement.id), eq(sessionBooking.status, "held")),
+    )
+    .where(where)
+    .limit(1);
+}
+
+async function resume(
+  exec: Executor,
+  institutionId: string,
+  open: Awaited<ReturnType<typeof openCheckouts>>[number],
+  wanted: { kind: PackageKind; anchorExamId: string | null; slotStartsAt: Date },
+): Promise<PurchaseResult> {
+  const same =
+    open.kind === wanted.kind &&
+    open.anchorExamId === wanted.anchorExamId &&
+    open.slot?.getTime() === wanted.slotStartsAt.getTime();
+  if (!same) {
+    return {
+      outcome: "other_checkout_open",
+      engagementId: open.id,
+      stripeCheckoutSessionId: open.stripeCheckoutSessionId,
+    };
+  }
+  return checkoutFor(exec, { engagementId: open.id, institutionId });
 }
 
 async function hold(
@@ -247,14 +288,12 @@ export async function purchasePackage(params: {
     }
     if (request.termEnded) throw new PurchaseError(TERM_ENDED);
 
-    const existing = await tx
-      .select({ id: engagement.id, status: engagement.status })
-      .from(engagement)
-      .where(and(eq(engagement.matchRequestId, request.id), ne(engagement.status, "cancelled")))
-      .limit(1);
-
+    const existing = await openCheckouts(
+      tx,
+      and(eq(engagement.matchRequestId, request.id), ne(engagement.status, "cancelled")),
+    );
     const already = existing.at(0);
-    if (already) {
+    if (already && already.status !== "pending_payment") {
       return checkoutFor(tx, { engagementId: already.id, institutionId: params.actor.institutionId });
     }
 
@@ -262,6 +301,13 @@ export async function purchasePackage(params: {
     if (!kind || kind === "top_up") throw new PurchaseError("Pick a package.");
     if (params.kind && params.kind !== kind) {
       throw new PurchaseError(`The tutor agreed to ${packageSummary(kind).toLowerCase()}.`);
+    }
+    if (already) {
+      return resume(tx, params.actor.institutionId, already, {
+        kind,
+        anchorExamId: params.anchorExamId,
+        slotStartsAt: params.slotStartsAt,
+      });
     }
     const option = packageOption(kind);
 
@@ -337,25 +383,23 @@ export async function purchaseTopUp(params: {
 
     const gate = await refillGate(tx, params);
 
-    const resumable = await tx
-      .select({ id: engagement.id })
-      .from(engagement)
-      .innerJoin(sessionBooking, eq(sessionBooking.engagementId, engagement.id))
-      .where(
-        and(
-          eq(engagement.studentProfileId, params.actor.studentProfileId),
-          eq(engagement.institutionId, params.actor.institutionId),
-          eq(engagement.tutorCourseId, gate.tutorCourseId),
-          eq(engagement.kind, "top_up"),
-          eq(engagement.status, "pending_payment"),
-          eq(sessionBooking.status, "held"),
-          eq(sessionBooking.scheduledAt, params.slotStartsAt),
-        ),
-      )
-      .limit(1);
-    const resumed = resumable.at(0);
+    const pending = await openCheckouts(
+      tx,
+      and(
+        eq(engagement.studentProfileId, params.actor.studentProfileId),
+        eq(engagement.institutionId, params.actor.institutionId),
+        eq(engagement.tutorCourseId, gate.tutorCourseId),
+        eq(engagement.kind, "top_up"),
+        eq(engagement.status, "pending_payment"),
+      ),
+    );
+    const resumed = pending.at(0);
     if (resumed) {
-      return checkoutFor(tx, { engagementId: resumed.id, institutionId: params.actor.institutionId });
+      return resume(tx, params.actor.institutionId, resumed, {
+        kind: "top_up",
+        anchorExamId: null,
+        slotStartsAt: params.slotStartsAt,
+      });
     }
 
     const open = await slotOpen(tx, {

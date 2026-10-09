@@ -3,9 +3,10 @@ import { purchasePackage, purchaseTopUp, type PurchaseResult } from "./purchase"
 
 /** Tests and db:demo only: settles a checkout with made-up payment data, as Stripe's word would. */
 export async function pay(result: PurchaseResult): Promise<{ engagementId: string }> {
+  if (process.env.VERCEL_ENV === "production") throw new Error("Fake payments are refused in production.");
   const { engagementId } = result;
   if (result.outcome === "paid") return { engagementId };
-  if (result.outcome === "expired") throw new Error(`Checkout ${engagementId} expired`);
+  if (result.outcome !== "checkout") throw new Error(`Checkout ${engagementId}: ${result.outcome}`);
   const { checkout } = result;
 
   const fulfilled = await fulfilCheckout({

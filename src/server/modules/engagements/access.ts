@@ -1,4 +1,4 @@
-import { and, eq, isNull, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -25,6 +25,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type Executor = typeof db | Tx;
 
 export const bought = notInArray(engagement.status, ["pending_payment", "cancelled"]);
+
+export const liveEngagement = inArray(engagement.status, ["active", "pending_payment"]);
 
 export const tutorUser = alias(user, "tutor_user");
 
