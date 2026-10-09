@@ -10,8 +10,9 @@ import {
   tutorCourse,
 } from "@/server/db/schema";
 
-import { TERM_FEE_CAP_MINOR } from "./pricing";
+import { TAKE_RATE_BP, TERM_FEE_CAP_MINOR } from "./pricing";
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type LedgerType = (typeof ledgerEntryType.enumValues)[number];
 type EngagementStatus = (typeof engagementStatus.enumValues)[number];
 
@@ -63,8 +64,8 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
     }
     if (refunded > paid) flag("refund <= purchase", subject, `refunded ${refunded} of ${paid}`);
     if (deferred < 0) flag("deferred >= 0", subject, `deferred ${deferred}`);
-    if (rows(e.totals, REFUND) > 0 && CLOSED.includes(e.status) && deferred !== 0) {
-      flag("deferred = 0 once refunded", subject, `${e.status}, deferred ${deferred}`);
+    if (CLOSED.includes(e.status) && deferred !== 0) {
+      flag("deferred = 0 once closed", subject, `${e.status}, deferred ${deferred}`);
     }
 
     const transferred = minor(e.totals, TRANSFER) - minor(e.totals, REVERSAL);
@@ -73,9 +74,14 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
   }
 
   for (const s of facts.sessions) {
+    const subject = `session ${s.id}`;
     const earned = minor(s.totals, EARNED);
-    const split = minor(s.totals, ACCRUED) + minor(s.totals, FEE);
-    if (earned !== split) flag("earned = accrued + fee", `session ${s.id}`, `earned ${earned}, split ${split}`);
+    const fee = minor(s.totals, FEE);
+    const split = minor(s.totals, ACCRUED) + fee;
+    const maxFee = Math.floor((earned * TAKE_RATE_BP) / 10_000);
+    if (rows(s.totals, EARNED) > 1) flag("one recognition per session", subject, `${rows(s.totals, EARNED)} earned rows`);
+    if (earned !== split) flag("earned = accrued + fee", subject, `earned ${earned}, split ${split}`);
+    if (fee > maxFee) flag("fee <= take rate", subject, `fee ${fee}, max ${maxFee}`);
   }
 
   for (const t of facts.tutorTerms) {
@@ -101,26 +107,33 @@ function collect(
 }
 
 export async function moneyFacts(institutionId: string): Promise<MoneyFacts> {
+  return db.transaction((tx) => readFacts(tx, institutionId), {
+    isolationLevel: "repeatable read",
+    accessMode: "read only",
+  });
+}
+
+async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
   const type = sql<string>`${ledgerEntry.type}::text`;
   const total = sql<number>`coalesce(sum(${ledgerEntry.amountMinor}), 0)::int`;
   const count = sql<number>`count(${ledgerEntry.id})::int`;
 
   const [engagements, byEngagement, bySession, tutorTerms] = await Promise.all([
-    db
+    tx
       .select({ id: engagement.id, status: engagement.status, pricePaidMinor: engagement.pricePaidMinor })
       .from(engagement)
       .where(eq(engagement.institutionId, institutionId)),
-    db
+    tx
       .select({ key: ledgerEntry.engagementId, type, minor: total, rows: count })
       .from(ledgerEntry)
       .where(eq(ledgerEntry.institutionId, institutionId))
       .groupBy(ledgerEntry.engagementId, type),
-    db
+    tx
       .select({ key: ledgerEntry.sessionId, type, minor: total, rows: count })
       .from(ledgerEntry)
       .where(and(eq(ledgerEntry.institutionId, institutionId), isNotNull(ledgerEntry.sessionId)))
       .groupBy(ledgerEntry.sessionId, type),
-    db
+    tx
       .select({ tutorProfileId: tutorCourse.tutorProfileId, termId: courseOffering.termId, feeMinor: total })
       .from(ledgerEntry)
       .innerJoin(engagement, eq(engagement.id, ledgerEntry.engagementId))

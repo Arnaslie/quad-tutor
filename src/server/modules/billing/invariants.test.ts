@@ -38,12 +38,26 @@ test("a missing, doubled or mispriced purchase is flagged", () => {
 
 test("refunding more than was paid breaks both the refund and deferred checks", () => {
   const e = { id: "e", status: "refunded" as const, pricePaidMinor: 3_500, totals: { package_purchase: t(3_500), refund: t(4_000) } };
-  assert.deepEqual(invariants({ ...healthy, engagements: [e] }), ["refund <= purchase", "deferred >= 0", "deferred = 0 once refunded"]);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e] }), ["refund <= purchase", "deferred >= 0", "deferred = 0 once closed"]);
 });
 
-test("a closed, refunded package with money left deferred is flagged", () => {
-  const e = { id: "e", status: "completed" as const, pricePaidMinor: 14_000, totals: { package_purchase: t(14_000), refund: t(7_000) } };
-  assert.deepEqual(invariants({ ...healthy, engagements: [e] }), ["deferred = 0 once refunded"]);
+test("a closed package with money left deferred is flagged, refunded or not", () => {
+  for (const totals of [{ package_purchase: t(14_000), refund: t(7_000) }, { package_purchase: t(14_000) }] as Totals[]) {
+    const e = { id: "e", status: "completed" as const, pricePaidMinor: 14_000, totals };
+    assert.deepEqual(invariants({ ...healthy, engagements: [e] }), ["deferred = 0 once closed"]);
+  }
+});
+
+test("a session recognised twice is flagged", () => {
+  const sessions = [{ id: "s", totals: { session_earned: t(7_000, 2), tutor_payout: t(6_300, 2), platform_fee: t(700, 2) } }];
+  assert.deepEqual(invariants({ ...healthy, sessions }), ["one recognition per session"]);
+});
+
+test("a fee above the take rate is flagged, and the floor is allowed", () => {
+  const over = [{ id: "s", totals: { session_earned: t(3_500), tutor_payout: t(3_100), platform_fee: t(400) } }];
+  assert.deepEqual(invariants({ ...healthy, sessions: over }), ["fee <= take rate"]);
+  const floored = [{ id: "s", totals: { session_earned: t(3_155), tutor_payout: t(2_840), platform_fee: t(315) } }];
+  assert.deepEqual(invariants({ ...healthy, sessions: floored }), []);
 });
 
 test("a session whose split does not add up to what was earned is flagged", () => {
