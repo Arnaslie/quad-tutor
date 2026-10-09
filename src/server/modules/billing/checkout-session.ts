@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { and, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, like, lt, notExists, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { engagement, ledgerEntry, moneyDiscrepancy } from "@/server/db/schema";
@@ -160,11 +160,25 @@ async function purchaseRecorded(ids: Ids, paymentIntentId: string): Promise<bool
 async function recordDiscrepancy(
   ids: Ids,
   values: Omit<typeof moneyDiscrepancy.$inferInsert, "institutionId" | "engagementId">,
-): Promise<void> {
-  await db
+): Promise<string | null> {
+  const [created] = await db
     .insert(moneyDiscrepancy)
     .values({ ...values, institutionId: ids.institutionId, engagementId: ids.engagementId })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ id: moneyDiscrepancy.id });
+  if (created || !values.stripeReference) return created?.id ?? null;
+
+  const [existing] = await db
+    .select({ id: moneyDiscrepancy.id })
+    .from(moneyDiscrepancy)
+    .where(
+      and(
+        eq(moneyDiscrepancy.institutionId, ids.institutionId),
+        eq(moneyDiscrepancy.kind, values.kind),
+        eq(moneyDiscrepancy.stripeReference, values.stripeReference),
+      ),
+    );
+  return existing?.id ?? null;
 }
 
 const live = (refund: { status: string | null }) => refund.status !== "failed" && refund.status !== "canceled";
@@ -287,11 +301,16 @@ async function fulfil(
     }
     return "settled";
   }
-  const refunded = await refundPayment(
-    ids,
-    paymentIntentId,
-    result?.outcome === "discrepancy" ? result.discrepancyId : undefined,
-  );
+  const discrepancyId =
+    result?.outcome === "discrepancy"
+      ? result.discrepancyId
+      : await recordDiscrepancy(ids, {
+          kind: "ledger_vs_stripe_charge",
+          stripeReference: paymentIntentId,
+          stripeAmountMinor: session.amountTotal,
+          currency: session.currency ?? "usd",
+        });
+  const refunded = await refundPayment(ids, paymentIntentId, discrepancyId ?? undefined);
   return refunded ? "refunded" : "refund_failed";
 }
 
@@ -392,7 +411,10 @@ export async function settleCheckout(ids: Ids): Promise<SyncOutcome> {
   return act(session, PATIENT);
 }
 
-/** A mismatch whose refund call failed is retried here; listing refunds first keeps it to one. */
+/**
+ * Money taken with nothing booked is recorded before its refund, so a refund that failed is retried here.
+ * A PaymentIntent that is some engagement's purchase is legitimately booked and never refunded.
+ */
 async function retryDiscrepancyRefunds(
   institutionId: string,
   deadline: number,
@@ -407,11 +429,23 @@ async function retryDiscrepancyRefunds(
     .where(
       and(
         eq(moneyDiscrepancy.institutionId, institutionId),
-        eq(moneyDiscrepancy.kind, "checkout_amount"),
+        inArray(moneyDiscrepancy.kind, ["checkout_amount", "ledger_vs_stripe_charge"]),
         isNull(moneyDiscrepancy.refundReference),
         isNull(moneyDiscrepancy.resolvedAt),
-        isNotNull(moneyDiscrepancy.stripeReference),
+        like(moneyDiscrepancy.stripeReference, "pi\\_%"),
         isNotNull(moneyDiscrepancy.engagementId),
+        notExists(
+          db
+            .select({ id: ledgerEntry.id })
+            .from(ledgerEntry)
+            .where(
+              and(
+                eq(ledgerEntry.institutionId, institutionId),
+                eq(ledgerEntry.type, "package_purchase"),
+                eq(ledgerEntry.stripeReference, moneyDiscrepancy.stripeReference),
+              ),
+            ),
+        ),
       ),
     )
     .limit(SWEEP_LIMIT);
