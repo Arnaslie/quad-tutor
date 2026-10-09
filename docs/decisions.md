@@ -100,8 +100,8 @@ drift:
   split is unknown until each session is delivered. The fee is fixed in `recognise()`
   (`engagements/confirmation.ts`), the one place a session becomes revenue — two
   confirmations, auto-release, or a dispute resolved as attended. It is written as a
-  `platform_fee` row beside `session_earned` and `tutor_payout`, so every delivered
-  session satisfies `session_earned = tutor_payout + platform_fee`, and the meter is
+  `platform_fee` row beside `session_earned` and `tutor_accrued`, so every delivered
+  session satisfies `session_earned = tutor_accrued + platform_fee`, and the meter is
   the sum of `platform_fee` for that tutor and term.
 - **Fixed once written.** A session's fee never changes after recognition. Nothing is
   re-priced retroactively, in either direction.

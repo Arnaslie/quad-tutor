@@ -1,7 +1,13 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { courseOffering, engagement, ledgerEntry, tutorCourse } from "@/server/db/schema";
+import {
+  courseOffering,
+  engagement,
+  ledgerEntry,
+  ledgerEntryType,
+  tutorCourse,
+} from "@/server/db/schema";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -60,7 +66,7 @@ export async function balanceFor(engagementId: string): Promise<EngagementBalanc
     .where(eq(ledgerEntry.engagementId, engagementId))
     .groupBy(ledgerEntry.type);
 
-  const by = (type: string) =>
+  const by = (type: (typeof ledgerEntryType.enumValues)[number]) =>
     totals.find((row) => row.type === type)?.total ?? 0;
 
   const paidMinor = by("package_purchase");
