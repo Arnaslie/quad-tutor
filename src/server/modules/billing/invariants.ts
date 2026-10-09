@@ -18,16 +18,16 @@ type EngagementStatus = (typeof engagementStatus.enumValues)[number];
 
 const PURCHASE = "package_purchase" satisfies LedgerType;
 const EARNED = "session_earned" satisfies LedgerType;
-const ACCRUED = "tutor_payout" satisfies LedgerType;
+const ACCRUED = "tutor_accrued" satisfies LedgerType;
 const FEE = "platform_fee" satisfies LedgerType;
 const REFUND = "refund" satisfies LedgerType;
-const TRANSFER = "tutor_transfer";
-const REVERSAL = "transfer_reversal";
+const TRANSFER = "tutor_transfer" satisfies LedgerType;
+const REVERSAL = "transfer_reversal" satisfies LedgerType;
 
-const UNPAID: readonly EngagementStatus[] = [];
-const CLOSED: readonly EngagementStatus[] = ["completed", "refunded"];
+const UNPAID: readonly EngagementStatus[] = ["pending_payment", "cancelled"];
+const CLOSED: readonly EngagementStatus[] = ["completed", "refunded", "cancelled"];
 
-type Totals = Record<string, { minor: number; rows: number }>;
+type Totals = Partial<Record<LedgerType, { minor: number; rows: number }>>;
 
 export type MoneyFacts = {
   engagements: {
@@ -42,8 +42,8 @@ export type MoneyFacts = {
 
 export type MoneyViolation = { invariant: string; subject: string; detail: string };
 
-const minor = (totals: Totals, type: string) => totals[type]?.minor ?? 0;
-const rows = (totals: Totals, type: string) => totals[type]?.rows ?? 0;
+const minor = (totals: Totals, type: LedgerType) => totals[type]?.minor ?? 0;
+const rows = (totals: Totals, type: LedgerType) => totals[type]?.rows ?? 0;
 
 export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
   const found: MoneyViolation[] = [];
@@ -94,7 +94,7 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
 }
 
 function collect(
-  grouped: { key: string | null; type: string; minor: number; rows: number }[],
+  grouped: { key: string | null; type: LedgerType; minor: number; rows: number }[],
 ): Map<string, Totals> {
   const out = new Map<string, Totals>();
   for (const row of grouped) {
@@ -114,7 +114,6 @@ export async function moneyFacts(institutionId: string): Promise<MoneyFacts> {
 }
 
 async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
-  const type = sql<string>`${ledgerEntry.type}::text`;
   const total = sql<number>`coalesce(sum(${ledgerEntry.amountMinor}), 0)::int`;
   const count = sql<number>`count(${ledgerEntry.id})::int`;
 
@@ -124,15 +123,15 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
       .from(engagement)
       .where(eq(engagement.institutionId, institutionId)),
     tx
-      .select({ key: ledgerEntry.engagementId, type, minor: total, rows: count })
+      .select({ key: ledgerEntry.engagementId, type: ledgerEntry.type, minor: total, rows: count })
       .from(ledgerEntry)
       .where(eq(ledgerEntry.institutionId, institutionId))
-      .groupBy(ledgerEntry.engagementId, type),
+      .groupBy(ledgerEntry.engagementId, ledgerEntry.type),
     tx
-      .select({ key: ledgerEntry.sessionId, type, minor: total, rows: count })
+      .select({ key: ledgerEntry.sessionId, type: ledgerEntry.type, minor: total, rows: count })
       .from(ledgerEntry)
       .where(and(eq(ledgerEntry.institutionId, institutionId), isNotNull(ledgerEntry.sessionId)))
-      .groupBy(ledgerEntry.sessionId, type),
+      .groupBy(ledgerEntry.sessionId, ledgerEntry.type),
     tx
       .select({ tutorProfileId: tutorCourse.tutorProfileId, termId: courseOffering.termId, feeMinor: total })
       .from(ledgerEntry)

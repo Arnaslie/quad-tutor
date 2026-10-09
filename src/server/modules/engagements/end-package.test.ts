@@ -150,7 +150,7 @@ async function delivered(engagementId: string, at: Date): Promise<void> {
   const row = { engagementId, sessionId, institutionId: home.institutionId };
   await db.insert(ledgerEntry).values([
     { ...row, type: "session_earned", amountMinor: sessionMinor },
-    { ...row, type: "tutor_payout", amountMinor: tutorMinor },
+    { ...row, type: "tutor_accrued", amountMinor: tutorMinor },
     { ...row, type: "platform_fee", amountMinor: platformMinor },
   ]);
 }
