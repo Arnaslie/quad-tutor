@@ -82,7 +82,9 @@ export function endBlock(
   sessions: { status: "held" | "scheduled" | "completed" | "cancelled" | "disputed"; scheduledAt: Date }[],
   now: Date,
 ): EndBlock | null {
-  const scheduled = sessions.filter((session) => session.status === "scheduled");
+  const scheduled = sessions.filter(
+    (session) => session.status === "scheduled" || session.status === "held",
+  );
   return (
     first("disputed", sessions.filter((session) => session.status === "disputed")) ??
     first("awaiting_answer", scheduled.filter((session) => now >= session.scheduledAt)) ??

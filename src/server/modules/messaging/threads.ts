@@ -16,7 +16,7 @@ import {
   user,
   userBlock,
 } from "@/server/db/schema";
-import { tutorUser, type Executor } from "@/server/modules/engagements/access";
+import { bought, tutorUser, type Executor } from "@/server/modules/engagements/access";
 import { bookAgain, bookAgainPath } from "@/server/modules/engagements/reads";
 import type { Actor } from "@/server/modules/identity/actor";
 import { displayName } from "@/server/modules/identity/display-name";
@@ -52,7 +52,8 @@ export const threadOpen = sql<boolean>`(
           ${matchRequest.status} = 'accepted'
           and ${term.endsOn} >= current_date
           and not exists (
-            select 1 from ${engagement} where ${engagement.matchRequestId} = ${matchRequest.id}
+            select 1 from ${engagement}
+            where ${engagement.matchRequestId} = ${matchRequest.id} and ${bought}
           )
         )
       )
@@ -61,7 +62,7 @@ export const threadOpen = sql<boolean>`(
     select 1 from ${engagement}
     where ${engagement.studentProfileId} = ${messageThread.studentProfileId}
       and ${engagement.tutorCourseId} = ${messageThread.tutorCourseId}
-      and ${engagement.status} = 'active'
+      and ${engagement.status} in ('active', 'pending_payment')
   )
 )`;
 

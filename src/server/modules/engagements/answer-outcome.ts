@@ -1,4 +1,5 @@
 import { settle } from "./attendance";
+import type { SessionOutcome } from "./confirmation";
 
 export type AnswerOutcome = "attended" | "not_attended" | "awaiting_other" | "disputed";
 
@@ -23,10 +24,17 @@ export function lapseCopy(delivered: boolean, packageOwner: string): string {
   return delivered ? "it counts as delivered" : `it goes back into ${packageOwner} package`;
 }
 
-export function outcomeOf(status: "held" | "scheduled" | "completed" | "cancelled" | "disputed"): AnswerOutcome {
-  if (status === "disputed") return "disputed";
-  if (status === "scheduled") return "awaiting_other";
-  return status === "completed" ? "attended" : "not_attended";
+export function outcomeOf(status: SessionOutcome["status"]): AnswerOutcome {
+  switch (status) {
+    case "disputed":
+      return "disputed";
+    case "scheduled":
+      return "awaiting_other";
+    case "completed":
+      return "attended";
+    case "cancelled":
+      return "not_attended";
+  }
 }
 
 export function answerCopy(params: {

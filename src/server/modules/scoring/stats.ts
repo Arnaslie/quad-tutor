@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { engagement, sessionRating, tutorCourse } from "@/server/db/schema";
@@ -46,7 +46,12 @@ export async function refreshScores(institutionId: string): Promise<number> {
           renewed: sql<boolean>`count(*) over (partition by ${engagement.studentProfileId}, ${engagement.tutorCourseId}) > 1`.as("renewed"),
         })
         .from(engagement)
-        .where(eq(engagement.institutionId, institutionId)),
+        .where(
+          and(
+            eq(engagement.institutionId, institutionId),
+            inArray(engagement.status, ["active", "completed", "refunded"]),
+          ),
+        ),
     );
 
     const renewals = tx.$with("renewals").as(
