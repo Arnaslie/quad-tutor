@@ -15,6 +15,7 @@ import {
   ledgerEntry,
   matchRequest,
   messageThread,
+  moneyDiscrepancy,
   reliabilityEvent,
   sessionBooking,
   studentProfile,
@@ -40,10 +41,12 @@ import { assertMoneyInvariants } from "@/server/modules/billing/invariants";
 
 import { SessionError } from "./access";
 import { buyPackage, buyTopUp, pay } from "./buy-and-pay";
-import { fulfilCheckout, releaseCheckout } from "./checkout";
+import { fulfilCheckout, releaseCheckout, type FulfilResult } from "./checkout";
 import { confirmAttendance } from "./confirmation";
 import {
   PurchaseError,
+  type Checkout,
+  type PurchaseResult,
   purchasePackage,
   purchaseTopUp,
   slotsForRequest,
@@ -175,6 +178,7 @@ after(async () => {
   const institutions = made.institutions;
   const engagements = (await db.select({ id: engagement.id }).from(engagement).where(inArray(engagement.institutionId, institutions))).map((row) => row.id);
   if (engagements.length) {
+    await db.delete(moneyDiscrepancy).where(inArray(moneyDiscrepancy.engagementId, engagements));
     await db.delete(ledgerEntry).where(inArray(ledgerEntry.engagementId, engagements));
     await db.delete(sessionBooking).where(inArray(sessionBooking.engagementId, engagements));
     await db.delete(engagement).where(inArray(engagement.id, engagements));
@@ -359,6 +363,13 @@ test("no package, refill or booking accepts a time the tutor did not publish or 
   assert.equal(await topUps(refiller), 0);
 });
 
+function opened(result: PurchaseResult): Checkout {
+  assert.equal(result.outcome, "checkout");
+  return (result as Extract<PurchaseResult, { outcome: "checkout" }>).checkout;
+}
+
+const cs = (engagementId: string) => `cs_test_${engagementId}`;
+
 test("a double-submitted refill resumes one checkout, and paying it writes one deferred ledger row", async () => {
   const { student } = await finishedPair();
   const [slot] = await slotsForTopUp({ actor: student, tutorCourseId });
@@ -368,7 +379,7 @@ test("a double-submitted refill resumes one checkout, and paying it writes one d
     purchaseTopUp({ actor: student, tutorCourseId, slotStartsAt: slot }),
   ]);
   assert.deepEqual(second, first);
-  assert.equal(first.checkout?.amountMinor, 3_500);
+  assert.equal(opened(first).amountMinor, 3_500);
   assert.equal(await topUps(student), 1);
   assert.ok(await bookAgain(student, tutorCourseId), "a pending refill leaves nothing to book, so refills chain");
 
@@ -391,13 +402,13 @@ test("a package checkout holds the slot and writes no ledger row until a payment
   const params = { actor: student, requestId, anchorExamId: null, slotStartsAt: slot };
 
   const first = await purchasePackage(params);
-  const { engagementId, checkout } = first;
-  assert.ok(checkout);
+  const { engagementId } = first;
+  const checkout = opened(first);
   assert.equal(checkout.amountMinor, 14_000);
   assert.equal(checkout.currency, "usd");
   assert.equal(checkout.institutionId, home.institutionId);
   assert.match(checkout.description, new RegExp(`^REN ${run} with .+: 4 sessions`));
-  assert.ok(checkout.expiresAt.getTime() > Date.now() + 29 * 60_000);
+  assert.ok(checkout.expiresAt.getTime() > Date.now() + 34 * 60_000, "Stripe needs 30 minutes from create");
   assert.deepEqual(await purchasePackage(params), first, "a second click resumes the same checkout");
 
   assert.deepEqual(await state(engagementId), { status: "pending_payment", sessions: ["held"], ledger: [] });
@@ -408,13 +419,15 @@ test("a package checkout holds the slot and writes no ledger row until a payment
   const [held] = await db.select({ id: sessionBooking.id }).from(sessionBooking).where(eq(sessionBooking.engagementId, engagementId));
   await assert.rejects(confirmAttendance({ actor: student, sessionId: held.id }), /payment/);
 
-  const ids = { engagementId, institutionId: home.institutionId };
+  const ids = { engagementId, institutionId: home.institutionId, checkoutSessionId: cs(engagementId) };
   const payment = { paymentIntentId: `pi_${run}_pkg`, amountTotal: 14_000, currency: "USD", chargeFeeMinor: 436, balanceTransactionId: `txn_${run}_pkg` };
-  assert.deepEqual(await fulfilCheckout({ engagementId, institutionId: randomUUID(), payment }), { outcome: "missing" });
+  assert.deepEqual(await fulfilCheckout({ ...ids, institutionId: randomUUID(), payment }), { outcome: "missing" });
   assert.deepEqual(await fulfilCheckout({ ...ids, payment }), { outcome: "fulfilled" });
   assert.deepEqual(await fulfilCheckout({ ...ids, payment }), { outcome: "not_pending", status: "active" });
   assert.deepEqual(await releaseCheckout(ids), { outcome: "not_pending", status: "active" });
 
+  const [stamped] = await db.select({ id: engagement.stripeCheckoutSessionId }).from(engagement).where(eq(engagement.id, engagementId));
+  assert.equal(stamped.id, cs(engagementId), "an unstamped checkout takes the paying session's id");
   assert.deepEqual(await state(engagementId), {
     status: "active",
     sessions: ["scheduled"],
@@ -423,9 +436,43 @@ test("a package checkout holds the slot and writes no ledger row until a payment
       { type: "processor_fee", amountMinor: 436, stripeReference: `txn_${run}_pkg` },
     ],
   });
-  assert.deepEqual(await purchasePackage(params), { engagementId, checkout: null });
+  assert.deepEqual(await purchasePackage(params), { outcome: "paid", engagementId });
   assert.ok((await requestsForStudent(student)).find((row) => row.id === requestId)?.engagementId);
   assert.equal(onBoard(await sessionBoardForTutor(tutor), engagementId).length, 1);
+});
+
+test("only the checkout session stamped on the row can fulfil or release it", async () => {
+  const student = await person(home.institutionId);
+  const requestId = await acceptedRequest(student);
+  const [slot] = await slotsForRequest({ actor: student, requestId });
+  const { engagementId } = await purchasePackage({ actor: student, requestId, anchorExamId: null, slotStartsAt: slot });
+  const ids = { engagementId, institutionId: home.institutionId };
+
+  await db.update(engagement).set({ stripeCheckoutSessionId: `cs_${run}_mine` }).where(eq(engagement.id, engagementId));
+  const payment = { paymentIntentId: `pi_${run}_stray`, amountTotal: 14_000, currency: "usd" };
+  assert.deepEqual(await fulfilCheckout({ ...ids, checkoutSessionId: `cs_${run}_stray`, payment }), { outcome: "other_session" });
+  assert.deepEqual(await releaseCheckout({ ...ids, checkoutSessionId: `cs_${run}_stray` }), { outcome: "other_session" });
+  assert.deepEqual(await releaseCheckout({ ...ids, checkoutSessionId: null }), { outcome: "other_session" });
+  assert.deepEqual(await state(engagementId), { status: "pending_payment", sessions: ["held"], ledger: [] });
+
+  assert.deepEqual(await releaseCheckout({ ...ids, checkoutSessionId: `cs_${run}_mine` }), { outcome: "released" });
+  assert.deepEqual(await state(engagementId), { status: "cancelled", sessions: ["cancelled"], ledger: [] });
+});
+
+test("a checkout past its expiry is returned as expired, not reopened", async () => {
+  const student = await person(home.institutionId);
+  const requestId = await acceptedRequest(student);
+  const [slot] = await slotsForRequest({ actor: student, requestId });
+  const params = { actor: student, requestId, anchorExamId: null, slotStartsAt: slot };
+  const { engagementId } = await purchasePackage(params);
+  await db
+    .update(engagement)
+    .set({ checkoutExpiresAt: new Date(Date.now() - 60_000), stripeCheckoutSessionId: `cs_${run}_expired` })
+    .where(eq(engagement.id, engagementId));
+
+  assert.deepEqual(await purchasePackage(params), { outcome: "expired", engagementId, stripeCheckoutSessionId: `cs_${run}_expired` });
+  assert.deepEqual(await releaseCheckout({ engagementId, institutionId: home.institutionId, checkoutSessionId: `cs_${run}_expired` }), { outcome: "released" });
+  assert.equal(opened(await purchasePackage(params)).amountMinor, 14_000, "released, the request opens a fresh checkout");
 });
 
 test("one PaymentIntent cannot fulfil two checkouts", async () => {
@@ -439,12 +486,13 @@ test("one PaymentIntent cannot fulfil two checkouts", async () => {
   const second = await purchasePackage({ actor: two, requestId: twoRequest, anchorExamId: null, slotStartsAt: other });
 
   const payment = { paymentIntentId: `pi_${run}_once`, amountTotal: 14_000, currency: "usd" };
-  await fulfilCheckout({ engagementId: first.engagementId, institutionId: home.institutionId, payment });
-  await assert.rejects(fulfilCheckout({ engagementId: second.engagementId, institutionId: home.institutionId, payment }));
+  const on = (engagementId: string) => ({ engagementId, institutionId: home.institutionId, checkoutSessionId: cs(engagementId), payment });
+  await fulfilCheckout(on(first.engagementId));
+  await assert.rejects(fulfilCheckout(on(second.engagementId)));
   assert.deepEqual(await state(second.engagementId), { status: "pending_payment", sessions: ["held"], ledger: [] });
 });
 
-test("a mismatched payment fulfils nothing; a released renewal counts as nothing and can be bought again", async () => {
+test("a mismatched payment ends the checkout with a discrepancy and no ledger row; the renewal can be bought again", async () => {
   const { student } = await finishedPair();
   await requestRenewal({ actor: student, tutorCourseId, kind: "exam_anchored" });
   const requestId = await pendingRequest(student, tutorCourseId);
@@ -453,34 +501,41 @@ test("a mismatched payment fulfils nothing; a released renewal counts as nothing
   const params = { actor: student, requestId, anchorExamId: null, slotStartsAt: slot };
 
   const { engagementId } = await purchasePackage(params);
-  const ids = { engagementId, institutionId: home.institutionId };
+  const ids = { engagementId, institutionId: home.institutionId, checkoutSessionId: cs(engagementId) };
   assert.equal(await bookAgain(student, tutorCourseId), null, "a package mid-checkout is not offered again");
 
   const short = { paymentIntentId: `pi_${run}_short`, amountTotal: 100, currency: "usd" };
-  assert.deepEqual(await fulfilCheckout({ ...ids, payment: short }), {
-    outcome: "discrepancy",
-    expectedMinor: 14_000,
-    expectedCurrency: "usd",
-    paidMinor: 100,
-    paidCurrency: "usd",
-  });
-  const euros = { paymentIntentId: `pi_${run}_eur`, amountTotal: 14_000, currency: "eur" };
-  assert.equal((await fulfilCheckout({ ...ids, payment: euros })).outcome, "discrepancy");
-  assert.deepEqual(await state(engagementId), { status: "pending_payment", sessions: ["held"], ledger: [] });
+  const result = await fulfilCheckout({ ...ids, payment: short });
+  assert.equal(result.outcome, "discrepancy");
+  const { discrepancyId, ...amounts } = result as Extract<FulfilResult, { outcome: "discrepancy" }>;
+  assert.deepEqual(amounts, { outcome: "discrepancy", expectedMinor: 14_000, expectedCurrency: "usd", paidMinor: 100, paidCurrency: "usd" });
+  assert.deepEqual(await fulfilCheckout({ ...ids, payment: short }), result, "a redelivered event finds the same discrepancy");
 
-  assert.deepEqual(await releaseCheckout(ids), { outcome: "released" });
+  const [recorded] = await db.select().from(moneyDiscrepancy).where(eq(moneyDiscrepancy.id, discrepancyId));
+  assert.equal(recorded.kind, "checkout_amount");
+  assert.equal(recorded.stripeReference, short.paymentIntentId);
+  assert.equal(recorded.ledgerAmountMinor, 14_000);
+  assert.equal(recorded.stripeAmountMinor, 100);
+  assert.equal(recorded.refundReference, null);
+  assert.equal(recorded.resolvedAt, null);
+  assert.deepEqual(await state(engagementId), { status: "cancelled", sessions: ["cancelled"], ledger: [] });
+
   assert.deepEqual(await releaseCheckout(ids), { outcome: "not_pending", status: "cancelled" });
   const late = { paymentIntentId: `pi_${run}_late`, amountTotal: 14_000, currency: "usd" };
   assert.deepEqual(await fulfilCheckout({ ...ids, payment: late }), { outcome: "not_pending", status: "cancelled" });
-  assert.deepEqual(await state(engagementId), { status: "cancelled", sessions: ["cancelled"], ledger: [] });
 
   assert.ok((await slotsForRequest({ actor: student, requestId })).some((open) => open.getTime() === slot.getTime()));
   assert.deepEqual(onBoard(await sessionBoardForStudent(student), engagementId), []);
   assert.deepEqual(onBoard(await sessionBoardForTutor(tutor), engagementId), []);
   assert.deepEqual((await bookAgain(student, tutorCourseId))?.liveRequest, { id: requestId, status: "accepted", requestedKind: "exam_anchored" });
 
-  const retry = await buyPackage(params);
+  const retry = await purchasePackage(params);
   assert.notEqual(retry.engagementId, engagementId);
+  const euros = { paymentIntentId: `pi_${run}_eur`, amountTotal: 14_000, currency: "eur" };
+  const retryIds = { engagementId: retry.engagementId, institutionId: home.institutionId, checkoutSessionId: cs(retry.engagementId) };
+  assert.equal((await fulfilCheckout({ ...retryIds, payment: euros })).outcome, "discrepancy", "the wrong currency is a mismatch too");
+
+  await buyPackage(params);
   assert.equal(await bookAgain(student, tutorCourseId), null);
 });
 

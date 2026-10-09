@@ -3,12 +3,15 @@ import { purchasePackage, purchaseTopUp, type PurchaseResult } from "./purchase"
 
 /** Tests and db:demo only: settles a checkout with made-up payment data, as Stripe's word would. */
 export async function pay(result: PurchaseResult): Promise<{ engagementId: string }> {
-  const { engagementId, checkout } = result;
-  if (!checkout) return { engagementId };
+  const { engagementId } = result;
+  if (result.outcome === "paid") return { engagementId };
+  if (result.outcome === "expired") throw new Error(`Checkout ${engagementId} expired`);
+  const { checkout } = result;
 
   const fulfilled = await fulfilCheckout({
     engagementId,
     institutionId: checkout.institutionId,
+    checkoutSessionId: `cs_test_${engagementId}`,
     payment: {
       paymentIntentId: `pi_test_${engagementId}`,
       amountTotal: checkout.amountMinor,

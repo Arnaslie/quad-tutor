@@ -126,7 +126,7 @@ drift:
   | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update) |
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
   | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation could hold (inside 12h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
-  | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment`), then its `held` `session_booking` rows |
+  | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment` and the Checkout Session id matches), then its `held` `session_booking` rows. An amount or currency mismatch cancels both and inserts a `money_discrepancy` row in the same transaction |
 
   The rules behind it:
   - Student before request; tutor before request.

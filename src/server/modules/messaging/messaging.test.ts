@@ -341,7 +341,7 @@ test("a closed thread offers booking again and refuses a send; a refill reopens 
   const [slot] = await slotsForRequest({ actor: student, requestId: request });
   const abandoned = await purchasePackage({ actor: student, requestId: request, anchorExamId: null, slotStartsAt: slot });
   assert.equal((await threadView(student, threadId)).open, true, "mid-checkout stays open");
-  await releaseCheckout({ engagementId: abandoned.engagementId, institutionId: home.institutionId });
+  await releaseCheckout({ engagementId: abandoned.engagementId, institutionId: home.institutionId, checkoutSessionId: null });
   assert.equal((await threadView(student, threadId)).open, true, "a released checkout leaves the request unbought");
 
   const { engagementId } = await buyPackage({

@@ -30,7 +30,7 @@ import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slo
 
 export class PurchaseError extends Error {}
 
-export const CHECKOUT_HOLD_MINUTES = 30;
+export const CHECKOUT_HOLD_MINUTES = 35;
 
 export type Checkout = {
   engagementId: string;
@@ -42,15 +42,19 @@ export type Checkout = {
   stripeCheckoutSessionId: string | null;
 };
 
-export type PurchaseResult = { engagementId: string; checkout: Checkout | null };
+export type PurchaseResult =
+  | { outcome: "checkout"; engagementId: string; checkout: Checkout }
+  | { outcome: "expired"; engagementId: string; stripeCheckoutSessionId: string | null }
+  | { outcome: "paid"; engagementId: string };
 
 export async function checkoutFor(
   exec: Executor,
   params: { engagementId: string; institutionId: string },
-): Promise<Checkout> {
+): Promise<PurchaseResult> {
   const rows = await exec
     .select({
       engagementId: engagement.id,
+      status: engagement.status,
       institutionId: engagement.institutionId,
       kind: engagement.kind,
       amountMinor: engagement.pricePaidMinor,
@@ -75,15 +79,23 @@ export async function checkoutFor(
       and(
         eq(engagement.id, params.engagementId),
         eq(engagement.institutionId, params.institutionId),
-        eq(engagement.status, "pending_payment"),
       ),
     )
     .limit(1);
 
   const row = rows.at(0);
-  if (!row?.expiresAt) throw new PurchaseError("That checkout is no longer open.");
+  const { engagementId } = params;
+  if (row && row.status !== "pending_payment" && row.status !== "cancelled") {
+    return { outcome: "paid", engagementId };
+  }
+  if (!row?.expiresAt || row.status === "cancelled") {
+    throw new PurchaseError("That checkout is no longer open.");
+  }
+  if (row.expiresAt.getTime() <= Date.now()) {
+    return { outcome: "expired", engagementId, stripeCheckoutSessionId: row.stripeCheckoutSessionId };
+  }
 
-  return {
+  const checkout = {
     engagementId: row.engagementId,
     institutionId: row.institutionId,
     amountMinor: row.amountMinor,
@@ -92,14 +104,7 @@ export async function checkoutFor(
     expiresAt: row.expiresAt,
     stripeCheckoutSessionId: row.stripeCheckoutSessionId,
   };
-}
-
-async function pending(
-  exec: Executor,
-  engagementId: string,
-  institutionId: string,
-): Promise<PurchaseResult> {
-  return { engagementId, checkout: await checkoutFor(exec, { engagementId, institutionId }) };
+  return { outcome: "checkout", engagementId, checkout };
 }
 
 async function hold(
@@ -132,7 +137,7 @@ async function hold(
     remindedAt: remindedAtForNewBooking(params.slotStartsAt),
   });
 
-  return pending(tx, created.id, params.engagement.institutionId);
+  return checkoutFor(tx, { engagementId: created.id, institutionId: params.engagement.institutionId });
 }
 
 const termEnded = sql<boolean>`${term.endsOn} < current_date`;
@@ -249,10 +254,9 @@ export async function purchasePackage(params: {
       .limit(1);
 
     const already = existing.at(0);
-    if (already?.status === "pending_payment") {
-      return pending(tx, already.id, params.actor.institutionId);
+    if (already) {
+      return checkoutFor(tx, { engagementId: already.id, institutionId: params.actor.institutionId });
     }
-    if (already) return { engagementId: already.id, checkout: null };
 
     const kind = request.requestedKind ?? params.kind;
     if (!kind || kind === "top_up") throw new PurchaseError("Pick a package.");
@@ -350,7 +354,9 @@ export async function purchaseTopUp(params: {
       )
       .limit(1);
     const resumed = resumable.at(0);
-    if (resumed) return pending(tx, resumed.id, params.actor.institutionId);
+    if (resumed) {
+      return checkoutFor(tx, { engagementId: resumed.id, institutionId: params.actor.institutionId });
+    }
 
     const open = await slotOpen(tx, {
       tutorProfileId: gate.tutorProfileId,
