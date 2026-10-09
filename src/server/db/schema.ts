@@ -101,6 +101,13 @@ export const ledgerEntryType = pgEnum("ledger_entry_type", [
   "transfer_reversal",
 ]);
 
+export const moneyDiscrepancyKind = pgEnum("money_discrepancy_kind", [
+  "checkout_amount",
+  "ledger_vs_stripe_charge",
+  "ledger_vs_stripe_transfers",
+  "unstamped_reference",
+]);
+
 export const packageKind = pgEnum("package_kind", [
   "exam_anchored",
   "through_final",
@@ -543,6 +550,31 @@ export const ledgerEntry = pgTable(
       .where(sql`${t.type} = 'session_earned'`),
     uniqueIndex("ledger_entry_stripe_reference_idx")
       .on(t.stripeReference)
+      .where(sql`${t.stripeReference} is not null`),
+  ],
+);
+
+export const moneyDiscrepancy = pgTable(
+  "money_discrepancy",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
+    engagementId: uuid("engagement_id").references(() => engagement.id),
+    kind: moneyDiscrepancyKind("kind").notNull(),
+    stripeReference: text("stripe_reference"),
+    ledgerAmountMinor: integer("ledger_amount_minor"),
+    stripeAmountMinor: integer("stripe_amount_minor"),
+    currency: text("currency").notNull().default("usd"),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolutionNote: text("resolution_note"),
+    refundReference: text("refund_reference").unique(),
+  },
+  (t) => [
+    index("money_discrepancy_institution_idx").on(t.institutionId, t.resolvedAt),
+    index("money_discrepancy_engagement_idx").on(t.engagementId),
+    uniqueIndex("money_discrepancy_kind_reference_idx")
+      .on(t.kind, t.stripeReference)
       .where(sql`${t.stripeReference} is not null`),
   ],
 );
