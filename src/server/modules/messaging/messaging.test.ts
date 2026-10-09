@@ -29,9 +29,10 @@ import {
   user,
   userBlock,
 } from "@/server/db/schema";
+import { buyPackage, buyTopUp } from "@/server/modules/engagements/buy-and-pay";
+import { releaseCheckout } from "@/server/modules/engagements/checkout";
 import {
   purchasePackage,
-  purchaseTopUp,
   slotsForRequest,
   slotsForTopUp,
 } from "@/server/modules/engagements/purchase";
@@ -338,7 +339,12 @@ test("a withdrawn tutor keeps a read-only thread", async () => {
 test("a closed thread offers booking again and refuses a send; a refill reopens it", async () => {
   const request = await requestId(tutor);
   const [slot] = await slotsForRequest({ actor: student, requestId: request });
-  const { engagementId } = await purchasePackage({
+  const abandoned = await purchasePackage({ actor: student, requestId: request, anchorExamId: null, slotStartsAt: slot });
+  assert.equal((await threadView(student, threadId)).open, true, "mid-checkout stays open");
+  await releaseCheckout({ engagementId: abandoned.engagementId, institutionId: home.institutionId });
+  assert.equal((await threadView(student, threadId)).open, true, "a released checkout leaves the request unbought");
+
+  const { engagementId } = await buyPackage({
     actor: student,
     requestId: request,
     anchorExamId: null,
@@ -362,7 +368,7 @@ test("a closed thread offers booking again and refuses a send; a refill reopens 
   assert.equal(closed.messages.length, 0);
 
   const [refillSlot] = await slotsForTopUp({ actor: student, tutorCourseId });
-  await purchaseTopUp({ actor: student, tutorCourseId, slotStartsAt: refillSlot });
+  await buyTopUp({ actor: student, tutorCourseId, slotStartsAt: refillSlot });
   assert.equal((await threadView(student, threadId)).open, true);
   await sendMessage({ actor: student, threadId, body: "Booked again" });
 });
