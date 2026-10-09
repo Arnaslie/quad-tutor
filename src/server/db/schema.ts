@@ -59,6 +59,7 @@ export const matchRequestStatus = pgEnum("match_request_status", [
 ]);
 
 export const engagementStatus = pgEnum("engagement_status", [
+  "pending_payment",
   "active",
   "completed",
   "refunded",
@@ -66,6 +67,7 @@ export const engagementStatus = pgEnum("engagement_status", [
 ]);
 
 export const sessionStatus = pgEnum("session_status", [
+  "held",
   "scheduled",
   "completed",
   "cancelled",
@@ -90,10 +92,13 @@ export const reliabilityEventType = pgEnum("reliability_event_type", [
 export const ledgerEntryType = pgEnum("ledger_entry_type", [
   "package_purchase",
   "session_earned",
-  "tutor_payout",
+  "tutor_accrued",
   "platform_fee",
   "refund",
   "guarantee_absorbed",
+  "processor_fee",
+  "tutor_transfer",
+  "transfer_reversal",
 ]);
 
 export const packageKind = pgEnum("package_kind", [
@@ -431,12 +436,16 @@ export const engagement = pgTable(
     guaranteeUsed: boolean("guarantee_used").notNull().default(false),
 
     status: engagementStatus("status").notNull().default("active"),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id").unique(),
+    checkoutExpiresAt: timestamp("checkout_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
   (t) => [
     index("engagement_institution_idx").on(t.institutionId),
-    uniqueIndex("engagement_match_request_idx").on(t.matchRequestId),
+    uniqueIndex("engagement_match_request_idx")
+      .on(t.matchRequestId)
+      .where(sql`${t.status} <> 'cancelled'`),
     index("engagement_student_idx").on(t.studentProfileId, t.status),
     index("engagement_tutor_course_idx").on(t.tutorCourseId),
   ],
@@ -532,6 +541,9 @@ export const ledgerEntry = pgTable(
     index("ledger_entry_session_earned_idx")
       .on(t.sessionId)
       .where(sql`${t.type} = 'session_earned'`),
+    uniqueIndex("ledger_entry_stripe_reference_idx")
+      .on(t.stripeReference)
+      .where(sql`${t.stripeReference} is not null`),
   ],
 );
 

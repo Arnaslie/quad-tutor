@@ -79,7 +79,7 @@ export type EndBlock = {
 };
 
 export function endBlock(
-  sessions: { status: "scheduled" | "completed" | "cancelled" | "disputed"; scheduledAt: Date }[],
+  sessions: { status: "held" | "scheduled" | "completed" | "cancelled" | "disputed"; scheduledAt: Date }[],
   now: Date,
 ): EndBlock | null {
   const scheduled = sessions.filter((session) => session.status === "scheduled");
@@ -117,7 +117,7 @@ export type ViewerAction =
   | "none";
 
 export function viewerAction(params: {
-  status: "scheduled" | "completed" | "cancelled" | "disputed";
+  status: "held" | "scheduled" | "completed" | "cancelled" | "disputed";
   scheduledAt: Date;
   durationMinutes: number;
   answers: AttendanceAnswers;

@@ -162,6 +162,20 @@
       "when": 1791491487240,
       "tag": "0022_match_request_requested_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791572383237,
+      "tag": "0023_stripe_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791572392783,
+      "tag": "0024_ledger_tutor_accrued",
+      "breakpoints": true
     }
   ]
 }

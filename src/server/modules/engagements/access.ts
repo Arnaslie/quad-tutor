@@ -36,7 +36,7 @@ export type SessionContextRow = {
   durationMinutes: number;
   location: string | null;
   studentNote: string | null;
-  status: "scheduled" | "completed" | "cancelled" | "disputed";
+  status: "held" | "scheduled" | "completed" | "cancelled" | "disputed";
   resolution:
     | "both_confirmed"
     | "auto_released"
@@ -57,7 +57,7 @@ export type SessionContextRow = {
   tutorProfileId: string;
   tutorUserId: string;
   tutorName: string;
-  engagementStatus: "active" | "completed" | "refunded" | "cancelled";
+  engagementStatus: "pending_payment" | "active" | "completed" | "refunded" | "cancelled";
   tutorCourseId: string;
   sessionsPurchased: number;
   pricePaidMinor: number;

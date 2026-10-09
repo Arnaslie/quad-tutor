@@ -72,6 +72,6 @@ export async function balanceFor(engagementId: string): Promise<EngagementBalanc
     recognisedMinor,
     refundedMinor,
     deferredMinor: paidMinor - recognisedMinor - refundedMinor,
-    tutorOwedMinor: by("tutor_payout"),
+    tutorOwedMinor: by("tutor_accrued"),
   };
 }
