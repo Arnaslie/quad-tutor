@@ -348,7 +348,7 @@ reviews items 2, 4 and 6 (idempotency, webhook, after-commit calls, sweeps).
 | 3 | Checkout UI: purchase panel and Book again redirect copy, "confirming payment" on return, cancel page, expired state | web | Polished flow on phone and desktop |
 | 4 | Refunds through Stripe: after-commit issue and stamp for `closeWithRefund`, `charge.refunded` backstop, `processor_fee` | payments | End-early and term-end refunds visible in the test dashboard |
 | 5 | Connect: account creation, Account Link, pure KYC mapping + tests, `account.updated`, Connect secret, daily payout schedule at creation, `/tutor/payouts` route | payments | Tutor can onboard with Stripe test data |
-| 6 | Transfer sweep, `earnings.transferredMinor`, `transfer.created`/`transfer.reversed`, dispute events and pause | payments, with backend for `earnings.ts` | Owed → transferred after a confirmed session, past the cap too |
+| 6 | Transfer sweep (never for an engagement whose `package_purchase` has no Stripe reference), `earnings.transferredMinor`, `transfer.created`/`transfer.reversed`, dispute events and pause | payments, with backend for `earnings.ts` | Owed → transferred after a confirmed session, past the cap too |
 | 7 | Onboarding UI: post-accept prompt, `/tutor/payouts` page, owed-but-unverified and restricted banners on `/tutor/sessions` | web | End-to-end tutor money path |
 | 8 | Reconciliation: `money_discrepancy` table (database), daily reconciliation (payments), `/ops` money list (web) | database → payments → web | Divergence visible and pauses transfers |
 | 9 | `stripe-smoke` CI job, after item 7 | payments | Real adapter exercised daily |
