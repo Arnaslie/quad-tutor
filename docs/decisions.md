@@ -651,6 +651,14 @@ production, like the email and proof-store fallbacks.
 transfers for that engagement and goes to `/ops`. It is fixed by appending a row that
 references the Stripe object.
 
+**Data from before Stripe is test data, and it is cleared before launch.** Every
+production account is a test account today, and no purchase before Stripe was charged.
+Those ledger rows include sessions recognised under the old 22% take with no
+`platform_fee` row (4 in production on 2026-10-09), which the money check flags. They
+are deleted before go-live rather than corrected or exempted, so the check needs no
+legacy carve-out. As a backstop, the transfer sweep never sends money for an engagement
+whose `package_purchase` has no Stripe reference.
+
 **Campus membership is gated on `crimson.ua.edu`**, the UA *student* domain, matched
 against `institution.email_domain`. One domain per institution: supporting several
 means that column stops being a single text field, which is not worth doing before a
@@ -797,6 +805,11 @@ Known wage floor: UA on-campus ~$10/hr, America Reads/Counts $12/hr, athletics
 tutoring $10–17.50. Target roughly 2×: **$25–30/hr to the tutor, $30–40 session price.**
 The 20–25% take this originally targeted is superseded by 10% capped at $100 per tutor
 per term (see Product) — well under Wyzant (~34%) and Preply (~33%).
+
+**4. Clear pre-Stripe test data from production before launch.** Every account is a
+test account and no pre-Stripe purchase was charged (see Technical). Wipe it before
+real students sign up, then run `db:check-money` against production and expect zero
+violations.
 
 ---
 
