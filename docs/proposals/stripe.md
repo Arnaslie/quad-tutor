@@ -183,10 +183,28 @@ accrual, and nothing claws session 1 back any more.
 *Alternative: transfer inline on confirm.* Rejected: a Stripe call in the settle
 transaction, and auto-release happens in the sweep anyway.
 
-**Bank payouts** (connected balance → bank) are set per account at creation. **Decision
-for you:** weekly on Friday (recommended: matches "next payout: Friday", one Connect payout
-fee per tutor per week) vs. daily (faster, about 5× the payout fees, which the platform
-absorbs).
+**Bank payouts** (connected balance → bank): **daily automatic, plus Instant Payouts the
+tutor pays for** (decided). Cash is immediate, so pay that waits a week is a reason to go
+off-platform.
+
+- The schedule is set to `daily` at account creation. Funds reach the bank about two
+  business days after they are available. The platform absorbs the standard Connect payout
+  fee, as decisions.md already says for Connect fees.
+- Instant Payouts send the available balance to an eligible debit card in about 30
+  minutes. The tutor starts it from the Express Dashboard (a login link from
+  `/tutor/payouts`), so we build no payout UI or Payouts API call. The fee (about 1%,
+  $0.50 minimum, from third-party sources) is charged to the tutor's connected account
+  through Stripe's platform pricing tools, not absorbed. Item 5 verifies the current fee,
+  that the Express Dashboard offers Instant Payouts for our accounts, and that the fee
+  can be set per connected account. If either check fails, item 5 adds a "Cash out" action
+  that calls `payouts.create({ method: "instant" })` on the connected account and
+  records the tutor's fee as a separate application fee. That fallback is a decision to
+  bring back, not to build silently.
+- Only the available balance can be paid out instantly. A transfer with
+  `source_transaction` becomes available when its charge settles, about two days after
+  purchase. Packages are paid up front, so in practice this delays only a first session
+  held within two days of purchase. `/tutor/payouts` shows the available and pending
+  amounts as Stripe reports them.
 
 Transfer reversals are an ops tool only; no code path issues one.
 
@@ -212,10 +230,9 @@ doesn't.**
   `disabled_reason` or past-due requirements → `restricted`, which pauses transfers and
   shows a fresh Account Link.
 
-**Decision for you:** never block accepts (recommended) vs. requiring onboarding
-*submitted* before a tutor's **second** accept. The alternative caps what the platform
-holds for an unverified tutor; the cost is a gate on the bottleneck side at its most
-engaged moment. Owed pay is a liability, not a loss.
+Never blocking accepts is decided. A gate before the second accept would cap what the
+platform holds for an unverified tutor. It would also give that tutor a reason to take
+cash from the student instead. Owed pay is a liability, not a loss.
 
 ## 5. Webhook route and security
 
@@ -244,7 +261,7 @@ engaged moment. Owed pay is a liability, not a loss.
 - Pin the SDK's `apiVersion` and register endpoints at the same version.
 - In `/api/cron`, each Stripe sweep gets its own `catch`, like the per-campus jobs.
 
-**No Stripe event writes a reliability fact in this build** (see Decisions for you, 4). A
+**No Stripe event writes a reliability fact in this build** (see Decisions taken, 4). A
 checkout decline isn't a missed obligation: nothing was booked, and the student retries on
 the same page.
 
@@ -283,7 +300,7 @@ past the cap, and duplicate signed events. The invariant check (§7) runs after 
 pages resist automation, CI would need a public webhook URL, and load tests would hit the
 test-mode rate limit.
 
-Optional: one daily `stripe-smoke` job (~10 calls: confirm a PaymentIntent with
+Approved for later, once item 7 lands: one daily `stripe-smoke` job (~10 calls: confirm a PaymentIntent with
 `pm_card_visa`, partial refund, transfer with `source_transaction` to a pre-made test
 account). Needs a `STRIPE_TEST_SECRET_KEY` GitHub secret.
 
@@ -344,11 +361,11 @@ reviews items 2, 4 and 6 (idempotency, webhook, after-commit calls, sweeps).
 | 2b | Gateway module (real + fake), `stripe` SDK, Checkout create/expire, `syncCheckout` and `syncPendingCheckouts`, webhook route (checkout events), `/api/dev/checkout` | payments | Full buy flow locally with `STRIPE_FAKE=1`, or test keys + `stripe listen` |
 | 3 | Checkout UI: purchase panel and Book again redirect copy, "confirming payment" on return, cancel page, expired state | web | Polished flow on phone and desktop |
 | 4 | Refunds through Stripe: after-commit issue and stamp for `closeWithRefund`, `charge.refunded` backstop, `processor_fee` | payments | End-early and term-end refunds visible in the test dashboard |
-| 5 | Connect: account creation, Account Link, pure KYC mapping + tests, `account.updated`, Connect secret, payout schedule at creation, `/tutor/payouts` route | payments | Tutor can onboard with Stripe test data |
+| 5 | Connect: account creation, Account Link, pure KYC mapping + tests, `account.updated`, Connect secret, daily payout schedule at creation, Instant Payouts enabled with the tutor-paid fee, Express Dashboard login link, `/tutor/payouts` route | payments | Tutor can onboard with Stripe test data |
 | 6 | Transfer sweep, `earnings.transferredMinor`, `transfer.created`/`transfer.reversed`, dispute events and pause | payments, with backend for `earnings.ts` | Owed → transferred after a confirmed session, past the cap too |
 | 7 | Onboarding UI: post-accept prompt, `/tutor/payouts` page, owed-but-unverified and restricted banners on `/tutor/sessions` | web | End-to-end tutor money path |
 | 8 | Reconciliation: `money_discrepancy` table (database), daily reconciliation (payments), `/ops` money list (web) | database → payments → web | Divergence visible and pauses transfers |
-| 9 | Optional `stripe-smoke` CI job | payments | Real adapter exercised daily |
+| 9 | `stripe-smoke` CI job, after item 7 | payments | Real adapter exercised daily |
 
 ---
 
@@ -358,35 +375,29 @@ Never paste keys into chat or commits; nobody on the team handles them.
 
 1. Create a Stripe account (test mode needs no business verification).
 2. In test mode, enable **Connect**, choose **Express** accounts with the platform handling
-   pricing, and set the Express branding tutors see during onboarding.
+   pricing, and set the Express branding tutors see during onboarding. Enable Instant
+   Payouts for Express accounts.
 3. Copy the **test** secret key (`sk_test_…`) into `.env.local` as `STRIPE_SECRET_KEY`.
 4. Install the Stripe CLI (`brew install stripe/stripe-cli/stripe`), `stripe login`, run
    the `stripe listen` command from §6 and put the printed `whsec_…` into `.env.local` as
    both `STRIPE_WEBHOOK_SECRET` and `STRIPE_CONNECT_WEBHOOK_SECRET`.
 5. In Vercel, **Preview** scope only: `STRIPE_SECRET_KEY` = the test key. Leave the webhook
    secrets unset for previews.
-6. Only if you approve item 9: add `STRIPE_TEST_SECRET_KEY` as a GitHub Actions secret and
+6. When item 9 starts: add `STRIPE_TEST_SECRET_KEY` as a GitHub Actions secret and
    create one test connected account for it.
 7. Before launch (not now): register the two production webhook endpoints and set live keys
    in Vercel Production only.
 
-## Decisions for you
+## Decisions taken
 
-1. **Bank payout cadence:** weekly on Friday (recommended) or daily.
-2. **Unverified tutors:** never block accepts (recommended) or require onboarding submitted
-   before the second accept.
-3. **Optional daily real-Stripe smoke job** (needs a GitHub secret). Recommended once
-   item 6 lands.
-4. **Does a chargeback write a `payment_failed` reliability fact?** Recommend **no, not
-   automatically**: the dispute is recorded with its timestamps, transfers pause, and ops
-   decides. A dispute can be fraud on a stolen card, a bank error or a real complaint, and
-   a fact minted from it could not be told apart from a genuine one. The alternative is to
-   write `payment_failed` on `charge.dispute.created`; it is a timestamped fact and its
-   consequence (a deposit) is recoverable, but it would be the first fact written by a
-   third party with no human in the loop.
+1. **Bank payouts:** daily automatic, plus Instant Payouts at the tutor's cost (§3).
+2. **Unverified tutors:** an accept is never blocked (§4).
+3. **`stripe-smoke` job:** yes, after item 7 (item 9).
+4. **Chargebacks:** recorded with timestamps; transfers pause; ops decides. No automatic
+   `payment_failed` fact. A dispute can be fraud on a stolen card, a bank error or a real
+   complaint, and an automatic fact could not be told apart from a genuine one.
 
-Everything else above is a technical recommendation I'd proceed with on approval,
-including the `tutor_payout → tutor_accrued` rename, which is the reviewer's call.
+The `tutor_payout → tutor_accrued` rename is the reviewer's call.
 
 ---
 
@@ -421,13 +432,13 @@ Technical:*
 > **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 > Transfers go per engagement once the tutor is verified and the engagement has no open
 > discrepancy or dispute. Refunds return only undelivered sessions, so none needs a
-> reversal. Bank payouts are [weekly, Friday / daily]. Reversals are an ops tool.
+> reversal. Bank payouts are daily; Instant Payouts are available and the tutor pays their fee. Reversals are an ops tool.
 
-> **KYC never blocks an accept** [if approved]. An unverified tutor's pay accrues and
+> **KYC never blocks an accept.** An unverified tutor's pay accrues and
 > waits, and the student's sessions proceed. Hiding unverified tutors from decks was
 > rejected: they would never get the accept that triggers onboarding.
 
-> **A chargeback is recorded, not judged** [if approved]. It pauses that engagement's
+> **A chargeback is recorded, not judged.** It pauses that engagement's
 > transfers and goes to ops; it writes no reliability fact on its own.
 
 > **CI and local dev run on a signed fake, not Stripe.** One gateway module is the only
