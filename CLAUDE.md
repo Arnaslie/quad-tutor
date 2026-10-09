@@ -44,6 +44,7 @@ npm run db:migrate   # drizzle-kit: apply migrations; a remote DB is refused unl
 npm run db:studio    # drizzle-kit: browse data
 npm run db:seed      # idempotent local campus: courses, professors, exams, tutors
 npm run db:demo      # re-runnable: drives the real functions to a populated session board
+npm run db:check-money # database-only money invariants per campus; exits 1 on any violation
 ```
 
 Production migrations are automatic: `.github/workflows/migrate.yml` runs `db:migrate` on
