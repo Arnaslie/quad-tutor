@@ -1,5 +1,6 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 
+import { formatDayTime } from "@/components/format";
 import { db } from "@/server/db";
 import {
   courseOffering,
@@ -79,7 +80,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export class EndPackageError extends SessionError {
   constructor(readonly block: EndBlock) {
-    super(END_BLOCK_MESSAGE[block.reason]);
+    super(END_BLOCK_MESSAGE[block.reason](formatDayTime(block.scheduledAt)));
   }
 }
 

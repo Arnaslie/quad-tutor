@@ -5,9 +5,10 @@ import { z } from "zod";
 import { ButtonLink } from "@/components/button";
 import { Card } from "@/components/card";
 import { EmptyState } from "@/components/empty-state";
-import { formatDay } from "@/components/format";
+import { formatDay, formatDayTime } from "@/components/format";
 import { PageHeader } from "@/components/page-header";
 import { SessionError } from "@/server/modules/engagements/access";
+import { END_BLOCK_MESSAGE } from "@/server/modules/engagements/attendance";
 import {
   bookAgainList,
   packagesForStudent,
@@ -19,6 +20,7 @@ import { requireActor } from "@/server/modules/identity/actor";
 
 import { BookAgainCard, BookAgainStep } from "./book-again";
 import { BookNext } from "./book-next";
+import { EndedNotice, EndPackage } from "./end-package";
 import { SessionRow } from "./session-row";
 import { displayName } from "@/server/modules/identity/display-name";
 
@@ -77,52 +79,54 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
         </Card>
       ) : null}
 
-      {empty ? (
-        <EmptyState
-          icon="calendar"
-          title="Nothing booked yet"
-          description="Sessions show up here once a tutor accepts and you pick a time. This is what day one looks like for everybody."
-          action={<ButtonLink href="/courses">Find a tutor</ButtonLink>}
+      <EndedNotice>
+        {empty ? (
+          <EmptyState
+            icon="calendar"
+            title="Nothing booked yet"
+            description="Sessions show up here once a tutor accepts and you pick a time. This is what day one looks like for everybody."
+            action={<ButtonLink href="/courses">Find a tutor</ButtonLink>}
+          />
+        ) : null}
+
+        <Section
+          title="Did these happen?"
+          description="Both of you answer. If neither of you does within a day, it settles as attended and your tutor gets paid."
+          items={board.awaitingAnswer}
         />
-      ) : null}
 
-      <Section
-        title="Did these happen?"
-        description="Both of you answer. If neither of you does within a day, it settles as attended and your tutor gets paid."
-        items={board.awaitingAnswer}
-      />
+        <Section title="Coming up" items={board.upcoming} />
 
-      <Section title="Coming up" items={board.upcoming} />
+        {packages.length > 0 ? (
+          <section className="flex flex-col gap-2" aria-label="Your packages">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+              Your packages
+            </h2>
+            {packages.map((pkg) => (
+              <PackageCard key={pkg.engagementId} pkg={pkg} />
+            ))}
+          </section>
+        ) : null}
 
-      {packages.length > 0 ? (
-        <section className="flex flex-col gap-2" aria-label="Your packages">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-            Your packages
-          </h2>
-          {packages.map((pkg) => (
-            <PackageCard key={pkg.engagementId} pkg={pkg} />
-          ))}
-        </section>
-      ) : null}
+        {bookable.length > 0 ? (
+          <section className="flex flex-col gap-2" aria-label="Book again">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+              Book again
+            </h2>
+            {bookable.map((pair) => (
+              <BookAgainCard key={pair.tutorCourseId} pair={pair} />
+            ))}
+          </section>
+        ) : null}
 
-      {bookable.length > 0 ? (
-        <section className="flex flex-col gap-2" aria-label="Book again">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-            Book again
-          </h2>
-          {bookable.map((pair) => (
-            <BookAgainCard key={pair.tutorCourseId} pair={pair} />
-          ))}
-        </section>
-      ) : null}
-
-      <Section
-        title="Done"
-        description={
-          board.past.length > 0 ? "Settled, cancelled, or waiting on review." : undefined
-        }
-        items={board.past}
-      />
+        <Section
+          title="Done"
+          description={
+            board.past.length > 0 ? "Settled, cancelled, or waiting on review." : undefined
+          }
+          items={board.past}
+        />
+      </EndedNotice>
     </div>
   );
 }
@@ -152,6 +156,7 @@ function Section({
 }
 
 function PackageCard({ pkg }: { pkg: StudentPackage }) {
+  const { ending } = pkg;
   const tutor = displayName(pkg.tutorName, "tutor");
   const course = [pkg.courseCode ?? pkg.courseTitle, pkg.professorName]
     .filter(Boolean)
@@ -180,6 +185,21 @@ function PackageCard({ pkg }: { pkg: StudentPackage }) {
           Every session is on the calendar. Anything you do not use refunds at the
           end of term.
         </p>
+      )}
+
+      {ending.blocked ? (
+        <p className="text-sm text-muted">
+          {END_BLOCK_MESSAGE[ending.blocked.reason](formatDayTime(ending.blocked.scheduledAt))}
+        </p>
+      ) : (
+        <EndPackage
+          engagementId={pkg.engagementId}
+          tutorName={tutor}
+          refundMinor={ending.refundMinor}
+          currency={pkg.currency}
+          delivered={pkg.sessionsDelivered}
+          cancels={ending.cancels.map((when) => when.toISOString())}
+        />
       )}
     </Card>
   );
