@@ -1,10 +1,12 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
+  courseOffering,
   engagement,
   matchRequest,
   sessionBooking,
+  term,
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
@@ -95,10 +97,13 @@ export async function purchasePackage(params: {
         tutorProfileId: tutorCourse.tutorProfileId,
         tutorUserId: tutorProfile.userId,
         defaultLocation: tutorProfile.defaultLocation,
+        termEnded: sql<boolean>`${term.endsOn} < current_date`,
       })
       .from(matchRequest)
       .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
       .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+      .innerJoin(courseOffering, eq(courseOffering.id, matchRequest.courseOfferingId))
+      .innerJoin(term, eq(term.id, courseOffering.termId))
       .where(
         and(
           eq(matchRequest.id, params.requestId),
@@ -119,6 +124,9 @@ export async function purchasePackage(params: {
 
     if (request.tutorUserId === params.actor.userId) {
       throw new PurchaseError("You cannot buy a package from yourself.");
+    }
+    if (request.termEnded) {
+      throw new PurchaseError("The term has ended, so this package can no longer be bought.");
     }
 
     const existing = await tx

@@ -14,6 +14,7 @@ import {
   engagement,
   institution,
   ledgerEntry,
+  matchRequest,
   messageThread,
   reliabilityEvent,
   sessionBooking,
@@ -30,6 +31,7 @@ import { refreshScores } from "@/server/modules/scoring/stats";
 
 import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
+import { purchasePackage, slotsForRequest } from "./purchase";
 import { packagesForStudent } from "./reads";
 import { bookSession, slotsForEngagement } from "./scheduling";
 import { EndPackageError, closeWithRefund, endPackage, runTermEndRefunds } from "./termEnd";
@@ -172,6 +174,7 @@ after(async () => {
     await db.delete(sessionBooking).where(inArray(sessionBooking.engagementId, engagements));
     await db.delete(engagement).where(inArray(engagement.id, engagements));
   }
+  await db.delete(matchRequest).where(inArray(matchRequest.institutionId, institutions));
   await db.delete(messageThread).where(inArray(messageThread.institutionId, institutions));
   await db.delete(tutorAvailability).where(inArray(tutorAvailability.institutionId, institutions));
   await db.delete(tutorCourse).where(inArray(tutorCourse.institutionId, institutions));
@@ -440,4 +443,16 @@ test("a package whose term has ended takes no new bookings", async () => {
   await assert.rejects(bookSession({ actor: student, engagementId: id, slotStartsAt: hours(24) }), /term has ended/);
   assert.equal(await scheduledLeft(id), 0);
   await sweep(id);
+});
+
+test("an accepted request for a term that has ended can no longer be bought", async () => {
+  const student = await person(home.institutionId);
+  const [request] = await db
+    .insert(matchRequest)
+    .values({ institutionId: home.institutionId, studentProfileId: student.studentProfileId, tutorCourseId, courseOfferingId: endedOfferingId, status: "accepted", requestedKind: "exam_anchored", expiresAt: hours(1) })
+    .returning({ id: matchRequest.id });
+  const [slot] = await slotsForRequest({ actor: student, requestId: request.id });
+  await assert.rejects(purchasePackage({ actor: student, requestId: request.id, anchorExamId: null, slotStartsAt: slot }), /term has ended/);
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(engagement).where(eq(engagement.studentProfileId, student.studentProfileId));
+  assert.equal(n, 0);
 });
