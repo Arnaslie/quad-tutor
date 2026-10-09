@@ -646,13 +646,27 @@ test("a failed refund after release is flagged and retried by the sweep; a booke
   assert.equal((await discrepancies(booked.engagementId))[0].refundReference, null);
 });
 
-test("the sweep starts no new rows past its deadline", async () => {
-  const { engagementId } = await opened();
-  await expireRow(engagementId);
-  assert.deepEqual(await syncPendingCheckouts(home.institutionId, Date.now() - 1), { settled: 0, failed: 0 });
-  assert.equal((await state(engagementId)).status, "pending_payment");
+test("past its deadline the sweep still settles one row and retries one refund per campus", async () => {
+  const first = await opened();
+  const second = await opened();
+  await expireRow(first.engagementId);
+  await expireRow(second.engagementId);
+  const failedRefund = await opened();
+  await fakeStripe.pay(failedRefund.sessionId);
+  await releaseCheckout({ engagementId: failedRefund.engagementId, institutionId: home.institutionId, checkoutSessionId: failedRefund.sessionId });
+  await patched("refund", async () => ({ id: `re_${run}_down`, status: "failed" }), async () => {
+    assert.equal((await syncCheckout(failedRefund.sessionId)).outcome, "refund_failed");
+  });
+
+  await syncPendingCheckouts(home.institutionId, Date.now() - 1);
+  const statuses = [(await state(first.engagementId)).status, (await state(second.engagementId)).status].sort();
+  assert.deepEqual(statuses, ["cancelled", "pending_payment"]);
+  const [refund] = await fakeStripe.refunds(failedRefund.sessionId);
+  assert.equal((await discrepancies(failedRefund.engagementId))[0].refundReference, refund.id);
+
   await syncPendingCheckouts(home.institutionId);
-  assert.equal((await state(engagementId)).status, "cancelled");
+  assert.equal((await state(first.engagementId)).status, "cancelled");
+  assert.equal((await state(second.engagementId)).status, "cancelled");
 });
 
 test("money invariants hold after every checkout path", async () => {

@@ -448,12 +448,13 @@ async function retryDiscrepancyRefunds(
         ),
       ),
     )
+    .orderBy(sql`random()`)
     .limit(SWEEP_LIMIT);
 
   let settled = 0;
   let failed = 0;
-  for (const row of rows) {
-    if (Date.now() > deadline) break;
+  for (const [index, row] of rows.entries()) {
+    if (index > 0 && Date.now() > deadline) break;
     if (!row.engagementId || !row.paymentIntentId) continue;
     try {
       const refunded = await refundPayment({ engagementId: row.engagementId, institutionId }, row.paymentIntentId, row.id);
@@ -467,7 +468,7 @@ async function retryDiscrepancyRefunds(
   return { settled, failed };
 }
 
-/** Stops starting new rows at the deadline, so later campuses' jobs still fit in the cron's maxDuration. */
+/** Past the deadline it starts only one row per campus, so later campuses' jobs still fit in maxDuration. */
 export async function syncPendingCheckouts(
   institutionId: string,
   deadline = Date.now() + SWEEP_BUDGET_MS,
@@ -487,8 +488,8 @@ export async function syncPendingCheckouts(
 
   let settled = 0;
   let failed = 0;
-  for (const row of rows) {
-    if (Date.now() > deadline) break;
+  for (const [index, row] of rows.entries()) {
+    if (index > 0 && Date.now() > deadline) break;
     try {
       await settleCheckout(row);
       settled += 1;
