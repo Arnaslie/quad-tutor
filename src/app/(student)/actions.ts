@@ -168,7 +168,7 @@ export async function purchase(
     return { ok: false, error: "Pick a package and a time before checking out." };
   }
 
-  let target: string;
+  let target: Awaited<ReturnType<typeof checkoutRedirect>>;
   try {
     target = await checkoutRedirect(actor.institutionId, () =>
       purchasePackage({
@@ -184,9 +184,10 @@ export async function purchase(
     return toResult(error);
   }
 
+  if (target.fulfilled) notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/requests");
   revalidatePath("/sessions");
-  redirect(target);
+  redirect(target.url);
 }
 
 export async function topUp(
@@ -203,7 +204,7 @@ export async function topUp(
 
   if (!parsed.success) return { ok: false, error: "Pick a time for this session." };
 
-  let target: string;
+  let target: Awaited<ReturnType<typeof checkoutRedirect>>;
   try {
     target = await checkoutRedirect(actor.institutionId, () =>
       purchaseTopUp({
@@ -217,8 +218,9 @@ export async function topUp(
     return toResult(error);
   }
 
+  if (target.fulfilled) notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
-  redirect(target);
+  redirect(target.url);
 }
 
 export async function askAgain(

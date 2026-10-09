@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { db } from "@/server/db";
 import { institution } from "@/server/db/schema";
 import { syncPendingCheckouts } from "@/server/modules/billing/checkout-session";
+import { errorFacts } from "@/server/modules/billing/stripe";
 import { releaseLapsedConfirmations } from "@/server/modules/engagements/confirmation";
 import { runTermEndRefunds } from "@/server/modules/engagements/termEnd";
 import { runNotifications } from "@/server/modules/notifications/dispatch";
@@ -68,8 +69,8 @@ export async function GET(request: Request) {
       refundsFailed += failed;
       refunded += refunds.length;
       refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
-      const checkouts = await syncPendingCheckouts(campus.id).catch((error) => {
-        console.error(`[cron] checkout sweep for ${campus.slug} failed`, error);
+      const checkouts = await syncPendingCheckouts(campus.id, startedAt + 30_000).catch((error) => {
+        console.error(`[cron] checkout sweep for ${campus.slug} failed`, errorFacts(error));
         return { settled: 0, failed: 1 };
       });
       checkoutsSettled += checkouts.settled;

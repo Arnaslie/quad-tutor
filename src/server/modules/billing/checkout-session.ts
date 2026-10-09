@@ -13,13 +13,16 @@ import {
 } from "@/server/modules/engagements/purchase";
 import type { Actor } from "@/server/modules/identity/actor";
 
-import { GatewayError, stripeGateway, type ChargeFee, type CheckoutSession } from "./stripe";
+import { GatewayError, errorFacts, stripeGateway, type ChargeFee, type CheckoutSession } from "./stripe";
 
 const RESUME_MARGIN_MS = 5 * 60 * 1000;
 const STRIPE_MIN_EXPIRY_MS = 30 * 60 * 1000;
 const SWEEP_GRACE_MS = 2 * 60 * 1000;
 const SWEEP_LIMIT = 20;
 const UNAVAILABLE = "Payments are unavailable right now. Nothing was charged; try again in a minute.";
+const UNREACHABLE =
+  "We could not reach our payment provider. Try again in a minute. If you already paid, your booking appears under Sessions shortly.";
+const SWEEP_BUDGET_MS = 30_000;
 
 type Ids = { engagementId: string; institutionId: string };
 type Patience = { patient: boolean };
@@ -34,6 +37,7 @@ export type SyncOutcome =
   | "refunded"
   | "settled"
   | "awaiting_fee"
+  | "refund_failed"
   | "foreign";
 
 export function appUrl(path: string): string {
@@ -49,7 +53,7 @@ function sessionParams(checkout: Checkout) {
     description: checkout.description,
     customerEmail: checkout.customerEmail,
     expiresAt: checkout.expiresAt,
-    successUrl: appUrl(`/sessions?package=${checkout.engagementId}&checkout={CHECKOUT_SESSION_ID}`),
+    successUrl: appUrl(`/sessions?package=${checkout.engagementId}`),
     cancelUrl: appUrl(`/checkout/cancel?package=${checkout.engagementId}`),
   };
 }
@@ -84,14 +88,14 @@ async function openCheckout(checkout: Checkout): Promise<string | null> {
   try {
     session = await stripeGateway().createCheckout(sessionParams(checkout));
   } catch (error) {
-    console.error(`[checkout] create failed for ${checkout.engagementId}`, error);
+    console.error(`[checkout] create failed for ${checkout.engagementId}`, errorFacts(error));
     throw new PurchaseError(UNAVAILABLE);
   }
 
   if (await stamp(ids, session.id)) return session.url;
   await stripeGateway()
     .expireCheckout(session.id)
-    .catch((error) => console.error(`[checkout] could not expire unstamped ${session.id}`, error));
+    .catch((error) => console.error(`[checkout] could not expire unstamped ${session.id}`, errorFacts(error)));
   return null;
 }
 
@@ -116,22 +120,24 @@ async function resumeUrl(checkout: Checkout): Promise<string | null> {
 export async function checkoutRedirect(
   institutionId: string,
   buy: () => Promise<PurchaseResult>,
-): Promise<string> {
+): Promise<{ url: string; fulfilled: boolean }> {
+  let fulfilled = false;
   try {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const result = await buy();
-      if (result.outcome === "paid") return `/sessions?package=${result.engagementId}`;
+      if (result.outcome === "paid") return { url: `/sessions?package=${result.engagementId}`, fulfilled };
 
       if (result.outcome === "checkout") {
         const url = await resumeUrl(result.checkout);
-        if (url) return url;
+        if (url) return { url, fulfilled };
       }
-      await settleCheckout({ engagementId: result.engagementId, institutionId });
+      const settled = await settleCheckout({ engagementId: result.engagementId, institutionId });
+      fulfilled ||= settled === "fulfilled";
     }
   } catch (error) {
     if (!(error instanceof GatewayError)) throw error;
-    console.error("[checkout] gateway error", error);
-    throw new PurchaseError(UNAVAILABLE);
+    console.error("[checkout] gateway error", errorFacts(error));
+    throw new PurchaseError(UNREACHABLE);
   }
   throw new PurchaseError("Your last checkout is still closing. Try again in a minute.");
 }
@@ -161,25 +167,32 @@ async function recordDiscrepancy(
     .onConflictDoNothing();
 }
 
-async function refundPayment(ids: Ids, paymentIntentId: string, discrepancyId?: string): Promise<void> {
+const live = (refund: { status: string | null }) => refund.status !== "failed" && refund.status !== "canceled";
+
+async function refundPayment(ids: Ids, paymentIntentId: string, discrepancyId?: string): Promise<boolean> {
   const gateway = stripeGateway();
-  const previous = (await gateway.listRefunds(paymentIntentId)).find(
-    (refund) => refund.status !== "failed" && refund.status !== "canceled",
-  );
-  const refund = previous ?? (await gateway.refund({ paymentIntentId, ...ids }));
+  const refund =
+    (await gateway.listRefunds(paymentIntentId)).find(live) ??
+    (await gateway.refund({ paymentIntentId, ...ids }));
+  if (!live(refund)) {
+    console.error(`[checkout] refund ${refund.id} for ${paymentIntentId} is ${refund.status}; not recorded`);
+    return false;
+  }
   console.warn(`[checkout] refunded ${paymentIntentId} for ${ids.engagementId}: ${refund.id}`);
 
-  if (!discrepancyId) return;
-  await db
-    .update(moneyDiscrepancy)
-    .set({ refundReference: refund.id })
-    .where(
-      and(
-        eq(moneyDiscrepancy.id, discrepancyId),
-        eq(moneyDiscrepancy.institutionId, ids.institutionId),
-        isNull(moneyDiscrepancy.refundReference),
-      ),
-    );
+  if (discrepancyId) {
+    await db
+      .update(moneyDiscrepancy)
+      .set({ refundReference: refund.id })
+      .where(
+        and(
+          eq(moneyDiscrepancy.id, discrepancyId),
+          eq(moneyDiscrepancy.institutionId, ids.institutionId),
+          isNull(moneyDiscrepancy.refundReference),
+        ),
+      );
+  }
+  return true;
 }
 
 function uniqueViolation(error: unknown, constraint: string): boolean {
@@ -201,12 +214,23 @@ async function chargeFee(paymentIntentId: string, patience: Patience): Promise<C
   return null;
 }
 
-async function stillPending(ids: Ids): Promise<boolean> {
+/** Only a payment fulfil will accept needs its fee; refund paths never wait for one. */
+async function fulfillable(ids: Ids, session: CheckoutSession): Promise<boolean> {
   const [row] = await db
-    .select({ status: engagement.status })
+    .select({
+      status: engagement.status,
+      sessionId: engagement.stripeCheckoutSessionId,
+      priceMinor: engagement.pricePaidMinor,
+      currency: engagement.currency,
+    })
     .from(engagement)
     .where(and(eq(engagement.id, ids.engagementId), eq(engagement.institutionId, ids.institutionId)));
-  return row?.status === "pending_payment";
+  return (
+    row?.status === "pending_payment" &&
+    (row.sessionId === null || row.sessionId === session.id) &&
+    row.priceMinor === session.amountTotal &&
+    row.currency === session.currency?.toLowerCase()
+  );
 }
 
 async function fulfil(
@@ -216,7 +240,7 @@ async function fulfil(
   patience: Patience,
 ): Promise<SyncOutcome> {
   let fee: ChargeFee = null;
-  if (await stillPending(ids)) {
+  if (await fulfillable(ids, session)) {
     fee = await chargeFee(paymentIntentId, patience);
     if (!fee && patience.patient) {
       throw new GatewayError(`The charge for ${paymentIntentId} has no balance transaction yet.`);
@@ -263,12 +287,12 @@ async function fulfil(
     }
     return "settled";
   }
-  await refundPayment(
+  const refunded = await refundPayment(
     ids,
     paymentIntentId,
     result?.outcome === "discrepancy" ? result.discrepancyId : undefined,
   );
-  return "refunded";
+  return refunded ? "refunded" : "refund_failed";
 }
 
 async function act(session: CheckoutSession, patience: Patience): Promise<SyncOutcome> {
@@ -342,7 +366,7 @@ export async function settleCheckout(ids: Ids): Promise<SyncOutcome> {
       recovered = await gateway.createCheckout(sessionParams(checkout));
     } catch (error) {
       if (!definitive(error)) throw error;
-      console.warn(`[checkout] no Session to recover for ${ids.engagementId}`, error);
+      console.warn(`[checkout] no Session to recover for ${ids.engagementId}`, errorFacts(error));
       return closeUnstamped(checkout);
     }
     if (!(await stamp(ids, recovered.id))) return "settled";
@@ -361,7 +385,7 @@ export async function settleCheckout(ids: Ids): Promise<SyncOutcome> {
     try {
       session = await gateway.expireCheckout(sessionId);
     } catch (error) {
-      console.warn(`[checkout] expire failed for ${sessionId}; asking Stripe again`, error);
+      console.warn(`[checkout] expire failed for ${sessionId}; asking Stripe again`, errorFacts(error));
       session = await gateway.retrieveCheckout(sessionId);
     }
   }
@@ -369,7 +393,10 @@ export async function settleCheckout(ids: Ids): Promise<SyncOutcome> {
 }
 
 /** A mismatch whose refund call failed is retried here; listing refunds first keeps it to one. */
-async function retryDiscrepancyRefunds(institutionId: string): Promise<{ settled: number; failed: number }> {
+async function retryDiscrepancyRefunds(
+  institutionId: string,
+  deadline: number,
+): Promise<{ settled: number; failed: number }> {
   const rows = await db
     .select({
       id: moneyDiscrepancy.id,
@@ -392,19 +419,25 @@ async function retryDiscrepancyRefunds(institutionId: string): Promise<{ settled
   let settled = 0;
   let failed = 0;
   for (const row of rows) {
+    if (Date.now() > deadline) break;
     if (!row.engagementId || !row.paymentIntentId) continue;
     try {
-      await refundPayment({ engagementId: row.engagementId, institutionId }, row.paymentIntentId, row.id);
-      settled += 1;
+      const refunded = await refundPayment({ engagementId: row.engagementId, institutionId }, row.paymentIntentId, row.id);
+      if (refunded) settled += 1;
+      else failed += 1;
     } catch (error) {
       failed += 1;
-      console.error(`[checkout] discrepancy refund still failing for ${row.id}`, error);
+      console.error(`[checkout] discrepancy refund still failing for ${row.id}`, errorFacts(error));
     }
   }
   return { settled, failed };
 }
 
-export async function syncPendingCheckouts(institutionId: string): Promise<{ settled: number; failed: number }> {
+/** Stops starting new rows at the deadline, so later campuses' jobs still fit in the cron's maxDuration. */
+export async function syncPendingCheckouts(
+  institutionId: string,
+  deadline = Date.now() + SWEEP_BUDGET_MS,
+): Promise<{ settled: number; failed: number }> {
   const rows = await db
     .select({ engagementId: engagement.id, institutionId: engagement.institutionId })
     .from(engagement)
@@ -421,15 +454,16 @@ export async function syncPendingCheckouts(institutionId: string): Promise<{ set
   let settled = 0;
   let failed = 0;
   for (const row of rows) {
+    if (Date.now() > deadline) break;
     try {
       await settleCheckout(row);
       settled += 1;
     } catch (error) {
       failed += 1;
-      console.error(`[checkout] sweep could not settle ${row.engagementId}`, error);
+      console.error(`[checkout] sweep could not settle ${row.engagementId}`, errorFacts(error));
     }
   }
-  const refunds = await retryDiscrepancyRefunds(institutionId);
+  const refunds = await retryDiscrepancyRefunds(institutionId, deadline);
   return { settled: settled + refunds.settled, failed: failed + refunds.failed };
 }
 
@@ -452,7 +486,7 @@ export async function syncOwnCheckouts(actor: Actor): Promise<boolean> {
   for (const row of rows) {
     if (!row.sessionId) continue;
     const outcome = await syncCheckout(row.sessionId, IMPATIENT).catch((error) => {
-      console.error(`[checkout] could not sync ${row.sessionId}`, error);
+      console.error(`[checkout] could not sync ${row.sessionId}`, errorFacts(error));
       return null;
     });
     fulfilled ||= outcome?.outcome === "fulfilled";
@@ -478,22 +512,16 @@ export async function ownCheckout(actor: Actor, engagementId: string): Promise<O
 }
 
 /** The student backed out on Stripe's page: expire the Session, then release the hold. */
-export async function cancelCheckout(actor: Actor, engagementId: string): Promise<OwnCheckout | null> {
-  const [row] = await db
-    .select({ status: engagement.status })
-    .from(engagement)
-    .where(
-      and(
-        eq(engagement.id, engagementId),
-        eq(engagement.studentProfileId, actor.studentProfileId),
-        eq(engagement.institutionId, actor.institutionId),
-      ),
-    )
-    .limit(1);
-  if (row?.status === "pending_payment") {
-    await settleCheckout({ engagementId, institutionId: actor.institutionId }).catch(
-      (error) => console.error(`[checkout] cancel could not settle ${engagementId}`, error),
-    );
-  }
-  return ownCheckout(actor, engagementId);
+export async function cancelCheckout(
+  actor: Actor,
+  engagementId: string,
+): Promise<{ checkout: OwnCheckout | null; fulfilled: boolean }> {
+  const before = await ownCheckout(actor, engagementId);
+  if (before?.status !== "pending_payment") return { checkout: before, fulfilled: false };
+
+  const settled = await settleCheckout({ engagementId, institutionId: actor.institutionId }).catch((error) => {
+    console.error(`[checkout] cancel could not settle ${engagementId}`, errorFacts(error));
+    return null;
+  });
+  return { checkout: await ownCheckout(actor, engagementId), fulfilled: settled === "fulfilled" };
 }

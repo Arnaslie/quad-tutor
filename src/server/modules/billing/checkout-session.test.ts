@@ -86,7 +86,7 @@ async function opened(student?: Actor) {
   const actor = student ?? (await person());
   const { requestId, slots } = await accepted(actor);
   const buy = (slot = slots[0]) => purchasePackage({ actor, requestId, anchorExamId: null, slotStartsAt: slot });
-  const url = await checkoutRedirect(home.institutionId, () => buy());
+  const { url } = await checkoutRedirect(home.institutionId, () => buy());
   const row = await pending(actor);
   return { actor, buy, slots, url, engagementId: row.id, sessionId: row.sessionId! };
 }
@@ -253,11 +253,11 @@ test("buy → Stripe page → signed completed event books the package once", as
 
 test("a second click resumes the same Stripe page", async () => {
   const { buy, url, sessionId } = await opened();
-  assert.equal(await checkoutRedirect(home.institutionId, () => buy()), url);
+  assert.deepEqual(await checkoutRedirect(home.institutionId, () => buy()), { url, fulfilled: false });
   await fakeStripe.pay(sessionId);
   await syncCheckout(sessionId);
   const { engagementId } = await buy();
-  assert.equal(await checkoutRedirect(home.institutionId, () => buy()), `/sessions?package=${engagementId}`);
+  assert.deepEqual(await checkoutRedirect(home.institutionId, () => buy()), { url: `/sessions?package=${engagementId}`, fulfilled: false });
 });
 
 test("the webhook rejects bad signatures and livemode mismatches, and ignores other events", async () => {
@@ -527,7 +527,7 @@ test("an unstamped hold with under 30 minutes left is settled and held afresh", 
   const { engagementId } = await buy();
   await db.update(engagement).set({ checkoutExpiresAt: new Date(Date.now() + 20 * 60 * 1000) }).where(eq(engagement.id, engagementId));
 
-  const url = await checkoutRedirect(home.institutionId, buy);
+  const { url } = await checkoutRedirect(home.institutionId, buy);
   const fresh = await pending(actor);
   assert.notEqual(fresh.id, engagementId);
   assert.equal(url, (await stripeGateway().retrieveCheckout(fresh.sessionId!)).url);
@@ -536,7 +536,7 @@ test("an unstamped hold with under 30 minutes left is settled and held afresh", 
 
 test("a different choice expires the open checkout and opens a new one", async () => {
   const { actor, buy, slots, engagementId, sessionId } = await opened();
-  const url = await checkoutRedirect(home.institutionId, () => buy(slots[1]));
+  const { url } = await checkoutRedirect(home.institutionId, () => buy(slots[1]));
   const fresh = await pending(actor);
   assert.notEqual(fresh.id, engagementId);
   assert.equal(url, (await stripeGateway().retrieveCheckout(fresh.sessionId!)).url);
@@ -583,7 +583,7 @@ test("cancel and reads only touch the viewer's own checkouts", async () => {
   const mine = await opened();
   const theirs = await opened();
 
-  assert.equal(await cancelCheckout(mine.actor, theirs.engagementId), null);
+  assert.deepEqual(await cancelCheckout(mine.actor, theirs.engagementId), { checkout: null, fulfilled: false });
   assert.equal((await state(theirs.engagementId)).status, "pending_payment");
 
   await fakeStripe.pay(theirs.sessionId);
@@ -592,8 +592,41 @@ test("cancel and reads only touch the viewer's own checkouts", async () => {
   assert.equal(await syncOwnCheckouts(theirs.actor), true);
   assert.deepEqual(await state(theirs.engagementId), paidState);
 
-  assert.deepEqual(await cancelCheckout(mine.actor, mine.engagementId), { status: "cancelled", kind: "exam_anchored" });
+  assert.deepEqual(await cancelCheckout(mine.actor, mine.engagementId), { checkout: { status: "cancelled", kind: "exam_anchored" }, fulfilled: false });
   assert.equal((await stripeGateway().retrieveCheckout(mine.sessionId)).status, "expired");
+});
+
+test("a paid Session found while settling is reported so the caller can notify", async () => {
+  const { buy, engagementId, sessionId } = await opened();
+  await fakeStripe.pay(sessionId);
+  await db.update(engagement).set({ checkoutExpiresAt: new Date(Date.now() + 60_000) }).where(eq(engagement.id, engagementId));
+  assert.deepEqual(await checkoutRedirect(home.institutionId, () => buy()), { url: `/sessions?package=${engagementId}`, fulfilled: true });
+
+  const other = await opened();
+  await fakeStripe.pay(other.sessionId);
+  assert.deepEqual(await cancelCheckout(other.actor, other.engagementId), { checkout: { status: "active", kind: "exam_anchored" }, fulfilled: true });
+  assert.equal((await state(engagementId)).status, "active");
+});
+
+test("refund paths never fetch the fee, and a failed refund is not recorded", async () => {
+  const { engagementId, sessionId } = await opened();
+  await fakeStripe.pay(sessionId, { amountTotal: 100 });
+  const create = stripeGateway().refund;
+  await patched("chargeFee", async () => { throw new Error("fee must not be fetched"); }, async () => {
+    await patched("refund", async (params) => ({ ...(await create(params)), status: "failed" }), async () => {
+      assert.equal((await syncCheckout(sessionId)).outcome, "refund_failed");
+    });
+  });
+  assert.equal((await discrepancies(engagementId))[0].refundReference, null);
+});
+
+test("the sweep starts no new rows past its deadline", async () => {
+  const { engagementId } = await opened();
+  await expireRow(engagementId);
+  assert.deepEqual(await syncPendingCheckouts(home.institutionId, Date.now() - 1), { settled: 0, failed: 0 });
+  assert.equal((await state(engagementId)).status, "pending_payment");
+  await syncPendingCheckouts(home.institutionId);
+  assert.equal((await state(engagementId)).status, "cancelled");
 });
 
 test("money invariants hold after every checkout path", async () => {

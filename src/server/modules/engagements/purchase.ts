@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -91,6 +91,7 @@ export async function checkoutDetails(
         eq(engagement.institutionId, params.institutionId),
       ),
     )
+    .orderBy(asc(courseCodeAlias.code))
     .limit(1);
 
   const row = rows.at(0);

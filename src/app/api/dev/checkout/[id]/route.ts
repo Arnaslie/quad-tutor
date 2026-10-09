@@ -44,6 +44,5 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/dev/chec
     return new Response(`Webhook answered ${delivered.status}: ${await delivered.text()}`, { status: 502 });
   }
 
-  const back = (session.successUrl ?? "/sessions").replace("{CHECKOUT_SESSION_ID}", id);
-  return Response.redirect(new URL(back, request.url), 303);
+  return Response.redirect(new URL(session.successUrl ?? "/sessions", request.url), 303);
 }

@@ -10,12 +10,21 @@ const MIN_EXPIRY_SECONDS = 30 * 60;
 const MAX_EXPIRY_SECONDS = 24 * 60 * 60;
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
-type ErrorFacts = { status?: number; code?: string; param?: string; idempotency?: boolean };
+type ErrorFacts = {
+  status?: number;
+  code?: string;
+  param?: string;
+  type?: string;
+  requestId?: string;
+  idempotency?: boolean;
+};
 
 export class GatewayError extends Error {
   readonly status?: number;
   readonly code?: string;
   readonly param?: string;
+  readonly type?: string;
+  readonly requestId?: string;
   readonly idempotency: boolean;
 
   constructor(message: string, facts: ErrorFacts = {}, options?: ErrorOptions) {
@@ -23,12 +32,23 @@ export class GatewayError extends Error {
     this.status = facts.status;
     this.code = facts.code;
     this.param = facts.param;
+    this.type = facts.type;
+    this.requestId = facts.requestId;
     this.idempotency = facts.idempotency ?? false;
   }
 
   get missing(): boolean {
     return this.code === "resource_missing";
   }
+}
+
+/** Stripe messages can echo request params such as customer_email, so logs carry only these facts. */
+export function errorFacts(error: unknown): string {
+  if (error instanceof GatewayError) {
+    const { status, code, type, requestId } = error;
+    return JSON.stringify({ status, code, type, requestId });
+  }
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
 export type NewCheckout = {
@@ -109,6 +129,8 @@ async function call<T>(work: () => Promise<T>): Promise<T> {
         status: error.statusCode,
         code: error.code,
         param: error.param,
+        type: error.rawType ?? error.type,
+        requestId: error.requestId,
         idempotency: error instanceof Stripe.errors.StripeIdempotencyError && error.statusCode === 400,
       },
       { cause: error },
@@ -120,8 +142,10 @@ function realGateway(): Gateway {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new GatewayError("STRIPE_SECRET_KEY is not set.");
   const livemode = key.startsWith("sk_live_");
-  if (livemode && process.env.VERCEL_ENV !== "production") {
-    throw new GatewayError("A live Stripe key is refused outside production.");
+  if (livemode) {
+    throw new GatewayError(
+      "Live Stripe keys are refused until refunds through Stripe and tutor transfers ship (Stripe plan items 4 and 6). Use an sk_test_ key.",
+    );
   }
   const stripe = new Stripe(key, { apiVersion: API_VERSION, maxNetworkRetries: 2 });
 

@@ -1,3 +1,4 @@
+import { errorFacts } from "@/server/modules/billing/stripe";
 import { handleStripeWebhook } from "@/server/modules/billing/webhook";
 import { notifySessionChangesSoon } from "@/server/modules/notifications/soon";
 
@@ -11,7 +12,7 @@ export async function POST(request: Request) {
     }
     return Response.json({ received: true, outcome: result.outcome });
   } catch (error) {
-    console.error("[stripe webhook]", error);
+    console.error("[stripe webhook]", errorFacts(error));
     return new Response("Webhook handler failed", { status: 500 });
   }
 }
