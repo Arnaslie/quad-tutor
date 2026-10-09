@@ -121,6 +121,7 @@ export async function closeWithRefund(
       .where(
         and(
           eq(sessionBooking.engagementId, engagementId),
+          eq(sessionBooking.institutionId, params.institutionId),
           inArray(sessionBooking.status, ["scheduled", "disputed"]),
         ),
       );
@@ -138,6 +139,7 @@ export async function closeWithRefund(
     .where(
       and(
         eq(sessionBooking.engagementId, engagementId),
+        eq(sessionBooking.institutionId, params.institutionId),
         eq(sessionBooking.status, "scheduled"),
       ),
     );
@@ -148,6 +150,7 @@ export async function closeWithRefund(
     .where(
       and(
         eq(sessionBooking.engagementId, engagementId),
+        eq(sessionBooking.institutionId, params.institutionId),
         eq(sessionBooking.status, "completed"),
       ),
     );

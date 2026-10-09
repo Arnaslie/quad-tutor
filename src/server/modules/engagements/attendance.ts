@@ -98,7 +98,8 @@ function first(reason: EndBlock["reason"], hits: { scheduledAt: Date }[]): EndBl
 export const END_BLOCK_MESSAGE: Record<EndBlock["reason"], (when: string) => string> = {
   late_cancel_window: (when) =>
     `Your session on ${when} is less than ${LATE_CANCEL_HOURS} hours away. You can end the package after it.`,
-  awaiting_answer: (when) => `Answer whether your session on ${when} happened first.`,
+  awaiting_answer: (when) =>
+    `Your session on ${when} is still being confirmed. You can end the package once it settles.`,
   disputed: (when) =>
     `Your session on ${when} is under review. You can end the package once it is settled.`,
 };

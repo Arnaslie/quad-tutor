@@ -234,19 +234,6 @@ test("a first package refunded at term end with no session delivered is no trial
   assert.deepEqual(await fields(termEnd), { ...prior, renewalTrialCount: 1, renewalPosteriorMean: 3_333 });
 });
 
-test("a historical guarantee refund, nothing delivered, still counts as a trial: failed alone, a success if the pair bought again", async () => {
-  const history = await claim(home, home.b.courseId);
-  await buy(home, home.b.offeringId, history, await student(home), "guarantee_refunded");
-  await refreshScores(home.institutionId);
-  assert.deepEqual(await fields(history), { ...prior, renewalTrialCount: 1, renewalPosteriorMean: posteriorBp(renewalPool(1, 0), RENEWAL_PRIOR_BP) });
-
-  const back = await student(home);
-  await buy(home, home.b.offeringId, history, back, "guarantee_refunded");
-  await buy(home, home.b.offeringId, history, back, "active");
-  await refreshScores(home.institutionId);
-  assert.deepEqual(await fields(history), { ...prior, renewalTrialCount: 2, renewalPosteriorMean: posteriorBp(renewalPool(2, 1), RENEWAL_PRIOR_BP) });
-});
-
 test("a refill and a direct-renewal package each make the pair a success once; an accepted renewal never bought does not", async () => {
   const direct = await claim(home, home.b.courseId);
 

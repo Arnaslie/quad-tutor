@@ -237,7 +237,7 @@ test("refused while a session is past its start and unanswered, or disputed", as
   const student = await person(home.institutionId);
   const id = await pkg(student);
   const started = await session(id, hours(-2));
-  await assert.rejects(endPackage({ actor: student, engagementId: id }), /Answer whether/);
+  await assert.rejects(endPackage({ actor: student, engagementId: id }), /still being confirmed/);
 
   await db.update(sessionBooking).set({ status: "disputed", resolution: "disputed" }).where(eq(sessionBooking.id, started));
   await assert.rejects(endPackage({ actor: student, engagementId: id }), /under review/);
