@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { db } from "@/server/db";
 import { institution } from "@/server/db/schema";
 import { syncPendingCheckouts } from "@/server/modules/billing/checkout-session";
+import { retryUnstampedRefunds } from "@/server/modules/billing/refunds";
 import { errorFacts } from "@/server/modules/billing/stripe";
 import { releaseLapsedConfirmations } from "@/server/modules/engagements/confirmation";
 import { runTermEndRefunds } from "@/server/modules/engagements/termEnd";
@@ -51,6 +52,8 @@ export async function GET(request: Request) {
     let refreshedScores = 0;
     let checkoutsSettled = 0;
     let checkoutsFailed = 0;
+    let cardRefundsSettled = 0;
+    let cardRefundsFailed = 0;
 
     for (const campus of campuses) {
       releasedRatings += await releaseRatings(campus.id).catch((error) => {
@@ -61,7 +64,7 @@ export async function GET(request: Request) {
         console.error(`[cron] proof purge for ${campus.slug} failed`, error);
         return 0;
       });
-      const { refunds, held, failed } = await runTermEndRefunds(campus.id).catch((error) => {
+      const { refunds, held, failed } = await runTermEndRefunds(campus.id, startedAt + 30_000).catch((error) => {
         console.error(`[cron] term-end refunds for ${campus.slug} failed`, error);
         return { refunds: [], held: 0, failed: 1 };
       });
@@ -75,6 +78,12 @@ export async function GET(request: Request) {
       });
       checkoutsSettled += checkouts.settled;
       checkoutsFailed += checkouts.failed;
+      const cardRefunds = await retryUnstampedRefunds(campus.id, startedAt + 30_000).catch((error) => {
+        console.error(`[cron] card refund retries for ${campus.slug} failed`, errorFacts(error));
+        return { settled: 0, failed: 1 };
+      });
+      cardRefundsSettled += cardRefunds.settled;
+      cardRefundsFailed += cardRefunds.failed;
       notified += await runNotifications(campus.id);
       refreshedScores += await refreshScores(campus.id).catch((error) => {
         console.error(`[cron] score refresh for ${campus.slug} failed`, error);
@@ -95,6 +104,8 @@ export async function GET(request: Request) {
       refreshedScores,
       checkoutsSettled,
       checkoutsFailed,
+      cardRefundsSettled,
+      cardRefundsFailed,
       campuses: campuses.length,
       tookMs: Date.now() - startedAt,
     });

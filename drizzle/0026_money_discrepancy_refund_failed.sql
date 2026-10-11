@@ -1,0 +1,1 @@
+ALTER TYPE "public"."money_discrepancy_kind" ADD VALUE 'refund_failed';

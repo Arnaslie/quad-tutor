@@ -106,6 +106,7 @@ export const moneyDiscrepancyKind = pgEnum("money_discrepancy_kind", [
   "ledger_vs_stripe_charge",
   "ledger_vs_stripe_transfers",
   "unstamped_reference",
+  "refund_failed",
 ]);
 
 export const packageKind = pgEnum("package_kind", [

@@ -13,7 +13,16 @@ import {
 } from "@/server/modules/engagements/purchase";
 import type { Actor } from "@/server/modules/identity/actor";
 
-import { GatewayError, errorFacts, stripeGateway, type ChargeFee, type CheckoutSession } from "./stripe";
+import { openRefundFailure, recordDiscrepancy, recordRefundFailure } from "./discrepancy";
+import { retryKey } from "./refunds";
+import {
+  GatewayError,
+  errorFacts,
+  isLiveRefund,
+  stripeGateway,
+  type ChargeFee,
+  type CheckoutSession,
+} from "./stripe";
 
 const RESUME_MARGIN_MS = 5 * 60 * 1000;
 const STRIPE_MIN_EXPIRY_MS = 30 * 60 * 1000;
@@ -157,55 +166,67 @@ async function purchaseRecorded(ids: Ids, paymentIntentId: string): Promise<bool
   return rows.length > 0;
 }
 
-async function recordDiscrepancy(
-  ids: Ids,
-  values: Omit<typeof moneyDiscrepancy.$inferInsert, "institutionId" | "engagementId">,
-): Promise<string | null> {
-  const [created] = await db
-    .insert(moneyDiscrepancy)
-    .values({ ...values, institutionId: ids.institutionId, engagementId: ids.engagementId })
-    .onConflictDoNothing()
-    .returning({ id: moneyDiscrepancy.id });
-  if (created || !values.stripeReference) return created?.id ?? null;
-
-  const [existing] = await db
-    .select({ id: moneyDiscrepancy.id })
-    .from(moneyDiscrepancy)
-    .where(
-      and(
-        eq(moneyDiscrepancy.institutionId, ids.institutionId),
-        eq(moneyDiscrepancy.kind, values.kind),
-        eq(moneyDiscrepancy.stripeReference, values.stripeReference),
-      ),
-    );
-  return existing?.id ?? null;
+/** Stripe keeps the processing fee on a refund, so a payment refunded unbooked still costs it. */
+async function recordRefundedFee(ids: Ids, paymentIntentId: string, currency: string, patience: Patience): Promise<void> {
+  const fee = await chargeFee(paymentIntentId, patience);
+  if (!fee) {
+    console.warn(`[checkout] no fee yet for refunded ${paymentIntentId}; the processor_fee row is not written`);
+    return;
+  }
+  await db
+    .insert(ledgerEntry)
+    .values({
+      ...ids,
+      type: "processor_fee",
+      amountMinor: fee.feeMinor,
+      currency,
+      stripeReference: fee.balanceTransactionId,
+    })
+    .onConflictDoNothing();
 }
 
-const live = (refund: { status: string | null }) => refund.status !== "failed" && refund.status !== "canceled";
+type Refunding = { currency: string; patience: Patience; discrepancyId?: string; since?: Date };
 
-async function refundPayment(ids: Ids, paymentIntentId: string, discrepancyId?: string): Promise<boolean> {
+/** Never re-issues over a refund Stripe could not deliver; that one waits for ops. */
+async function refundPayment(ids: Ids, paymentIntentId: string, refunding: Refunding): Promise<boolean> {
   const gateway = stripeGateway();
-  const refund =
-    (await gateway.listRefunds(paymentIntentId)).find(live) ??
-    (await gateway.refund({ paymentIntentId, ...ids }));
-  if (!live(refund)) {
-    console.error(`[checkout] refund ${refund.id} for ${paymentIntentId} is ${refund.status}; not recorded`);
+  const listed = await gateway.listRefunds(paymentIntentId);
+  let refund = listed.find(isLiveRefund) ?? listed.at(0);
+  if (!refund) {
+    const key = `refund:${paymentIntentId}`;
+    try {
+      refund = await gateway.refund({
+        paymentIntentId,
+        ...ids,
+        idempotencyKey: refunding.since ? retryKey(key, refunding.since) : key,
+      });
+    } catch (error) {
+      if (!(error instanceof GatewayError && error.refused)) throw error;
+      await recordRefundFailure(ids, { refund: null, paymentIntentId, amountMinor: null, currency: refunding.currency });
+      return false;
+    }
+  }
+  if (!isLiveRefund(refund)) {
+    await recordRefundFailure(ids, { refund, paymentIntentId, amountMinor: refund.amountMinor, currency: refunding.currency });
     return false;
   }
   console.warn(`[checkout] refunded ${paymentIntentId} for ${ids.engagementId}: ${refund.id}`);
 
-  if (discrepancyId) {
+  if (refunding.discrepancyId) {
     await db
       .update(moneyDiscrepancy)
       .set({ refundReference: refund.id })
       .where(
         and(
-          eq(moneyDiscrepancy.id, discrepancyId),
+          eq(moneyDiscrepancy.id, refunding.discrepancyId),
           eq(moneyDiscrepancy.institutionId, ids.institutionId),
           isNull(moneyDiscrepancy.refundReference),
         ),
       );
   }
+  await recordRefundedFee(ids, paymentIntentId, refunding.currency, refunding.patience).catch((error) =>
+    console.error(`[checkout] processor_fee for refunded ${paymentIntentId} not written`, errorFacts(error)),
+  );
   return true;
 }
 
@@ -310,7 +331,11 @@ async function fulfil(
           stripeAmountMinor: session.amountTotal,
           currency: session.currency ?? "usd",
         });
-  const refunded = await refundPayment(ids, paymentIntentId, discrepancyId ?? undefined);
+  const refunded = await refundPayment(ids, paymentIntentId, {
+    currency: session.currency?.toLowerCase() ?? "usd",
+    patience,
+    discrepancyId: discrepancyId ?? undefined,
+  });
   return refunded ? "refunded" : "refund_failed";
 }
 
@@ -424,6 +449,8 @@ async function retryDiscrepancyRefunds(
       id: moneyDiscrepancy.id,
       engagementId: moneyDiscrepancy.engagementId,
       paymentIntentId: moneyDiscrepancy.stripeReference,
+      currency: moneyDiscrepancy.currency,
+      detectedAt: moneyDiscrepancy.detectedAt,
     })
     .from(moneyDiscrepancy)
     .where(
@@ -434,6 +461,7 @@ async function retryDiscrepancyRefunds(
         isNull(moneyDiscrepancy.resolvedAt),
         like(moneyDiscrepancy.stripeReference, "pi\\_%"),
         isNotNull(moneyDiscrepancy.engagementId),
+        notExists(openRefundFailure(moneyDiscrepancy.engagementId)),
         notExists(
           db
             .select({ id: ledgerEntry.id })
@@ -457,7 +485,12 @@ async function retryDiscrepancyRefunds(
     if (index > 0 && Date.now() > deadline) break;
     if (!row.engagementId || !row.paymentIntentId) continue;
     try {
-      const refunded = await refundPayment({ engagementId: row.engagementId, institutionId }, row.paymentIntentId, row.id);
+      const refunded = await refundPayment({ engagementId: row.engagementId, institutionId }, row.paymentIntentId, {
+        currency: row.currency,
+        patience: IMPATIENT,
+        discrepancyId: row.id,
+        since: row.detectedAt,
+      });
       if (refunded) settled += 1;
       else failed += 1;
     } catch (error) {

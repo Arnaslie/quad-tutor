@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { awaitCoverage, enroll, offeringById } from "@/server/modules/catalog/courses";
@@ -28,6 +29,8 @@ import { bookSession, cancelSession } from "@/server/modules/engagements/schedul
 import { endPackage } from "@/server/modules/engagements/termEnd";
 import { checkoutRedirect } from "@/server/modules/billing/checkout-session";
 import { formatMinor } from "@/server/modules/billing/pricing";
+import { refundThroughStripe } from "@/server/modules/billing/refunds";
+import { errorFacts } from "@/server/modules/billing/stripe";
 import {
   requestRenewalInput,
   requestTutorsInput,
@@ -324,6 +327,12 @@ export async function endEarly(
   }
   if (!refund) return { ok: false, error: "That package is already closed." };
 
+  const ids = { engagementId: parsed.data.engagementId, institutionId: actor.institutionId };
+  after(() =>
+    refundThroughStripe(ids).catch((error) =>
+      console.error(`[refund] ${ids.engagementId} left for the retry sweep`, errorFacts(error)),
+    ),
+  );
   notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   revalidatePath("/sessions/[id]", "page");

@@ -91,3 +91,8 @@ test("transfers net of reversals may not exceed what the tutor accrued", () => {
 test("a tutor's fees past the term cap are flagged", () => {
   assert.deepEqual(invariants({ ...healthy, tutorTerms: [{ tutorProfileId: "tp", termId: "term", feeMinor: 10_001 }] }), ["fee <= term cap"]);
 });
+
+test("a second refund row on one engagement is flagged", () => {
+  const e = { id: "e", status: "refunded" as const, pricePaidMinor: 14_000, totals: { package_purchase: t(14_000), refund: t(14_000, 2) } };
+  assert.deepEqual(invariants({ ...healthy, engagements: [e] }), ["one refund per engagement"]);
+});

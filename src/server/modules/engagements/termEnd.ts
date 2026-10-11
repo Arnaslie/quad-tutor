@@ -10,6 +10,8 @@ import {
 } from "@/server/db/schema";
 import { record } from "@/server/modules/billing/ledger";
 import { unusedRefundMinor } from "@/server/modules/billing/pricing";
+import { refundThroughStripe } from "@/server/modules/billing/refunds";
+import { errorFacts } from "@/server/modules/billing/stripe";
 import type { Actor } from "@/server/modules/identity/actor";
 
 import { SessionError } from "./access";
@@ -160,7 +162,6 @@ export async function closeWithRefund(
   });
 
   if (refund.refundMinor > 0) {
-    // TODO(stripe): issue the refund here; `stripeReference` carries the id.
     await record(tx, [
       {
         engagementId,
@@ -198,9 +199,10 @@ export async function endPackage(params: {
 
 export type TermEndSweep = { refunds: TermEndRefund[]; held: number; failed: number };
 
-/** The whole sweep for one campus. Called by the cron route. */
+/** The whole sweep for one campus. Called by the cron route. Card refunds past the deadline wait for the retry sweep. */
 export async function runTermEndRefunds(
   institutionId: string,
+  deadline = Date.now() + 30_000,
 ): Promise<TermEndSweep> {
   const due = await engagementsDueForTermEndRefund(institutionId);
   const refunds: TermEndRefund[] = [];
@@ -213,6 +215,11 @@ export async function runTermEndRefunds(
         closeWithRefund(tx, { engagementId: candidate.engagementId, institutionId }),
       );
       if (refunded) refunds.push(refunded);
+      if (refunded && Date.now() < deadline) {
+        await refundThroughStripe({ engagementId: candidate.engagementId, institutionId }).catch((error) =>
+          console.error(`[term-end] card refund for ${candidate.engagementId} left for the retry sweep`, errorFacts(error)),
+        );
+      }
     } catch (error) {
       if (error instanceof EndPackageError) {
         held += 1;

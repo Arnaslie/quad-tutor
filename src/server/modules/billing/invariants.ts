@@ -63,6 +63,7 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
       flag("one purchase of the price", subject, `${purchases} purchase rows totalling ${paid}, price ${e.pricePaidMinor}`);
     }
     if (refunded > paid) flag("refund <= purchase", subject, `refunded ${refunded} of ${paid}`);
+    if (rows(e.totals, REFUND) > 1) flag("one refund per engagement", subject, `${rows(e.totals, REFUND)} refund rows`);
     if (deferred < 0) flag("deferred >= 0", subject, `deferred ${deferred}`);
     if (CLOSED.includes(e.status) && deferred !== 0) {
       flag("deferred = 0 once closed", subject, `${e.status}, deferred ${deferred}`);

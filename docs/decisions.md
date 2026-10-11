@@ -127,6 +127,7 @@ drift:
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
   | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation could hold (inside 12h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
   | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment` and the Checkout Session id matches), then its `held` `session_booking` rows. An amount or currency mismatch cancels both and inserts a `money_discrepancy` row in the same transaction |
+  | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the unstamped `refund` row, calls Stripe, then stamps `re_…` with `where stripe_reference is null` |
 
   The rules behind it:
   - Student before request; tutor before request.
@@ -630,6 +631,21 @@ no reference; the call follows the commit with the row id as its idempotency key
 reference is stamped once, conditionally. That stamp is the only update a ledger row
 ever takes. Lock order adds: fulfil and release take the engagement (for update), then
 its held sessions; the transfer sweep takes the engagement (no key update) alone.
+
+**Refunds reach the card after commit, and a failed one goes to ops.** `closeWithRefund`
+writes the `refund` row under its lock with no reference. After commit the row is sent to
+Stripe with key `refund:<ledger_entry_id>` and the row id in metadata, then stamped. A row
+the after-commit call left unstamped is retried by the sweep after a 5-minute grace: it
+lists the PaymentIntent's refunds by metadata first, then creates on `refund:<id>:<hours
+since the row>`, because Stripe replays a failed response under its key for 24h.
+`charge.refunded` and the refund events re-read the refund and stamp the row. A refund
+Stripe refuses at create, or that fails later (closed or lost card), is never re-issued by
+code: the same card would bounce the next one. It writes a `refund_failed` discrepancy,
+the row keeps the `re_…` it was tried against, and no automatic refund touches that
+engagement again until ops resolves it, paying the student another way and appending the
+corrective row. Stripe keeps the processing fee on a refund, so a payment refunded with
+nothing booked still writes its `processor_fee`. Engagements bought before Stripe have no
+`pi_…` and are never sent.
 
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 Transfers go per engagement once the tutor is verified and the engagement has no open
