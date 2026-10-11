@@ -12,11 +12,11 @@ import {
   type PurchaseResult,
 } from "@/server/modules/engagements/purchase";
 import { checkoutRestartPath } from "@/server/modules/engagements/reads";
+import { resumableUntil } from "./checkout-window";
 import type { Actor } from "@/server/modules/identity/actor";
 
 import { GatewayError, errorFacts, stripeGateway, type ChargeFee, type CheckoutSession } from "./stripe";
 
-const RESUME_MARGIN_MS = 5 * 60 * 1000;
 const STRIPE_MIN_EXPIRY_MS = 30 * 60 * 1000;
 const SWEEP_GRACE_MS = 2 * 60 * 1000;
 const SWEEP_LIMIT = 20;
@@ -107,7 +107,7 @@ async function resumeUrl(checkout: Checkout): Promise<string | null> {
   if (!checkout.stripeCheckoutSessionId) {
     return left < STRIPE_MIN_EXPIRY_MS ? null : openCheckout(checkout);
   }
-  if (left < RESUME_MARGIN_MS) return null;
+  if (Date.now() >= resumableUntil(checkout.expiresAt).getTime()) return null;
   try {
     const session = await stripeGateway().retrieveCheckout(checkout.stripeCheckoutSessionId);
     return session.status === "open" ? session.url : null;

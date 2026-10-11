@@ -24,6 +24,7 @@ import {
   type RequestedKind,
   unusedRefundMinor,
 } from "@/server/modules/billing/pricing";
+import { resumableUntil } from "@/server/modules/billing/checkout-window";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 
 import {
@@ -266,7 +267,7 @@ export type PendingCheckout = {
   kind: PackageKind;
   amountMinor: number;
   currency: string;
-  expiresAt: Date;
+  payBy: Date;
   lapsed: boolean;
   slot: Date | null;
   tutorName: string;
@@ -315,11 +316,11 @@ export async function pendingCheckoutsForStudent(actor: Actor): Promise<PendingC
     .orderBy(desc(engagement.createdAt));
 
   const now = Date.now();
-  return rows.flatMap(({ expiresAt, ...row }) =>
-    expiresAt
-      ? [{ ...row, expiresAt, lapsed: expiresAt.getTime() <= now, restartPath: checkoutRestartPath(row) }]
-      : [],
-  );
+  return rows.flatMap(({ expiresAt, ...row }) => {
+    if (!expiresAt) return [];
+    const payBy = resumableUntil(expiresAt);
+    return [{ ...row, payBy, lapsed: payBy.getTime() <= now, restartPath: checkoutRestartPath(row) }];
+  });
 }
 
 function termEndMoment(endsOn: string): Date {

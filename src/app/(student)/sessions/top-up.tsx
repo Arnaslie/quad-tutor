@@ -2,12 +2,12 @@
 
 import { useActionState, useState } from "react";
 
-import { Button, ButtonLink } from "@/components/button";
+import { Button } from "@/components/button";
+import { CheckoutFinePrint } from "@/components/checkout-fine-print";
 import { formatDay, formatTime } from "@/components/format";
 import { Money } from "@/components/money";
 
 import { topUp, type ActionResult } from "../actions";
-import { CheckoutFinePrint } from "../requests/purchase-panel";
 import { MeetingSpot, StudentNoteField } from "../meeting-spot";
 
 export function TopUp({
@@ -31,17 +31,6 @@ export function TopUp({
   );
   const [slot, setSlot] = useState<string>(slots.at(0) ?? "");
   const [showAll, setShowAll] = useState(false);
-
-  if (state?.ok) {
-    return (
-      <div className="flex flex-col items-start gap-3">
-        <p role="status" className="text-sm text-accent">
-          Booked. It is on your session board.
-        </p>
-        <ButtonLink href="/sessions">See your sessions</ButtonLink>
-      </div>
-    );
-  }
 
   const visible = showAll ? slots : slots.slice(0, 8);
 

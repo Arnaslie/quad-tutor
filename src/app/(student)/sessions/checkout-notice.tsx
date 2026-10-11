@@ -43,7 +43,7 @@ export function PendingCheckoutCard({ checkout }: { checkout: PendingCheckout })
     <Card className="flex flex-col items-start gap-3">
       <Summary checkout={checkout} />
       <p className="text-sm text-muted">
-        Not paid yet. Your time is held until {formatTime(checkout.expiresAt)}; after
+        Not paid yet. Your time is held until {formatTime(checkout.payBy)}; after
         that it is released and nothing is charged.
       </p>
       <ContinuePayment engagementId={checkout.engagementId} />
@@ -77,7 +77,7 @@ export function ConfirmingPayment({ checkout }: { checkout: PendingCheckout }) {
       <Summary checkout={checkout} />
       <p className="text-sm text-muted">
         This usually takes a few seconds, and this page updates on its own. If you left
-        Stripe before paying, your time is held until {formatTime(checkout.expiresAt)}.
+        Stripe before paying, your time is held until {formatTime(checkout.payBy)}.
       </p>
       <ContinuePayment engagementId={checkout.engagementId} />
     </Card>
