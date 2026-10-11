@@ -17,7 +17,7 @@ import {
 } from "@/server/db/schema";
 import { courseCodeAlias } from "@/server/db/schema";
 import { asRequestedKind, type RequestedKind } from "@/server/modules/billing/pricing";
-import type { Executor } from "@/server/modules/engagements/access";
+import { bought, type Executor } from "@/server/modules/engagements/access";
 import { bookAgain } from "@/server/modules/engagements/reads";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
@@ -243,7 +243,7 @@ export async function acceptRequest(params: {
     const winner = await tx
       .select({ id: matchRequest.id })
       .from(matchRequest)
-      .leftJoin(engagement, eq(engagement.matchRequestId, matchRequest.id))
+      .leftJoin(engagement, and(eq(engagement.matchRequestId, matchRequest.id), bought))
       .where(
         and(
           eq(matchRequest.studentProfileId, request.studentProfileId),
@@ -345,7 +345,7 @@ export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]
     .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
     .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
     .innerJoin(user, eq(user.id, tutorProfile.userId))
-    .leftJoin(engagement, eq(engagement.matchRequestId, matchRequest.id))
+    .leftJoin(engagement, and(eq(engagement.matchRequestId, matchRequest.id), bought))
     .leftJoin(messageThread, pairThread)
     .innerJoin(courseOffering, eq(courseOffering.id, matchRequest.courseOfferingId))
     .innerJoin(course, eq(course.id, courseOffering.courseId))

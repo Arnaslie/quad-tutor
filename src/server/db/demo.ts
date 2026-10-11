@@ -19,12 +19,13 @@ import {
 import { balanceFor } from "@/server/modules/billing/ledger";
 import { formatMinor } from "@/server/modules/billing/pricing";
 import { upcomingExams } from "@/server/modules/catalog/courses";
+import { buyPackage } from "@/server/modules/engagements/buy-and-pay";
 import {
   confirmAttendance,
   denyAttendance,
   releaseLapsedConfirmations,
 } from "@/server/modules/engagements/confirmation";
-import { purchasePackage, slotsForRequest } from "@/server/modules/engagements/purchase";
+import { slotsForRequest } from "@/server/modules/engagements/purchase";
 import { confirmationDeadline } from "@/server/modules/engagements/slots";
 import {
   sessionBoardForStudent,
@@ -321,7 +322,7 @@ async function main(): Promise<void> {
   const exams = await upcomingExams(target.courseOfferingId);
   const anchor = exams.at(0) ?? null;
 
-  const { engagementId } = await purchasePackage({
+  const { engagementId } = await buyPackage({
     actor: student,
     requestId,
     kind: "exam_anchored",
@@ -425,7 +426,7 @@ async function autoReleasedPackage(
   if (slots.length === 0) throw new Error(`${SECOND_TUTOR} has no open slots`);
 
   const exams = await upcomingExams(target.courseOfferingId);
-  const { engagementId } = await purchasePackage({
+  const { engagementId } = await buyPackage({
     actor: student,
     requestId,
     kind: "exam_anchored",

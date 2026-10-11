@@ -30,8 +30,9 @@ import {
   tutorProfile,
   user,
 } from "@/server/db/schema";
+import { buyPackage } from "@/server/modules/engagements/buy-and-pay";
 import { confirmAttendance } from "@/server/modules/engagements/confirmation";
-import { purchasePackage, slotsForRequest } from "@/server/modules/engagements/purchase";
+import { slotsForRequest } from "@/server/modules/engagements/purchase";
 import type { Actor, OperatorActor, TutorActor } from "@/server/modules/identity/actor";
 import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
 import {
@@ -234,7 +235,7 @@ before(async () => {
     .from(matchRequest)
     .where(and(eq(matchRequest.studentProfileId, student.studentProfileId), eq(matchRequest.tutorCourseId, tutorCourseId)));
   await acceptRequest({ tutor, requestId: request.id });
-  ({ engagementId } = await purchasePackage({
+  ({ engagementId } = await buyPackage({
     actor: student,
     requestId: request.id,
     anchorExamId: null,

@@ -90,7 +90,7 @@ async function buy(
   offeringId: string,
   tutorCourseId: string,
   studentProfileId: string,
-  outcome: "active" | "completed" | "guarantee_refunded" | "term_refunded",
+  outcome: "pending_payment" | "active" | "completed" | "cancelled" | "guarantee_refunded" | "term_refunded",
   kind: "exam_anchored" | "through_final" | "top_up" = "exam_anchored",
 ) {
   const [row] = await db
@@ -263,6 +263,29 @@ test("a refill and a direct-renewal package each make the pair a success once; a
     ...prior,
     renewalTrialCount: 3,
     renewalPosteriorMean: posteriorBp(renewalPool(3, 2), RENEWAL_PRIOR_BP),
+  });
+});
+
+test("a checkout still pending or released is never a first package, a trial or a renewal", async () => {
+  const checkouts = await claim(home, home.b.courseId);
+
+  const releasedFirst = await student(home);
+  await buy(home, home.b.offeringId, checkouts, releasedFirst, "cancelled");
+  await buy(home, home.b.offeringId, checkouts, releasedFirst, "completed");
+
+  const pendingRenewal = await student(home);
+  await buy(home, home.b.offeringId, checkouts, pendingRenewal, "completed");
+  await buy(home, home.b.offeringId, checkouts, pendingRenewal, "pending_payment");
+
+  const releasedRenewal = await student(home);
+  await buy(home, home.b.offeringId, checkouts, releasedRenewal, "completed");
+  await buy(home, home.b.offeringId, checkouts, releasedRenewal, "cancelled", "top_up");
+
+  await refreshScores(home.institutionId);
+  assert.deepEqual(await fields(checkouts), {
+    ...prior,
+    renewalTrialCount: 3,
+    renewalPosteriorMean: posteriorBp(renewalPool(3, 0), RENEWAL_PRIOR_BP),
   });
 });
 

@@ -37,7 +37,7 @@ export async function setDefaultLocation(params: {
       .where(
         and(
           inArray(sessionBooking.engagementId, theirs),
-          eq(sessionBooking.status, "scheduled"),
+          inArray(sessionBooking.status, ["scheduled", "held"]),
           isNull(sessionBooking.location),
           gt(sessionBooking.scheduledAt, now),
         ),

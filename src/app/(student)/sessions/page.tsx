@@ -18,7 +18,11 @@ import {
 import { slotsForEngagement } from "@/server/modules/engagements/scheduling";
 import { requireActor } from "@/server/modules/identity/actor";
 
+import { ownCheckout, syncOwnCheckouts } from "@/server/modules/billing/checkout-session";
+import { notifySessionChangesSoon } from "@/server/modules/notifications/soon";
+
 import { BookAgainCard, BookAgainStep } from "./book-again";
+import { CheckoutCancelled, CheckoutClosed, ConfirmingPayment } from "./checkout-notice";
 import { BookNext } from "./book-next";
 import { EndedNotice, EndPackage } from "./end-package";
 import { SessionRow } from "./session-row";
@@ -28,6 +32,7 @@ export const metadata: Metadata = { title: "Sessions" };
 
 const bookParam = z.uuid();
 const againParam = z.uuid();
+const packageParam = z.uuid();
 
 export default async function SessionsPage(props: PageProps<"/sessions">) {
   const actor = await requireActor();
@@ -45,10 +50,15 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
     return <BookAgainStep tutorCourseId={again.data} />;
   }
 
-  const [board, packages, bookable] = await Promise.all([
+  if (await syncOwnCheckouts(actor)) notifySessionChangesSoon(actor.institutionId);
+
+  const rawPackage = searchParams.package;
+  const returning = packageParam.safeParse(Array.isArray(rawPackage) ? rawPackage[0] : rawPackage);
+  const [board, packages, bookable, checkout] = await Promise.all([
     sessionBoardForStudent(actor),
     packagesForStudent(actor),
     bookAgainList(actor),
+    returning.success ? ownCheckout(actor, returning.data) : null,
   ]);
 
   const purchased = packages.find((pkg) => pkg.engagementId === searchParams.package);
@@ -65,6 +75,10 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
         title="Sessions"
         description="Everything booked, and everything still to settle."
       />
+
+      {searchParams.cancelled ? <CheckoutCancelled /> : null}
+      {checkout?.status === "pending_payment" ? <ConfirmingPayment /> : null}
+      {checkout?.status === "cancelled" ? <CheckoutClosed /> : null}
 
       {purchased?.kind === "top_up" ? (
         <Card className="bg-accent-soft text-sm text-accent">

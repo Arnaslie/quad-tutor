@@ -153,7 +153,7 @@ export function PurchasePanel({
 
       <div className="flex flex-col gap-2">
         <Button type="submit" size="lg" disabled={pending || slot === ""}>
-          {pending ? "Booking…" : "Pay and book"}
+          {pending ? "Opening checkout…" : "Pay and book"}
         </Button>
         <p className="text-center text-xs text-muted">
           Sessions you do not use are refunded at the end of term, or when you end

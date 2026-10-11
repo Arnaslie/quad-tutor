@@ -27,6 +27,8 @@ import {
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 
 import {
+  bought,
+  liveEngagement,
   onCampus,
   sessionContext,
   loadParticipation,
@@ -142,7 +144,7 @@ async function board(
   const upcoming = items
     .filter(
       (item) =>
-        item.status === "scheduled" &&
+        (item.status === "scheduled" || item.status === "held") &&
         item.action !== "confirm_or_deny" &&
         now.getTime() < sessionEndsAt(item.scheduledAt, item.durationMinutes).getTime(),
     )
@@ -166,6 +168,7 @@ export async function sessionBoardForStudent(actor: Actor): Promise<SessionBoard
       and(
         eq(studentProfile.id, actor.studentProfileId),
         onCampus(actor.institutionId),
+        ne(engagement.status, "cancelled"),
         recentEnough,
       ),
     )
@@ -183,6 +186,7 @@ export async function sessionBoardForTutor(tutor: TutorActor): Promise<SessionBo
       and(
         eq(tutorProfile.id, tutor.tutorProfileId),
         onCampus(tutor.institutionId),
+        bought,
         recentEnough,
       ),
     )
@@ -278,7 +282,7 @@ async function bookAgainRows(
     .select({
       tutorCourseId: engagement.tutorCourseId,
       offeringId: engagement.courseOfferingId,
-      sessionsRemaining: sql<number>`coalesce(sum(${remainingCount}) filter (where ${engagement.status} = 'active'), 0)::int`,
+      sessionsRemaining: sql<number>`coalesce(sum(${remainingCount}) filter (where ${liveEngagement}), 0)::int`,
       tutorProfileId: tutorProfile.id,
       tutorName: user.name,
       tutorLocation: tutorProfile.defaultLocation,
@@ -304,7 +308,7 @@ async function bookAgainRows(
         eq(engagement.institutionId, actor.institutionId),
         eq(tutorProfile.institutionId, actor.institutionId),
         tutorCourseId ? eq(engagement.tutorCourseId, tutorCourseId) : undefined,
-        inArray(engagement.status, ["active", "completed"]),
+        or(liveEngagement, eq(engagement.status, "completed")),
         gte(term.endsOn, sql`current_date`),
         eq(tutorCourse.status, "active"),
         ne(tutorProfile.userId, actor.userId),
@@ -340,7 +344,7 @@ async function bookAgainRows(
       requestedKind: matchRequest.requestedKind,
     })
     .from(matchRequest)
-    .leftJoin(engagement, eq(engagement.matchRequestId, matchRequest.id))
+    .leftJoin(engagement, and(eq(engagement.matchRequestId, matchRequest.id), bought))
     .where(
       and(
         eq(matchRequest.studentProfileId, actor.studentProfileId),

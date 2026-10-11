@@ -95,7 +95,7 @@ export function TopUp({
 
       <Button type="submit" size="lg" disabled={pending || slot === ""}>
         {pending ? (
-          "Booking…"
+          "Opening checkout…"
         ) : (
           <>
             Book and pay <Money minor={priceMinor} currency={currency} />

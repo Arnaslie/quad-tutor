@@ -136,6 +136,7 @@ async function settleLocked(tx: Tx, sessionId: string, now: Date): Promise<Sessi
   const rows = await sessionContext(tx).where(eq(sessionBooking.id, sessionId)).limit(1);
   const session = rows.at(0);
   if (!session) throw new SessionError("That session does not exist.");
+  if (session.status === "held") throw new SessionError(AWAITING_PAYMENT);
 
   if (session.status !== "scheduled") {
     return { sessionId, status: session.status, resolution: session.resolution };
@@ -158,7 +159,10 @@ function statusFor(outcome: Settlement): SessionOutcome["status"] {
   return outcome.delivered ? "completed" : "cancelled";
 }
 
+const AWAITING_PAYMENT = "That session is not booked until its payment goes through.";
+
 function assertAnswerable(session: SessionContextRow, now: Date): void {
+  if (session.status === "held") throw new SessionError(AWAITING_PAYMENT);
   if (session.status !== "scheduled") {
     throw new SessionError("That session has already been settled.");
   }
@@ -169,7 +173,7 @@ function assertAnswerable(session: SessionContextRow, now: Date): void {
 
 export type SessionOutcome = {
   sessionId: string;
-  status: SessionContextRow["status"];
+  status: Exclude<SessionContextRow["status"], "held">;
   resolution: SessionContextRow["resolution"];
 };
 
