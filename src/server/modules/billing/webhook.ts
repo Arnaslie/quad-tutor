@@ -19,7 +19,7 @@ export async function handleStripeWebhook(payload: string, signature: string | n
     try {
       return { status: 200, ...(await syncConnectAccount(accountId)) };
     } catch (error) {
-      if (error instanceof GatewayError && error.missing) {
+      if (error instanceof GatewayError && (error.missing || error.status === 403 || error.code === "account_invalid")) {
         return { status: 200, outcome: "foreign", institutionId: null };
       }
       throw error;

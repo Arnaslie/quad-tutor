@@ -53,11 +53,19 @@ export async function onboardingLink(actor: TutorActor): Promise<string> {
 }
 
 async function applyAccount(account: ConnectAccount, institutionId: string): Promise<KycStatus | null> {
+  const tutorProfileId = account.tutorProfileId;
+  if (tutorProfileId !== null && !z.uuid().safeParse(tutorProfileId).success) return null;
   const status = kycStatusOf(account);
   const [row] = await db
     .update(tutorProfile)
     .set({ kycStatus: status })
-    .where(and(eq(tutorProfile.stripeAccountId, account.id), eq(tutorProfile.institutionId, institutionId)))
+    .where(
+      and(
+        eq(tutorProfile.stripeAccountId, account.id),
+        eq(tutorProfile.institutionId, institutionId),
+        tutorProfileId ? eq(tutorProfile.id, tutorProfileId) : undefined,
+      ),
+    )
     .returning({ id: tutorProfile.id });
   return row ? status : null;
 }

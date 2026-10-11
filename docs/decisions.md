@@ -639,7 +639,8 @@ reversal. Bank payouts are daily. Reversals are an ops tool.
 **KYC never blocks an accept.** An unverified tutor's pay accrues and
 waits, and the student's sessions proceed. Hiding unverified tutors from decks was
 rejected: they would never get the accept that triggers onboarding. The Express account is created
-when the tutor first opens `/tutor/payouts`, never inside an accept, with transfers only
+when the tutor starts payout setup from `/tutor/payouts` (its button, or Stripe's
+`refresh_url`), never on viewing the page and never inside an accept, with transfers only
 and a daily payout schedule; onboarding collects `eventually_due` fields up front so a
 later threshold doesn't restrict the account. `kyc_status` is re-derived from Stripe's
 account on every `account.updated` and every view of that page, never from the event

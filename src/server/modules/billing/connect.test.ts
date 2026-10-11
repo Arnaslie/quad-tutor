@@ -10,7 +10,7 @@ import { institution, studentProfile, tutorProfile, user } from "@/server/db/sch
 import type { TutorActor } from "@/server/modules/identity/actor";
 
 import { ensureConnectAccount, onboardingLink, payoutsFor } from "./connect";
-import { fakeStripe, signWebhookPayload, stripeGateway } from "./stripe";
+import { GatewayError, fakeStripe, signWebhookPayload, stripeGateway } from "./stripe";
 import { handleStripeWebhook } from "./webhook";
 
 process.env.STRIPE_FAKE = "1";
@@ -149,4 +149,25 @@ test("an account is only applied on the campus its metadata names", async () => 
   await fakeStripe.setAccount(accountId, "verified");
   assert.deepEqual(await deliver(await fakeStripe.accountEvent(accountId)), { status: 200, outcome: "foreign", institutionId: null });
   assert.equal((await profile(actor)).status, "not_started");
+});
+
+test("an account whose metadata names another tutor, or that Stripe won't let us read, is foreign", async () => {
+  const actor = await tutor();
+  const other = await tutor();
+  const accountId = await ensureConnectAccount(actor);
+  await fakeStripe.setAccount(accountId, "verified");
+  const retrieve = stripeGateway().retrieveAccount;
+  try {
+    stripeGateway().retrieveAccount = async (id) => ({ ...(await retrieve(id)), tutorProfileId: other.tutorProfileId });
+    assert.deepEqual(await deliver(await fakeStripe.accountEvent(accountId)), { status: 200, outcome: "foreign", institutionId: null });
+    assert.equal((await profile(actor)).status, "not_started");
+
+    stripeGateway().retrieveAccount = async () => {
+      throw new GatewayError("The provided key does not have access to account", { status: 403, type: "invalid_request_error" });
+    };
+    assert.deepEqual(await deliver(await fakeStripe.accountEvent(accountId)), { status: 200, outcome: "foreign", institutionId: null });
+  } finally {
+    stripeGateway().retrieveAccount = retrieve;
+  }
+  assert.equal((await stripeGateway().retrieveAccount(accountId)).tutorProfileId, actor.tutorProfileId);
 });
