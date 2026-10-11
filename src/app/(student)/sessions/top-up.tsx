@@ -7,6 +7,7 @@ import { formatDay, formatTime } from "@/components/format";
 import { Money } from "@/components/money";
 
 import { topUp, type ActionResult } from "../actions";
+import { CheckoutFinePrint } from "../requests/purchase-panel";
 import { MeetingSpot, StudentNoteField } from "../meeting-spot";
 
 export function TopUp({
@@ -93,15 +94,18 @@ export function TopUp({
         </p>
       ) : null}
 
-      <Button type="submit" size="lg" disabled={pending || slot === ""}>
-        {pending ? (
-          "Opening checkout…"
-        ) : (
-          <>
-            Book and pay <Money minor={priceMinor} currency={currency} />
-          </>
-        )}
-      </Button>
+      <div className="flex flex-col gap-2">
+        <Button type="submit" size="lg" disabled={pending || slot === ""}>
+          {pending ? (
+            "Opening Stripe…"
+          ) : (
+            <>
+              Continue to payment · <Money minor={priceMinor} currency={currency} />
+            </>
+          )}
+        </Button>
+        <CheckoutFinePrint />
+      </div>
     </form>
   );
 }

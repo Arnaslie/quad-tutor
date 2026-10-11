@@ -5,11 +5,17 @@ import { formatDay } from "@/components/format";
 import { PageHeader } from "@/components/page-header";
 import { packageSummary } from "@/server/modules/billing/pricing";
 import { slotsForTopUp } from "@/server/modules/engagements/purchase";
-import { bookAgain, bookAgainPath, type BookAgain } from "@/server/modules/engagements/reads";
+import {
+  bookAgain,
+  bookAgainPath,
+  pendingCheckoutsForStudent,
+  type BookAgain,
+} from "@/server/modules/engagements/reads";
 import { requireActor } from "@/server/modules/identity/actor";
 import { displayName } from "@/server/modules/identity/display-name";
 
 import { BookAgainForm } from "./book-again-form";
+import { CheckoutCancelled, OpenCheckout } from "./checkout-notice";
 
 type LiveRequest = NonNullable<BookAgain["liveRequest"]>;
 
@@ -60,9 +66,19 @@ export function BookAgainCard({ pair }: { pair: BookAgain }) {
   );
 }
 
-export async function BookAgainStep({ tutorCourseId }: { tutorCourseId: string }) {
+export async function BookAgainStep({
+  tutorCourseId,
+  cancelled,
+}: {
+  tutorCourseId: string;
+  cancelled: boolean;
+}) {
   const actor = await requireActor();
-  const pair = await bookAgain(actor, tutorCourseId);
+  const [pair, pending] = await Promise.all([
+    bookAgain(actor, tutorCourseId),
+    pendingCheckoutsForStudent(actor),
+  ]);
+  const open = pending.find((row) => row.tutorCourseId === tutorCourseId && row.kind === "top_up");
 
   if (!pair) {
     return (
@@ -93,6 +109,9 @@ export async function BookAgainStep({ tutorCourseId }: { tutorCourseId: string }
           </ButtonLink>
         }
       />
+
+      {cancelled ? <CheckoutCancelled /> : null}
+      <OpenCheckout checkout={open} />
 
       {pair.liveRequest ? (
         <Card className="flex flex-col items-start gap-3">

@@ -33,6 +33,7 @@ export function SessionRow({ session }: { session: SessionListItem }) {
 
 function statusFor(session: SessionListItem): string | null {
   const tutor = displayName(session.otherPartyName, "tutor");
+  if (session.status === "held") return "Held while you pay — not booked yet";
   switch (session.action) {
     case "cancel":
     case "late_cancel":

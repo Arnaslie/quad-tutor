@@ -5,6 +5,7 @@ import { useActionState, useState } from "react";
 import { Button, ButtonLink } from "@/components/button";
 import { Card } from "@/components/card";
 import { formatDay, formatTime } from "@/components/format";
+import { Money } from "@/components/money";
 import type {
   PackageKind,
   PackageOption,
@@ -14,6 +15,15 @@ import type {
 import { purchase, type ActionResult } from "../actions";
 import { MeetingSpot, StudentNoteField } from "../meeting-spot";
 import { PackageChoice } from "../package-choice";
+
+export function CheckoutFinePrint() {
+  return (
+    <p className="text-center text-xs text-muted">
+      You pay on Stripe&rsquo;s secure checkout page. We hold this time for you for 30
+      minutes while you pay, and nothing is booked until the payment goes through.
+    </p>
+  );
+}
 
 export type ExamChoice = {
   id: string;
@@ -51,6 +61,7 @@ export function PurchasePanel({
     kind === "through_final" ? (exams.at(-1) ?? null) : (exams.at(0) ?? null);
 
   const visibleSlots = showAllSlots ? slots : slots.slice(0, 8);
+  const price = options.find((option) => option.kind === kind)?.priceMinor;
 
   if (slots.length === 0) {
     return (
@@ -153,8 +164,15 @@ export function PurchasePanel({
 
       <div className="flex flex-col gap-2">
         <Button type="submit" size="lg" disabled={pending || slot === ""}>
-          {pending ? "Opening checkout…" : "Pay and book"}
+          {pending ? (
+            "Opening Stripe…"
+          ) : (
+            <>
+              Continue to payment{price !== undefined ? <> · <Money minor={price} /></> : null}
+            </>
+          )}
         </Button>
+        <CheckoutFinePrint />
         <p className="text-center text-xs text-muted">
           Sessions you do not use are refunded at the end of term, or when you end
           the package.
