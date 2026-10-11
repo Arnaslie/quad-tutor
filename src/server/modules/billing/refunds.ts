@@ -2,19 +2,18 @@ import { and, eq, isNull, like, lt, notExists, sql, type SQL } from "drizzle-orm
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
-import { ledgerEntry } from "@/server/db/schema";
+import { ledgerEntry, moneyDiscrepancy } from "@/server/db/schema";
 
-import { openRefundFailure, recordRefundFailure } from "./discrepancy";
-import { GatewayError, errorFacts, isLiveRefund, stripeGateway, type Refund } from "./stripe";
+import { recordDiscrepancy, recordRefundFailure, refundBlocker, type Ids } from "./discrepancy";
+import { GatewayError, errorFacts, isLiveRefund, stripeGateway, type NewRefund, type Refund } from "./stripe";
 
 const HOUR_MS = 60 * 60 * 1000;
-const IDEMPOTENCY_WINDOW_MS = 24 * HOUR_MS;
 const RETRY_GRACE_MS = 5 * 60 * 1000;
 const RETRY_LIMIT = 20;
+export const SWEEP_BUDGET_MS = 30_000;
+export const MANUAL_REFUND_PREFIX = "manual:";
 
-type Ids = { engagementId: string; institutionId: string };
-
-export type RefundOutcome = "refunded" | "refund_failed" | "skipped" | "foreign";
+export type RefundOutcome = "refunded" | "refund_failed" | "flagged" | "in_flight" | "skipped" | "foreign";
 
 type RefundRow = Ids & {
   id: string;
@@ -24,9 +23,30 @@ type RefundRow = Ids & {
   paymentIntentId: string;
 };
 
-/** Stripe keeps a failed response under its key for 24h, so a retry moves to a fresh key each hour. */
+/** Stripe keeps a failed response under its key for 24h, so a retry past one moves to a fresh key each hour. */
 export function retryKey(base: string, since: Date): string {
   return `${base}:${Math.floor((Date.now() - since.getTime()) / HOUR_MS)}`;
+}
+
+/**
+ * The base key first, so a retry overlapping a call still in flight gets Stripe's 409 or its answer.
+ * Only a retry whose base key replays a 5xx moves on, once nothing turned up for it.
+ */
+export async function createRefund(
+  params: Omit<NewRefund, "idempotencyKey">,
+  base: string,
+  retrySince: Date | null,
+  lookAgain: () => Promise<Refund | undefined>,
+): Promise<Refund> {
+  const gateway = stripeGateway();
+  try {
+    return await gateway.refund({ ...params, idempotencyKey: base });
+  } catch (error) {
+    if (!retrySince || !(error instanceof GatewayError) || (error.status ?? 0) < 500) throw error;
+    const found = await lookAgain();
+    if (found) return found;
+    return gateway.refund({ ...params, idempotencyKey: retryKey(base, retrySince) });
+  }
 }
 
 const purchase = alias(ledgerEntry, "purchase");
@@ -57,7 +77,7 @@ async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[
       and(
         eq(ledgerEntry.type, "refund"),
         isNull(ledgerEntry.stripeReference),
-        notExists(openRefundFailure(ledgerEntry.engagementId)),
+        notExists(refundBlocker(ledgerEntry.engagementId, ledgerEntry.institutionId)),
         ...where,
       ),
     )
@@ -66,10 +86,10 @@ async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[
   return rows.map((row) => ({ ...row, paymentIntentId: row.paymentIntentId! }));
 }
 
-async function stamp(row: Ids & { id: string }, refundId: string): Promise<void> {
+async function stamp(row: Ids & { id: string }, reference: string): Promise<void> {
   await db
     .update(ledgerEntry)
-    .set({ stripeReference: refundId })
+    .set({ stripeReference: reference })
     .where(
       and(
         eq(ledgerEntry.id, row.id),
@@ -80,41 +100,69 @@ async function stamp(row: Ids & { id: string }, refundId: string): Promise<void>
     );
 }
 
-async function settle(row: Omit<RefundRow, "occurredAt">, refund: Refund): Promise<RefundOutcome> {
+type Settling = Omit<RefundRow, "occurredAt">;
+
+async function settle(row: Settling, refund: Refund): Promise<RefundOutcome> {
   await stamp(row, refund.id);
   if (isLiveRefund(refund)) return "refunded";
   await recordRefundFailure(row, { refund, paymentIntentId: row.paymentIntentId, amountMinor: row.amountMinor, currency: row.currency });
   return "refund_failed";
 }
 
+/** Ours (live first), or a live refund on the charge that is not, such as one made in the Dashboard. */
+async function onCharge(row: Settling): Promise<{ mine?: Refund; foreign?: Refund }> {
+  const listed = await stripeGateway().listRefunds(row.paymentIntentId);
+  const mine = listed.filter((r) => r.ledgerEntryId === row.id);
+  return {
+    mine: mine.find(isLiveRefund) ?? mine.at(0),
+    foreign: listed.find((r) => r.ledgerEntryId !== row.id && isLiveRefund(r)),
+  };
+}
+
+async function settleFound(row: Settling, found: { mine?: Refund; foreign?: Refund }): Promise<RefundOutcome | null> {
+  if (found.mine) return settle(row, found.mine);
+  if (!found.foreign) return null;
+  console.error(`[refund] ${row.paymentIntentId} already carries ${found.foreign.id}, not ours; flagged for ops`);
+  await recordDiscrepancy(row, {
+    kind: "ledger_vs_stripe_charge",
+    stripeReference: found.foreign.id,
+    ledgerAmountMinor: row.amountMinor,
+    stripeAmountMinor: found.foreign.amountMinor,
+    currency: row.currency,
+  });
+  return "flagged";
+}
+
 async function issue(row: RefundRow, retry: boolean): Promise<RefundOutcome> {
-  const gateway = stripeGateway();
-  let refund: Refund | undefined;
-  if (retry || Date.now() - row.occurredAt.getTime() > IDEMPOTENCY_WINDOW_MS) {
-    const mine = (await gateway.listRefunds(row.paymentIntentId)).filter((r) => r.ledgerEntryId === row.id);
-    refund = mine.find(isLiveRefund) ?? mine.at(0);
-  }
-  if (!refund) {
-    const key = `refund:${row.id}`;
-    try {
-      refund = await gateway.refund({
+  const settled = await settleFound(row, await onCharge(row));
+  if (settled) return settled;
+
+  let refund: Refund;
+  try {
+    refund = await createRefund(
+      {
         paymentIntentId: row.paymentIntentId,
         engagementId: row.engagementId,
         institutionId: row.institutionId,
         amountMinor: row.amountMinor,
         ledgerEntryId: row.id,
-        idempotencyKey: retry ? retryKey(key, row.occurredAt) : key,
-      });
-    } catch (error) {
-      if (!(error instanceof GatewayError && error.refused)) throw error;
-      await recordRefundFailure(row, { refund: null, paymentIntentId: row.paymentIntentId, amountMinor: row.amountMinor, currency: row.currency });
-      return "refund_failed";
-    }
+      },
+      `refund:${row.id}`,
+      retry ? row.occurredAt : null,
+      async () => (await onCharge(row)).mine,
+    );
+  } catch (error) {
+    if (!(error instanceof GatewayError)) throw error;
+    if (error.inFlight) return "in_flight";
+    if (!error.refused) throw error;
+    const found = await settleFound(row, await onCharge(row));
+    if (found) return found;
+    await recordRefundFailure(row, { refund: null, paymentIntentId: row.paymentIntentId, amountMinor: row.amountMinor, currency: row.currency });
+    return "refund_failed";
   }
   return settle(row, refund);
 }
 
-/** After `closeWithRefund` commits: send its refund row to Stripe and stamp the `re_` on it. */
 export async function refundThroughStripe(ids: Ids): Promise<RefundOutcome> {
   const [row] = await unstampedRefunds(
     [eq(ledgerEntry.engagementId, ids.engagementId), eq(ledgerEntry.institutionId, ids.institutionId)],
@@ -127,24 +175,67 @@ export async function refundThroughStripe(ids: Ids): Promise<RefundOutcome> {
 export async function retryUnstampedRefunds(
   institutionId: string,
   deadline: number,
-): Promise<{ settled: number; failed: number }> {
+): Promise<{ settled: number; flagged: number; failed: number }> {
   const rows = await unstampedRefunds(
     [eq(ledgerEntry.institutionId, institutionId), lt(ledgerEntry.occurredAt, new Date(Date.now() - RETRY_GRACE_MS))],
     RETRY_LIMIT,
   );
-  let settled = 0;
-  let failed = 0;
+  const counts = { settled: 0, flagged: 0, failed: 0 };
   for (const [index, row] of rows.entries()) {
     if (index > 0 && Date.now() > deadline) break;
     try {
-      await issue(row, true);
-      settled += 1;
+      const outcome = await issue(row, true);
+      if (outcome === "refunded") counts.settled += 1;
+      else if (outcome === "refund_failed" || outcome === "flagged") counts.flagged += 1;
     } catch (error) {
-      failed += 1;
+      counts.failed += 1;
       console.error(`[refund] retry failed for ${row.id}`, errorFacts(error));
     }
   }
-  return { settled, failed };
+  return counts;
+}
+
+/**
+ * Ops paid the student another way: the refund row is stamped `manual:<discrepancy id>` and the
+ * discrepancy resolved, in one transaction. The sweep never sees a stamped row, and the row stays
+ * the engagement's one refund.
+ */
+export async function recordManualRefund(params: {
+  discrepancyId: string;
+  institutionId: string;
+  note: string;
+}): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const [found] = await tx
+      .select({ engagementId: moneyDiscrepancy.engagementId })
+      .from(moneyDiscrepancy)
+      .where(
+        and(
+          eq(moneyDiscrepancy.id, params.discrepancyId),
+          eq(moneyDiscrepancy.institutionId, params.institutionId),
+          isNull(moneyDiscrepancy.resolvedAt),
+        ),
+      )
+      .for("update");
+    if (!found?.engagementId) return false;
+
+    await tx
+      .update(ledgerEntry)
+      .set({ stripeReference: `${MANUAL_REFUND_PREFIX}${params.discrepancyId}` })
+      .where(
+        and(
+          eq(ledgerEntry.engagementId, found.engagementId),
+          eq(ledgerEntry.institutionId, params.institutionId),
+          eq(ledgerEntry.type, "refund"),
+          isNull(ledgerEntry.stripeReference),
+        ),
+      );
+    await tx
+      .update(moneyDiscrepancy)
+      .set({ resolvedAt: new Date(), resolutionNote: params.note })
+      .where(eq(moneyDiscrepancy.id, params.discrepancyId));
+    return true;
+  });
 }
 
 async function reconcile(refund: Refund): Promise<RefundOutcome> {

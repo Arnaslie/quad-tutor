@@ -638,7 +638,7 @@ test("a refund that comes back failed is not recorded, waits for ops, and is nev
   assert.equal((await fakeStripe.refunds(sessionId)).length, 1, "neither a repeat event nor the sweep refunds again");
 });
 
-test("a refund Stripe refuses outright is flagged for ops instead of retried", async () => {
+test("a refund Stripe refuses outright is flagged for ops, and resolving it never re-arms one", async () => {
   const { engagementId, sessionId } = await opened();
   const { paymentIntentId } = await fakeStripe.pay(sessionId);
   await releaseCheckout({ engagementId, institutionId: home.institutionId, checkoutSessionId: sessionId });
@@ -652,6 +652,14 @@ test("a refund Stripe refuses outright is flagged for ops instead of retried", a
   await syncPendingCheckouts(home.institutionId);
   assert.deepEqual(await fakeStripe.refunds(sessionId), []);
   assert.ok(paymentIntentId);
+
+  await db.update(moneyDiscrepancy).set({ resolvedAt: new Date() }).where(eq(moneyDiscrepancy.engagementId, engagementId));
+  let calls = 0;
+  await patched("refund", async () => { calls += 1; throw new Error("must not refund once ops has resolved the failure"); }, async () => {
+    assert.equal((await syncCheckout(sessionId)).outcome, "refund_failed");
+    await syncPendingCheckouts(home.institutionId);
+  });
+  assert.equal(calls, 0, "resolving the flag never re-arms the card refund");
 });
 
 test("a refund that errored is retried by the sweep on a fresh key, never the one replaying the error; a booked PaymentIntent never is", async () => {

@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { db } from "@/server/db";
 import { institution } from "@/server/db/schema";
 import { syncPendingCheckouts } from "@/server/modules/billing/checkout-session";
-import { retryUnstampedRefunds } from "@/server/modules/billing/refunds";
+import { SWEEP_BUDGET_MS, retryUnstampedRefunds } from "@/server/modules/billing/refunds";
 import { errorFacts } from "@/server/modules/billing/stripe";
 import { releaseLapsedConfirmations } from "@/server/modules/engagements/confirmation";
 import { runTermEndRefunds } from "@/server/modules/engagements/termEnd";
@@ -53,6 +53,7 @@ export async function GET(request: Request) {
     let checkoutsSettled = 0;
     let checkoutsFailed = 0;
     let cardRefundsSettled = 0;
+    let cardRefundsFlagged = 0;
     let cardRefundsFailed = 0;
 
     for (const campus of campuses) {
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
         console.error(`[cron] proof purge for ${campus.slug} failed`, error);
         return 0;
       });
-      const { refunds, held, failed } = await runTermEndRefunds(campus.id, startedAt + 30_000).catch((error) => {
+      const { refunds, held, failed } = await runTermEndRefunds(campus.id, startedAt + SWEEP_BUDGET_MS).catch((error) => {
         console.error(`[cron] term-end refunds for ${campus.slug} failed`, error);
         return { refunds: [], held: 0, failed: 1 };
       });
@@ -72,17 +73,18 @@ export async function GET(request: Request) {
       refundsFailed += failed;
       refunded += refunds.length;
       refundedMinor += refunds.reduce((sum, refund) => sum + refund.refundMinor, 0);
-      const checkouts = await syncPendingCheckouts(campus.id, startedAt + 30_000).catch((error) => {
+      const checkouts = await syncPendingCheckouts(campus.id, startedAt + SWEEP_BUDGET_MS).catch((error) => {
         console.error(`[cron] checkout sweep for ${campus.slug} failed`, errorFacts(error));
         return { settled: 0, failed: 1 };
       });
       checkoutsSettled += checkouts.settled;
       checkoutsFailed += checkouts.failed;
-      const cardRefunds = await retryUnstampedRefunds(campus.id, startedAt + 30_000).catch((error) => {
+      const cardRefunds = await retryUnstampedRefunds(campus.id, startedAt + SWEEP_BUDGET_MS).catch((error) => {
         console.error(`[cron] card refund retries for ${campus.slug} failed`, errorFacts(error));
-        return { settled: 0, failed: 1 };
+        return { settled: 0, flagged: 0, failed: 1 };
       });
       cardRefundsSettled += cardRefunds.settled;
+      cardRefundsFlagged += cardRefunds.flagged;
       cardRefundsFailed += cardRefunds.failed;
       notified += await runNotifications(campus.id);
       refreshedScores += await refreshScores(campus.id).catch((error) => {
@@ -105,6 +107,7 @@ export async function GET(request: Request) {
       checkoutsSettled,
       checkoutsFailed,
       cardRefundsSettled,
+      cardRefundsFlagged,
       cardRefundsFailed,
       campuses: campuses.length,
       tookMs: Date.now() - startedAt,

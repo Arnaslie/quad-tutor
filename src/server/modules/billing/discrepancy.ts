@@ -1,4 +1,4 @@
-import { and, eq, isNull, type AnyColumn } from "drizzle-orm";
+import { and, eq, like, or, type AnyColumn } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -6,7 +6,7 @@ import { moneyDiscrepancy } from "@/server/db/schema";
 
 import type { Refund } from "./stripe";
 
-type Ids = { engagementId: string; institutionId: string };
+export type Ids = { engagementId: string; institutionId: string };
 
 export async function recordDiscrepancy(
   ids: Ids,
@@ -53,11 +53,24 @@ export async function recordRefundFailure(
   });
 }
 
-const failure = alias(moneyDiscrepancy, "refund_failure");
+const blocker = alias(moneyDiscrepancy, "refund_blocker");
 
-/** Open refund failures stop every automatic refund for the engagement until ops resolves them. */
-export const openRefundFailure = (engagementId: AnyColumn) =>
+/**
+ * A failed refund, or one Stripe holds that is not ours, stops every automatic refund for the engagement
+ * for good. Resolving it never re-arms one: ops settles the student by hand (`recordManualRefund`).
+ */
+export const refundBlocker = (engagementId: AnyColumn | string, institutionId: AnyColumn | string) =>
   db
-    .select({ id: failure.id })
-    .from(failure)
-    .where(and(eq(failure.engagementId, engagementId), eq(failure.kind, "refund_failed"), isNull(failure.resolvedAt)));
+    .select({ id: blocker.id })
+    .from(blocker)
+    .where(
+      and(
+        eq(blocker.engagementId, engagementId),
+        eq(blocker.institutionId, institutionId),
+        or(eq(blocker.kind, "refund_failed"), like(blocker.stripeReference, "re\\_%")),
+      ),
+    );
+
+export async function refundBlocked(ids: Ids): Promise<boolean> {
+  return (await refundBlocker(ids.engagementId, ids.institutionId).limit(1)).length > 0;
+}

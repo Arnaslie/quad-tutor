@@ -10,7 +10,7 @@ import {
 } from "@/server/db/schema";
 import { record } from "@/server/modules/billing/ledger";
 import { unusedRefundMinor } from "@/server/modules/billing/pricing";
-import { refundThroughStripe } from "@/server/modules/billing/refunds";
+import { SWEEP_BUDGET_MS, refundThroughStripe } from "@/server/modules/billing/refunds";
 import { errorFacts } from "@/server/modules/billing/stripe";
 import type { Actor } from "@/server/modules/identity/actor";
 
@@ -199,10 +199,10 @@ export async function endPackage(params: {
 
 export type TermEndSweep = { refunds: TermEndRefund[]; held: number; failed: number };
 
-/** The whole sweep for one campus. Called by the cron route. Card refunds past the deadline wait for the retry sweep. */
+/** The whole sweep for one campus. Called by the cron route. */
 export async function runTermEndRefunds(
   institutionId: string,
-  deadline = Date.now() + 30_000,
+  deadline = Date.now() + SWEEP_BUDGET_MS,
 ): Promise<TermEndSweep> {
   const due = await engagementsDueForTermEndRefund(institutionId);
   const refunds: TermEndRefund[] = [];

@@ -96,3 +96,15 @@ test("a second refund row on one engagement is flagged", () => {
   const e = { id: "e", status: "refunded" as const, pricePaidMinor: 14_000, totals: { package_purchase: t(14_000), refund: t(14_000, 2) } };
   assert.deepEqual(invariants({ ...healthy, engagements: [e] }), ["one refund per engagement"]);
 });
+
+test("a refund row may carry only a Stripe refund or a manual settlement", () => {
+  const e = (reference: string | null) => ({
+    id: "e",
+    status: "refunded" as const,
+    pricePaidMinor: 14_000,
+    totals: { package_purchase: t(14_000), refund: t(14_000) },
+    refundReferences: [reference],
+  });
+  for (const ok of [null, "re_123", "manual:abc"]) assert.deepEqual(invariants({ ...healthy, engagements: [e(ok)] }), []);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e("pi_123")] }), ["refund reference is re_ or manual:"]);
+});

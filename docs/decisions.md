@@ -632,20 +632,29 @@ reference is stamped once, conditionally. That stamp is the only update a ledger
 ever takes. Lock order adds: fulfil and release take the engagement (for update), then
 its held sessions; the transfer sweep takes the engagement (no key update) alone.
 
-**Refunds reach the card after commit, and a failed one goes to ops.** `closeWithRefund`
-writes the `refund` row under its lock with no reference. After commit the row is sent to
-Stripe with key `refund:<ledger_entry_id>` and the row id in metadata, then stamped. A row
-the after-commit call left unstamped is retried by the sweep after a 5-minute grace: it
-lists the PaymentIntent's refunds by metadata first, then creates on `refund:<id>:<hours
-since the row>`, because Stripe replays a failed response under its key for 24h.
-`charge.refunded` and the refund events re-read the refund and stamp the row. A refund
-Stripe refuses at create, or that fails later (closed or lost card), is never re-issued by
-code: the same card would bounce the next one. It writes a `refund_failed` discrepancy,
-the row keeps the `re_…` it was tried against, and no automatic refund touches that
-engagement again until ops resolves it, paying the student another way and appending the
-corrective row. Stripe keeps the processing fee on a refund, so a payment refunded with
-nothing booked still writes its `processor_fee`. Engagements bought before Stripe have no
-`pi_…` and are never sent.
+**Refunds reach the card after commit, and a failed one goes to ops for good.**
+`closeWithRefund` writes the `refund` row under its lock with no reference. After commit,
+every attempt first lists the PaymentIntent's refunds: one carrying this row's id in
+metadata is stamped; a live one that is not ours (a Dashboard refund) writes a discrepancy
+and nothing is created. Otherwise it creates on `refund:<ledger_entry_id>` and stamps the
+`re_…`. A row the after-commit call left unstamped is retried by the sweep after a 5-minute
+grace, on the same base key, so an overlapping call gets Stripe's 409 (left for the next
+pass) or its answer. Only when the base key replays a 5xx does the retry move to
+`refund:<id>:<hours since the row>`, since Stripe keeps a failed response for 24h.
+`charge.refunded` and the refund events re-read the refund and stamp the row. Engagements
+bought before Stripe have no `pi_…` and are never sent. Stripe keeps the processing fee on a
+refund, so a payment refunded with nothing booked still writes its `processor_fee`.
+
+Only a 400 or 402 from Stripe is a refusal; 401, 403 and 404 are logged and retried. A
+refusal first re-lists the refunds and settles with ours if Stripe already holds one. A
+refund refused with none, or that fails later (closed or lost card), writes a `refund_failed`
+discrepancy, and the row keeps any `re_…` it was tried against. Code never re-sends a
+refund to that card: a `refund_failed` discrepancy, or any discrepancy naming a `re_…`,
+stops automatic refunds for the engagement whether or not it is resolved. Ops pays the
+student another way and records it with `recordManualRefund`, which stamps the unstamped
+refund row `manual:<discrepancy id>` and resolves the discrepancy in one transaction. The
+row stays the engagement's one refund, the sweep never sees a stamped row, and
+`db:check-money` accepts only `re_…` or `manual:…` on a refund row.
 
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 Transfers go per engagement once the tutor is verified and the engagement has no open

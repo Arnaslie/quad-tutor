@@ -13,8 +13,8 @@ import {
 } from "@/server/modules/engagements/purchase";
 import type { Actor } from "@/server/modules/identity/actor";
 
-import { openRefundFailure, recordDiscrepancy, recordRefundFailure } from "./discrepancy";
-import { retryKey } from "./refunds";
+import { recordDiscrepancy, recordRefundFailure, refundBlocked, refundBlocker, type Ids } from "./discrepancy";
+import { SWEEP_BUDGET_MS, createRefund } from "./refunds";
 import {
   GatewayError,
   errorFacts,
@@ -31,9 +31,7 @@ const SWEEP_LIMIT = 20;
 const UNAVAILABLE = "Payments are unavailable right now. Nothing was charged; try again in a minute.";
 const UNREACHABLE =
   "We could not reach our payment provider. Try again in a minute. If you already paid, your booking appears under Sessions shortly.";
-const SWEEP_BUDGET_MS = 30_000;
 
-type Ids = { engagementId: string; institutionId: string };
 type Patience = { patient: boolean };
 const PATIENT: Patience = { patient: true };
 const IMPATIENT: Patience = { patient: false };
@@ -187,23 +185,24 @@ async function recordRefundedFee(ids: Ids, paymentIntentId: string, currency: st
 
 type Refunding = { currency: string; patience: Patience; discrepancyId?: string; since?: Date };
 
-/** Never re-issues over a refund Stripe could not deliver; that one waits for ops. */
+/** Never re-issues over a refund Stripe could not deliver, even once ops resolves it. */
 async function refundPayment(ids: Ids, paymentIntentId: string, refunding: Refunding): Promise<boolean> {
-  const gateway = stripeGateway();
-  const listed = await gateway.listRefunds(paymentIntentId);
-  let refund = listed.find(isLiveRefund) ?? listed.at(0);
+  if (await refundBlocked(ids)) return false;
+  const onCharge = async () => {
+    const listed = await stripeGateway().listRefunds(paymentIntentId);
+    return listed.find(isLiveRefund) ?? listed.at(0);
+  };
+  let refund = await onCharge();
   if (!refund) {
-    const key = `refund:${paymentIntentId}`;
     try {
-      refund = await gateway.refund({
-        paymentIntentId,
-        ...ids,
-        idempotencyKey: refunding.since ? retryKey(key, refunding.since) : key,
-      });
+      refund = await createRefund({ paymentIntentId, ...ids }, `refund:${paymentIntentId}`, refunding.since ?? null, onCharge);
     } catch (error) {
       if (!(error instanceof GatewayError && error.refused)) throw error;
-      await recordRefundFailure(ids, { refund: null, paymentIntentId, amountMinor: null, currency: refunding.currency });
-      return false;
+      refund = await onCharge();
+      if (!refund) {
+        await recordRefundFailure(ids, { refund: null, paymentIntentId, amountMinor: null, currency: refunding.currency });
+        return false;
+      }
     }
   }
   if (!isLiveRefund(refund)) {
@@ -461,7 +460,7 @@ async function retryDiscrepancyRefunds(
         isNull(moneyDiscrepancy.resolvedAt),
         like(moneyDiscrepancy.stripeReference, "pi\\_%"),
         isNotNull(moneyDiscrepancy.engagementId),
-        notExists(openRefundFailure(moneyDiscrepancy.engagementId)),
+        notExists(refundBlocker(moneyDiscrepancy.engagementId, moneyDiscrepancy.institutionId)),
         notExists(
           db
             .select({ id: ledgerEntry.id })

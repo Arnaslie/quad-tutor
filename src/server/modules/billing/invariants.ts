@@ -11,6 +11,7 @@ import {
 } from "@/server/db/schema";
 
 import { TAKE_RATE_BP, TERM_FEE_CAP_MINOR } from "./pricing";
+import { MANUAL_REFUND_PREFIX } from "./refunds";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type LedgerType = (typeof ledgerEntryType.enumValues)[number];
@@ -35,6 +36,7 @@ export type MoneyFacts = {
     status: EngagementStatus;
     pricePaidMinor: number;
     totals: Totals;
+    refundReferences?: (string | null)[];
   }[];
   sessions: { id: string; totals: Totals }[];
   tutorTerms: { tutorProfileId: string; termId: string; feeMinor: number }[];
@@ -64,6 +66,11 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
     }
     if (refunded > paid) flag("refund <= purchase", subject, `refunded ${refunded} of ${paid}`);
     if (rows(e.totals, REFUND) > 1) flag("one refund per engagement", subject, `${rows(e.totals, REFUND)} refund rows`);
+    for (const reference of e.refundReferences ?? []) {
+      if (reference && !reference.startsWith("re_") && !reference.startsWith(MANUAL_REFUND_PREFIX)) {
+        flag("refund reference is re_ or manual:", subject, reference);
+      }
+    }
     if (deferred < 0) flag("deferred >= 0", subject, `deferred ${deferred}`);
     if (CLOSED.includes(e.status) && deferred !== 0) {
       flag("deferred = 0 once closed", subject, `${e.status}, deferred ${deferred}`);
@@ -118,7 +125,7 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
   const total = sql<number>`coalesce(sum(${ledgerEntry.amountMinor}), 0)::int`;
   const count = sql<number>`count(${ledgerEntry.id})::int`;
 
-  const [engagements, byEngagement, bySession, tutorTerms] = await Promise.all([
+  const [engagements, byEngagement, bySession, tutorTerms, refundRows] = await Promise.all([
     tx
       .select({ id: engagement.id, status: engagement.status, pricePaidMinor: engagement.pricePaidMinor })
       .from(engagement)
@@ -141,11 +148,21 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
       .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
       .where(and(eq(ledgerEntry.institutionId, institutionId), eq(ledgerEntry.type, FEE)))
       .groupBy(tutorCourse.tutorProfileId, courseOffering.termId),
+    tx
+      .select({ engagementId: ledgerEntry.engagementId, reference: ledgerEntry.stripeReference })
+      .from(ledgerEntry)
+      .where(and(eq(ledgerEntry.institutionId, institutionId), eq(ledgerEntry.type, REFUND))),
   ]);
 
   const ledger = collect(byEngagement);
+  const references = new Map<string, (string | null)[]>();
+  for (const row of refundRows) references.set(row.engagementId, [...(references.get(row.engagementId) ?? []), row.reference]);
   return {
-    engagements: engagements.map((e) => ({ ...e, totals: ledger.get(e.id) ?? {} })),
+    engagements: engagements.map((e) => ({
+      ...e,
+      totals: ledger.get(e.id) ?? {},
+      refundReferences: references.get(e.id) ?? [],
+    })),
     sessions: [...collect(bySession)].map(([id, totals]) => ({ id, totals })),
     tutorTerms,
   };

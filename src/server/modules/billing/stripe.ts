@@ -41,10 +41,13 @@ export class GatewayError extends Error {
     return this.code === "resource_missing";
   }
 
-  /** Stripe answered and said no; asking again with the same request gets the same answer. */
+  /** A card or charge refusal; asking again gets the same answer. Auth and lookup errors are not refusals. */
   get refused(): boolean {
-    const status = this.status ?? 0;
-    return status >= 400 && status < 500 && status !== 409 && status !== 429 && !this.idempotency;
+    return (this.status === 400 || this.status === 402) && !this.idempotency;
+  }
+
+  get inFlight(): boolean {
+    return this.status === 409;
   }
 }
 
@@ -100,7 +103,6 @@ export type NewRefund = {
   paymentIntentId: string;
   engagementId: string;
   institutionId: string;
-  /** Omitted refunds whatever is left on the charge. */
   amountMinor?: number;
   ledgerEntryId?: string;
   idempotencyKey: string;
@@ -128,7 +130,11 @@ export type Gateway = {
   refund(params: NewRefund): Promise<Refund>;
 };
 
-function refundMetadata(params: NewRefund): Record<string, string> {
+function refundMetadata(params: {
+  engagementId: string | null;
+  institutionId: string | null;
+  ledgerEntryId?: string | null;
+}): Record<string, string | null> {
   return {
     engagement_id: params.engagementId,
     institution_id: params.institutionId,
@@ -435,66 +441,82 @@ const fakeGateway: Gateway = {
     const { refund } = await fakeRefund(id);
     return refund;
   },
-  refund(params) {
+  async refund(params) {
     const key = `idem-refund:${params.idempotencyKey}`;
-    return locked(key, async () => {
-      const sent = JSON.stringify({ ...params, idempotencyKey: undefined });
-      const replay = await fakeRead<FakeRefundReplay>(key);
-      if (replay && Date.now() - replay.at < IDEMPOTENCY_TTL_MS) {
-        if (replay.params !== sent) {
-          throw new GatewayError(
-            "Keys for idempotent requests can only be used with the same parameters they were first used with.",
-            { status: 400, idempotency: true },
-          );
-        }
-        if (replay.error) throw new GatewayError(replay.error.message, replay.error);
-        return replay.refund!;
-      }
-
-      const payment = await fakeRead<FakePayment>(params.paymentIntentId);
-      if (!payment) throw missing("payment_intent", params.paymentIntentId);
-      return locked(payment.sessionId, async () => {
-        const remember = (outcome: Pick<FakeRefundReplay, "refund" | "error">) =>
-          fakeWrite(key, { ...outcome, params: sent, at: Date.now() });
-
-        if (fakeRefundOutages > 0) {
-          fakeRefundOutages -= 1;
-          const error = { message: "An unknown error occurred", status: 500, type: "api_error" };
-          await remember({ refund: null, error });
-          throw new GatewayError(error.message, error);
-        }
-        const record = await fakeRecord(payment.sessionId);
-        const left = payment.amountMinor - record.refunds.filter(isLiveRefund).reduce((sum, r) => sum + r.amountMinor, 0);
-        const amountMinor = params.amountMinor ?? left;
-        if (left <= 0 || amountMinor <= 0 || amountMinor > left) {
-          const error = {
-            message: `Refund amount (${amountMinor}) is greater than the unrefunded amount on the charge (${left}).`,
-            status: 400,
-            code: left <= 0 ? "charge_already_refunded" : "amount_too_large",
-          };
-          await remember({ refund: null, error });
-          throw new GatewayError(error.message, error);
-        }
-        const refund: Refund = {
-          id: `re_fake_${randomUUID().replaceAll("-", "")}`,
-          status: "succeeded",
-          amountMinor,
-          currency: record.session.currency ?? "usd",
-          paymentIntentId: params.paymentIntentId,
-          ledgerEntryId: params.ledgerEntryId ?? null,
-          engagementId: params.engagementId,
-          institutionId: params.institutionId,
-          failureReason: null,
-        };
-        record.refunds.push(refund);
-        await fakeWrite(payment.sessionId, record);
-        await fakeWrite(refund.id, { sessionId: payment.sessionId });
-        await remember({ refund, error: null });
-        return refund;
+    if (fakeRefundsInFlight.has(key)) {
+      throw new GatewayError("There is currently another in-progress request using this Idempotent Key.", {
+        status: 409,
+        code: "idempotency_key_in_use",
       });
-    });
+    }
+    fakeRefundsInFlight.add(key);
+    try {
+      await fakeRefundHold;
+      return await fakeCreateRefund(key, params);
+    } finally {
+      fakeRefundsInFlight.delete(key);
+    }
   },
 };
+
+function fakeCreateRefund(key: string, params: NewRefund): Promise<Refund> {
+  return locked(key, async () => {
+    const sent = JSON.stringify({ ...params, idempotencyKey: undefined });
+    const replay = await fakeRead<FakeRefundReplay>(key);
+    if (replay && Date.now() - replay.at < IDEMPOTENCY_TTL_MS) {
+      if (replay.params !== sent) {
+        throw new GatewayError(
+          "Keys for idempotent requests can only be used with the same parameters they were first used with.",
+          { status: 400, idempotency: true },
+        );
+      }
+      if (replay.error) throw new GatewayError(replay.error.message, replay.error);
+      return replay.refund!;
+    }
+
+    const payment = await fakeRead<FakePayment>(params.paymentIntentId);
+    if (!payment) throw missing("payment_intent", params.paymentIntentId);
+    return locked(payment.sessionId, async () => {
+      const remember = (outcome: Pick<FakeRefundReplay, "refund" | "error">) =>
+        fakeWrite(key, { ...outcome, params: sent, at: Date.now() });
+
+      if (fakeRefundOutages > 0) {
+        fakeRefundOutages -= 1;
+        const error = { message: "An unknown error occurred", status: 500, type: "api_error" };
+        await remember({ refund: null, error });
+        throw new GatewayError(error.message, error);
+      }
+      const record = await fakeRecord(payment.sessionId);
+      const left = payment.amountMinor - record.refunds.filter(isLiveRefund).reduce((sum, r) => sum + r.amountMinor, 0);
+      const amountMinor = params.amountMinor ?? left;
+      if (left <= 0 || amountMinor <= 0 || amountMinor > left) {
+        const error = {
+          message: `Refund amount (${amountMinor}) is greater than the unrefunded amount on the charge (${left}).`,
+          status: 400,
+          code: left <= 0 ? "charge_already_refunded" : "amount_too_large",
+        };
+        await remember({ refund: null, error });
+        throw new GatewayError(error.message, error);
+      }
+      const refund: Refund = {
+        id: `re_fake_${randomUUID().replaceAll("-", "")}`,
+        status: "succeeded",
+        amountMinor,
+        currency: record.session.currency ?? "usd",
+        paymentIntentId: params.paymentIntentId,
+        ledgerEntryId: params.ledgerEntryId ?? null,
+        engagementId: params.engagementId,
+        institutionId: params.institutionId,
+        failureReason: null,
+      };
+      record.refunds.push(refund);
+      await fakeWrite(payment.sessionId, record);
+      await fakeWrite(refund.id, { sessionId: payment.sessionId });
+      await remember({ refund, error: null });
+      return refund;
+    });
+  });
+}
 
 type FakePayment = { sessionId: string; amountMinor: number };
 type FakeRefundReplay = {
@@ -505,6 +527,8 @@ type FakeRefundReplay = {
 };
 
 let fakeRefundOutages = 0;
+const fakeRefundsInFlight = new Set<string>();
+let fakeRefundHold: Promise<void> = Promise.resolve();
 
 async function fakeRefund(id: string): Promise<{ sessionId: string; record: FakeRecord; refund: Refund }> {
   const owner = await fakeRead<{ sessionId: string }>(id);
@@ -549,6 +573,16 @@ export const fakeStripe = {
     assertNotProduction();
     fakeRefundOutages += 1;
   },
+  /** Refund creates wait, their keys in flight, until the returned release is called. */
+  holdRefunds(): () => void {
+    assertNotProduction();
+    let release = () => {};
+    fakeRefundHold = new Promise((resolve) => (release = resolve));
+    return () => {
+      fakeRefundHold = Promise.resolve();
+      release();
+    };
+  },
   /** Plays the card network bouncing a refund days after it was created. */
   async failRefund(id: string, reason = "expired_or_canceled_card"): Promise<Refund> {
     assertNotProduction();
@@ -567,11 +601,7 @@ export const fakeStripe = {
   ): Promise<{ payload: string; signature: string }> {
     assertNotProduction();
     const { record, refund } = await fakeRefund(id);
-    const metadata = {
-      engagement_id: refund.engagementId,
-      institution_id: refund.institutionId,
-      ...(refund.ledgerEntryId ? { ledger_entry_id: refund.ledgerEntryId } : {}),
-    };
+    const metadata = refundMetadata(refund);
     const chargeId = refund.paymentIntentId?.replace(/^pi_/, "ch_") ?? null;
     const object =
       type === "charge.refunded"
