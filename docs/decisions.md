@@ -127,7 +127,7 @@ drift:
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
   | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation could hold (inside 12h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
   | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment` and the Checkout Session id matches), then its `held` `session_booking` rows. An amount or currency mismatch cancels both and inserts a `money_discrepancy` row in the same transaction |
-  | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the unstamped `refund` row, calls Stripe, then stamps `re_…` with `where stripe_reference is null` |
+  | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the unstamped `refund` row, calls Stripe, then stamps `re_…` with `where stripe_reference is null`. The retry sweep runs each campus under a `sweep_lease` row (a timestamp claimed by one conditional upsert, not a lock) |
 
   The rules behind it:
   - Student before request; tutor before request.
@@ -641,6 +641,12 @@ and nothing is created. Otherwise it creates on `refund:<ledger_entry_id>` and s
 grace, on the same base key, so an overlapping call gets Stripe's 409 (left for the next
 pass) or its answer. Only when the base key replays a 5xx does the retry move to
 `refund:<id>:<hours since the row>`, since Stripe keeps a failed response for 24h.
+Two retry sweeps never run one campus at once: each claims a `sweep_lease` row (campus,
+name, `held_until`) with one conditional upsert and releases it at the end, and a sweep
+that cannot claim skips the campus. A Postgres advisory lock was rejected because holding
+it means an open transaction across the Stripe calls; the lease is a timestamp, holds no
+lock, and lapses after two minutes if its holder dies. The Stripe client times out a call
+at 15s, so one call and its two retries fit inside the cron's 60s and the 5-minute grace.
 `charge.refunded` and the refund events re-read the refund and stamp the row. Engagements
 bought before Stripe have no `pi_…` and are never sent. Stripe keeps the processing fee on a
 refund, so a payment refunded with nothing booked still writes its `processor_fee`.
@@ -650,7 +656,10 @@ refusal first re-lists the refunds and settles with ours if Stripe already holds
 refund refused with none, or that fails later (closed or lost card), writes a `refund_failed`
 discrepancy, and the row keeps any `re_…` it was tried against. Code never re-sends a
 refund to that card: a `refund_failed` discrepancy, or any discrepancy naming a `re_…`,
-stops automatic refunds for the engagement whether or not it is resolved. Ops pays the
+stops automatic refunds for the engagement whether or not it is resolved. The halt is per
+engagement, not per payment: a failed refund of a stray payment on a superseded Checkout
+Session also pauses that engagement's later term-end or end-early card refund until ops
+acts. Ops pays the
 student another way and records it with `recordManualRefund`, which stamps the unstamped
 refund row `manual:<discrepancy id>` and resolves the discrepancy in one transaction. The
 row stays the engagement's one refund, the sweep never sees a stamped row, and

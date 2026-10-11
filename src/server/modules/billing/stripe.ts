@@ -207,7 +207,7 @@ function realGateway(): Gateway {
       "Live Stripe keys are refused until refunds through Stripe and tutor transfers ship (Stripe plan items 4 and 6). Use an sk_test_ key.",
     );
   }
-  const stripe = new Stripe(key, { apiVersion: API_VERSION, maxNetworkRetries: 2 });
+  const stripe = new Stripe(key, { apiVersion: API_VERSION, maxNetworkRetries: 2, timeout: 15_000 });
 
   return {
     livemode,

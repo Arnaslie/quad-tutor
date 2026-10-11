@@ -18,6 +18,7 @@ import {
   moneyDiscrepancy,
   sessionBooking,
   studentProfile,
+  sweepLease,
   term,
   tutorAvailability,
   tutorCourse,
@@ -200,6 +201,7 @@ after(async () => {
   await db.delete(courseCodeAlias).where(eq(courseCodeAlias.institutionId, institutionId));
   await db.delete(course).where(eq(course.institutionId, institutionId));
   await db.delete(term).where(eq(term.institutionId, institutionId));
+  await db.delete(sweepLease).where(eq(sweepLease.institutionId, institutionId));
   await db.delete(institution).where(eq(institution.id, institutionId));
   await db.$client.end();
 });
@@ -459,6 +461,27 @@ test("an engagement bought before Stripe is closed on the ledger and never sent 
     }),
   );
   assert.equal((await refundRow(legacy.id)).stripeReference, null);
+});
+
+test("a second sweep on the same campus is skipped while the first holds the lease", async () => {
+  const { actor, engagementId, checkoutSessionId } = await bought();
+  await endPackage({ actor, engagementId });
+  await age(engagementId);
+  const release = fakeStripe.holdRefunds();
+  const first = retryUnstampedRefunds(home.institutionId, Date.now() + 10_000);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(await creates(async () => {
+      assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, failed: 0 });
+    }), 0);
+  } finally {
+    release();
+  }
+  assert.deepEqual(await first, { settled: 1, flagged: 0, failed: 0 });
+  assert.equal((await fakeStripe.refunds(checkoutSessionId)).length, 1);
+
+  const [lease] = await db.select({ heldUntil: sweepLease.heldUntil }).from(sweepLease).where(eq(sweepLease.institutionId, home.institutionId));
+  assert.ok(lease.heldUntil.getTime() < Date.now(), "released when the sweep ends");
 });
 
 test("money invariants hold after every refund path", async () => {

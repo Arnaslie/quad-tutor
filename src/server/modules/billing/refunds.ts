@@ -4,12 +4,14 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/server/db";
 import { ledgerEntry, moneyDiscrepancy } from "@/server/db/schema";
 
+import { withLease } from "./lease";
 import { recordDiscrepancy, recordRefundFailure, refundBlocker, type Ids } from "./discrepancy";
 import { GatewayError, errorFacts, isLiveRefund, stripeGateway, type NewRefund, type Refund } from "./stripe";
 
 const HOUR_MS = 60 * 60 * 1000;
 const RETRY_GRACE_MS = 5 * 60 * 1000;
 const RETRY_LIMIT = 20;
+const RETRY_LEASE_MS = 2 * 60 * 1000;
 export const SWEEP_BUDGET_MS = 30_000;
 export const MANUAL_REFUND_PREFIX = "manual:";
 
@@ -171,11 +173,19 @@ export async function refundThroughStripe(ids: Ids): Promise<RefundOutcome> {
   return row ? issue(row, false) : "skipped";
 }
 
-/** Rows whose after-commit call died. The grace keeps the sweep off a call still in flight. */
+/**
+ * Rows whose after-commit call died. The grace keeps the sweep off a call still in flight, and the lease
+ * keeps a second sweep off this campus, so two never race onto different hour-suffixed keys.
+ */
 export async function retryUnstampedRefunds(
   institutionId: string,
   deadline: number,
 ): Promise<{ settled: number; flagged: number; failed: number }> {
+  const counts = await withLease(institutionId, "card-refund-retry", RETRY_LEASE_MS, () => retryCampus(institutionId, deadline));
+  return counts ?? { settled: 0, flagged: 0, failed: 0 };
+}
+
+async function retryCampus(institutionId: string, deadline: number) {
   const rows = await unstampedRefunds(
     [eq(ledgerEntry.institutionId, institutionId), lt(ledgerEntry.occurredAt, new Date(Date.now() - RETRY_GRACE_MS))],
     RETRY_LIMIT,

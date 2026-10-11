@@ -580,6 +580,16 @@ export const moneyDiscrepancy = pgTable(
   ],
 );
 
+export const sweepLease = pgTable(
+  "sweep_lease",
+  {
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
+    name: text("name").notNull(),
+    heldUntil: timestamp("held_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.institutionId, t.name] })],
+);
+
 export const tutorAvailability = pgTable(
   "tutor_availability",
   {
