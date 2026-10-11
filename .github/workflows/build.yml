@@ -1,4 +1,4 @@
-name: journal
+name: build
 
 on:
   pull_request:
@@ -7,9 +7,9 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -17,4 +17,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm run db:check-journal
+          cache: npm
+      - run: npm ci
+      - run: npm run build
