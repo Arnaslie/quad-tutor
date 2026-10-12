@@ -76,7 +76,6 @@ const unstampedTransfer = (engagementId: AnyColumn, institutionId: AnyColumn, ..
       ),
     );
 
-/** An open chargeback or an open discrepancy on the engagement holds its transfers until ops resolves it. */
 const paused = (engagementId: AnyColumn | string, institutionId: AnyColumn | string) => sql<boolean>`(${exists(
       db
         .select({ id: paymentDispute.id })
@@ -214,7 +213,6 @@ const ours = async (row: Ids & { id: string }) =>
 
 type Kyc = (payee: Payee) => Promise<KycStatus | null>;
 
-/** One account read per tutor per run, whatever the number of their engagements. */
 function kycThisRun(): Kyc {
   const seen = new Map<string, Promise<KycStatus | null>>();
   return (payee) => {
@@ -250,7 +248,7 @@ async function send(row: Sending, retry: boolean): Promise<Outcome> {
       `transfer:${row.id}`,
       retry ? row.occurredAt : null,
       () => ours(row),
-      // A refusal still flagged nothing only because the account was unverified then; it is now.
+      // Only an unverified account's refusal leaves a row unflagged, and the account was verified since.
       (error) => (error.status ?? 0) >= 500 || error.refused,
     );
   } catch (error) {
@@ -271,7 +269,6 @@ async function send(row: Sending, retry: boolean): Promise<Outcome> {
   return "transferred";
 }
 
-/** The after-commit call died: stamp the transfer Stripe already holds for the row, or make it now. */
 async function retry(row: Awaited<ReturnType<typeof unstampedRows>>[number], kyc: Kyc): Promise<Outcome> {
   const found = await ours(row);
   if (found) {
