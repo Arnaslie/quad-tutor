@@ -363,7 +363,12 @@ type FakeRecord = {
   refunds: Refund[];
 };
 
-const fakeDir = () => path.join(tmpdir(), "quad-tutor-stripe-fake");
+/** One folder per database, so worktrees running side by side never see each other's fake objects. */
+function fakeDir(): string {
+  const url = process.env.DATABASE_URL;
+  const database = url ? new URL(url).pathname.slice(1).replace(/[^\w-]/g, "_") : "";
+  return path.join(tmpdir(), "quad-tutor-stripe-fake", database || "default");
+}
 const fakeFile = (name: string) => path.join(fakeDir(), `${name.replace(/[^\w-]/g, "_")}.json`);
 
 async function fakeRead<T>(name: string): Promise<T | null> {
