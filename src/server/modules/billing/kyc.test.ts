@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { kycStatusOf } from "./kyc";
+import { kycStatusOf, payoutStageOf } from "./kyc";
 
 const fresh = {
   detailsSubmitted: false,
@@ -38,4 +38,16 @@ test("past-due requirements or a disabled reason restrict a submitted account", 
 test("an unsubmitted account rejected or paused by Stripe is restricted, not merely unstarted", () => {
   assert.equal(kycStatusOf({ ...fresh, disabledReason: "rejected.terms_of_service" }), "restricted");
   assert.equal(kycStatusOf({ ...fresh, disabledReason: "platform_paused" }), "restricted");
+});
+
+test("a restriction Stripe imposed, not one the tutor can fill in, needs support", () => {
+  assert.equal(payoutStageOf({ ...verified, transfers: "inactive", payoutsEnabled: false, disabledReason: "rejected.fraud" }), "needs_support");
+  assert.equal(payoutStageOf({ ...fresh, disabledReason: "rejected.terms_of_service" }), "needs_support");
+  assert.equal(
+    payoutStageOf({ ...verified, transfers: "inactive", payoutsEnabled: false, disabledReason: "requirements.past_due", pastDue: ["external_account"] }),
+    "restricted",
+  );
+  assert.equal(payoutStageOf({ ...verified, pastDue: ["individual.verification.document"] }), "restricted");
+  assert.equal(payoutStageOf(verified), "verified");
+  assert.equal(payoutStageOf(null), "not_started");
 });
