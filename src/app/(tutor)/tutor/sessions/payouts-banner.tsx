@@ -30,7 +30,7 @@ const BANNERS: Record<PayoutStage, (owed: string | null) => Banner | null> = {
   }),
   needs_support: (owed) => ({
     heading: "Payouts are blocked on this account",
-    body: `${PAYOUTS_SUPPORT}${owing(owed)}`,
+    body: `${PAYOUTS_SUPPORT}${owed ? ` You're owed ${owed}, held for you.` : ""}`,
     action: null,
   }),
   verified: () => null,
