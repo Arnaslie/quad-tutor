@@ -72,8 +72,8 @@ export async function recordRefundFailure(
 
 const blocker = alias(moneyDiscrepancy, "refund_blocker");
 
-/** Any discrepancy on a refund row stops it for good; resolving one never re-arms it (`recordManualRefund`). */
-export const ledgerRefundBlocker = (ledgerEntryId: AnyColumn, institutionId: AnyColumn | string) =>
+/** Any discrepancy naming a ledger row stops that row for good; resolving one never re-arms it. */
+export const ledgerRowBlocker = (ledgerEntryId: AnyColumn, institutionId: AnyColumn | string) =>
   db
     .select({ id: blocker.id })
     .from(blocker)

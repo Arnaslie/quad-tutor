@@ -587,6 +587,33 @@ export const moneyDiscrepancy = pgTable(
   ],
 );
 
+/** `closed_at` is Stripe ending the dispute; `resolved_at` is ops, and only that lifts the transfer pause. */
+export const paymentDispute = pgTable(
+  "payment_dispute",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    institutionId: uuid("institution_id").notNull().references(() => institution.id),
+    engagementId: uuid("engagement_id")
+      .notNull()
+      .references(() => engagement.id),
+    stripeDisputeId: text("stripe_dispute_id").notNull().unique(),
+    paymentIntentId: text("payment_intent_id").notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull().default("usd"),
+    reason: text("reason"),
+    status: text("status").notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolutionNote: text("resolution_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("payment_dispute_institution_idx").on(t.institutionId, t.resolvedAt),
+    index("payment_dispute_engagement_idx").on(t.engagementId),
+  ],
+);
+
 export const sweepLease = pgTable(
   "sweep_lease",
   {

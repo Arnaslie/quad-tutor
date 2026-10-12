@@ -5,6 +5,7 @@ import { institution } from "@/server/db/schema";
 import { syncPendingCheckouts } from "@/server/modules/billing/checkout-session";
 import { SWEEP_BUDGET_MS, retryUnstampedRefunds } from "@/server/modules/billing/refunds";
 import { errorFacts } from "@/server/modules/billing/stripe";
+import { runTransfers, type TransferCounts } from "@/server/modules/billing/transfers";
 import { releaseLapsedConfirmations } from "@/server/modules/engagements/confirmation";
 import { runTermEndRefunds } from "@/server/modules/engagements/termEnd";
 import { runNotifications } from "@/server/modules/notifications/dispatch";
@@ -56,6 +57,7 @@ export async function GET(request: Request) {
     let cardRefundsFlagged = 0;
     let cardRefundsBlocked = 0;
     let cardRefundsFailed = 0;
+    const transfers: TransferCounts = { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 0, failed: 0 };
 
     for (const campus of campuses) {
       releasedRatings += await releaseRatings(campus.id).catch((error) => {
@@ -88,6 +90,11 @@ export async function GET(request: Request) {
       cardRefundsFlagged += cardRefunds.flagged;
       cardRefundsBlocked += cardRefunds.blocked;
       cardRefundsFailed += cardRefunds.failed;
+      const campusTransfers = await runTransfers(campus.id, startedAt + SWEEP_BUDGET_MS).catch((error) => {
+        console.error(`[cron] tutor transfers for ${campus.slug} failed`, errorFacts(error));
+        return { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 0, failed: 1 };
+      });
+      for (const key of Object.keys(transfers) as (keyof TransferCounts)[]) transfers[key] += campusTransfers[key];
       notified += await runNotifications(campus.id);
       refreshedScores += await refreshScores(campus.id).catch((error) => {
         console.error(`[cron] score refresh for ${campus.slug} failed`, error);
@@ -112,6 +119,12 @@ export async function GET(request: Request) {
       cardRefundsFlagged,
       cardRefundsBlocked,
       cardRefundsFailed,
+      transfersSent: transfers.sent,
+      transfersSettled: transfers.settled,
+      transfersWaiting: transfers.waiting,
+      transfersFlagged: transfers.flagged,
+      transfersBlocked: transfers.blocked,
+      transfersFailed: transfers.failed,
       campuses: campuses.length,
       tookMs: Date.now() - startedAt,
     });

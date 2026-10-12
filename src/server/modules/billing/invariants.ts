@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -36,7 +36,7 @@ export type MoneyFacts = {
     status: EngagementStatus;
     pricePaidMinor: number;
     totals: Totals;
-    refundReferences?: (string | null)[];
+    references?: Partial<Record<LedgerType, (string | null)[]>>;
   }[];
   sessions: { id: string; totals: Totals }[];
   tutorTerms: { tutorProfileId: string; termId: string; feeMinor: number }[];
@@ -66,10 +66,20 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
     }
     if (refunded > paid) flag("refund <= purchase", subject, `refunded ${refunded} of ${paid}`);
     if (rows(e.totals, REFUND) > 1) flag("one refund per engagement", subject, `${rows(e.totals, REFUND)} refund rows`);
-    for (const reference of e.refundReferences ?? []) {
+    const references = (type: LedgerType) => e.references?.[type] ?? [];
+    for (const reference of references(REFUND)) {
       if (reference && !reference.startsWith("re_") && !reference.startsWith(MANUAL_REFUND_PREFIX)) {
         flag("refund reference is re_ or manual:", subject, reference);
       }
+    }
+    for (const reference of references(TRANSFER)) {
+      if (reference && !reference.startsWith("tr_")) flag("transfer reference is tr_", subject, reference);
+    }
+    for (const reference of references(REVERSAL)) {
+      if (!reference?.startsWith("trr_")) flag("reversal reference is trr_", subject, String(reference));
+    }
+    if (rows(e.totals, TRANSFER) > 0 && !references(PURCHASE).some((reference) => reference?.startsWith("pi_"))) {
+      flag("transfers only from a Stripe purchase", subject, `${rows(e.totals, TRANSFER)} transfer rows`);
     }
     if (deferred < 0) flag("deferred >= 0", subject, `deferred ${deferred}`);
     if (CLOSED.includes(e.status) && deferred !== 0) {
@@ -79,6 +89,9 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
     const transferred = minor(e.totals, TRANSFER) - minor(e.totals, REVERSAL);
     const accrued = minor(e.totals, ACCRUED);
     if (transferred > accrued) flag("transferred <= accrued", subject, `transferred ${transferred}, accrued ${accrued}`);
+    if (transferred < 0) {
+      flag("reversals <= transfers", subject, `reversed ${minor(e.totals, REVERSAL)} of ${minor(e.totals, TRANSFER)}`);
+    }
   }
 
   for (const s of facts.sessions) {
@@ -125,7 +138,7 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
   const total = sql<number>`coalesce(sum(${ledgerEntry.amountMinor}), 0)::int`;
   const count = sql<number>`count(${ledgerEntry.id})::int`;
 
-  const [engagements, byEngagement, bySession, tutorTerms, refundRows] = await Promise.all([
+  const [engagements, byEngagement, bySession, tutorTerms, referenceRows] = await Promise.all([
     tx
       .select({ id: engagement.id, status: engagement.status, pricePaidMinor: engagement.pricePaidMinor })
       .from(engagement)
@@ -149,19 +162,28 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
       .where(and(eq(ledgerEntry.institutionId, institutionId), eq(ledgerEntry.type, FEE)))
       .groupBy(tutorCourse.tutorProfileId, courseOffering.termId),
     tx
-      .select({ engagementId: ledgerEntry.engagementId, reference: ledgerEntry.stripeReference })
+      .select({ engagementId: ledgerEntry.engagementId, type: ledgerEntry.type, reference: ledgerEntry.stripeReference })
       .from(ledgerEntry)
-      .where(and(eq(ledgerEntry.institutionId, institutionId), eq(ledgerEntry.type, REFUND))),
+      .where(
+        and(
+          eq(ledgerEntry.institutionId, institutionId),
+          inArray(ledgerEntry.type, [PURCHASE, REFUND, TRANSFER, REVERSAL]),
+        ),
+      ),
   ]);
 
   const ledger = collect(byEngagement);
-  const references = new Map<string, (string | null)[]>();
-  for (const row of refundRows) references.set(row.engagementId, [...(references.get(row.engagementId) ?? []), row.reference]);
+  const references = new Map<string, Partial<Record<LedgerType, (string | null)[]>>>();
+  for (const row of referenceRows) {
+    const byType = references.get(row.engagementId) ?? {};
+    byType[row.type] = [...(byType[row.type] ?? []), row.reference];
+    references.set(row.engagementId, byType);
+  }
   return {
     engagements: engagements.map((e) => ({
       ...e,
       totals: ledger.get(e.id) ?? {},
-      refundReferences: references.get(e.id) ?? [],
+      references: references.get(e.id) ?? {},
     })),
     sessions: [...collect(bySession)].map(([id, totals]) => ({ id, totals })),
     tutorTerms,

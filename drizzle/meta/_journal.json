@@ -204,6 +204,13 @@
       "when": 1791826549063,
       "tag": "0028_smooth_scarlet_spider",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791834914137,
+      "tag": "0029_cultured_beast",
+      "breakpoints": true
     }
   ]
 }
