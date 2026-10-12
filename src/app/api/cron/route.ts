@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { db } from "@/server/db";
 import { institution } from "@/server/db/schema";
 import { syncPendingCheckouts } from "@/server/modules/billing/checkout-session";
+import { runReconciliation, type ReconcileCounts } from "@/server/modules/billing/reconcile";
 import { SWEEP_BUDGET_MS, retryUnstampedRefunds } from "@/server/modules/billing/refunds";
 import { errorFacts } from "@/server/modules/billing/stripe";
 import { runTransfers, type TransferCounts } from "@/server/modules/billing/transfers";
@@ -58,6 +59,7 @@ export async function GET(request: Request) {
     let cardRefundsBlocked = 0;
     let cardRefundsFailed = 0;
     const transfers: TransferCounts = { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 0, failed: 0 };
+    const reconciled: ReconcileCounts = { checked: 0, flagged: 0, resolved: 0, failed: 0 };
 
     for (const campus of campuses) {
       releasedRatings += await releaseRatings(campus.id).catch((error) => {
@@ -95,6 +97,11 @@ export async function GET(request: Request) {
         return { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 0, failed: 1 };
       });
       for (const key of Object.keys(transfers) as (keyof TransferCounts)[]) transfers[key] += campusTransfers[key];
+      const campusReconciled = await runReconciliation(campus.id, startedAt + SWEEP_BUDGET_MS).catch((error) => {
+        console.error(`[cron] reconciliation for ${campus.slug} failed`, errorFacts(error));
+        return { checked: 0, flagged: 0, resolved: 0, failed: 1 };
+      });
+      for (const key of Object.keys(reconciled) as (keyof ReconcileCounts)[]) reconciled[key] += campusReconciled[key];
       notified += await runNotifications(campus.id);
       refreshedScores += await refreshScores(campus.id).catch((error) => {
         console.error(`[cron] score refresh for ${campus.slug} failed`, error);
@@ -125,6 +132,10 @@ export async function GET(request: Request) {
       transfersFlagged: transfers.flagged,
       transfersBlocked: transfers.blocked,
       transfersFailed: transfers.failed,
+      reconciled: reconciled.checked,
+      reconcileFlagged: reconciled.flagged,
+      reconcileResolved: reconciled.resolved,
+      reconcileFailed: reconciled.failed,
       campuses: campuses.length,
       tookMs: Date.now() - startedAt,
     });
