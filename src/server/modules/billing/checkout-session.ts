@@ -15,7 +15,16 @@ import { checkoutRestartPath } from "@/server/modules/engagements/reads";
 import { resumableUntil } from "./checkout-window";
 import type { Actor } from "@/server/modules/identity/actor";
 
-import { GatewayError, errorFacts, stripeGateway, type ChargeFee, type CheckoutSession } from "./stripe";
+import { paymentRefundBlocker, recordDiscrepancy, recordRefundFailure, type Ids } from "./discrepancy";
+import { SWEEP_BUDGET_MS, createRefund } from "./refunds";
+import {
+  GatewayError,
+  errorFacts,
+  isLiveRefund,
+  stripeGateway,
+  type ChargeFee,
+  type CheckoutSession,
+} from "./stripe";
 
 const STRIPE_MIN_EXPIRY_MS = 30 * 60 * 1000;
 const SWEEP_GRACE_MS = 2 * 60 * 1000;
@@ -23,9 +32,7 @@ const SWEEP_LIMIT = 20;
 const UNAVAILABLE = "Payments are unavailable right now. Nothing was charged; try again in a minute.";
 const UNREACHABLE =
   "We could not reach our payment provider. Try again in a minute. If you already paid, your booking appears under Sessions shortly.";
-const SWEEP_BUDGET_MS = 30_000;
 
-type Ids = { engagementId: string; institutionId: string };
 type Patience = { patient: boolean };
 const PATIENT: Patience = { patient: true };
 const IMPATIENT: Patience = { patient: false };
@@ -158,55 +165,68 @@ async function purchaseRecorded(ids: Ids, paymentIntentId: string): Promise<bool
   return rows.length > 0;
 }
 
-async function recordDiscrepancy(
-  ids: Ids,
-  values: Omit<typeof moneyDiscrepancy.$inferInsert, "institutionId" | "engagementId">,
-): Promise<string | null> {
-  const [created] = await db
-    .insert(moneyDiscrepancy)
-    .values({ ...values, institutionId: ids.institutionId, engagementId: ids.engagementId })
-    .onConflictDoNothing()
-    .returning({ id: moneyDiscrepancy.id });
-  if (created || !values.stripeReference) return created?.id ?? null;
-
-  const [existing] = await db
-    .select({ id: moneyDiscrepancy.id })
-    .from(moneyDiscrepancy)
-    .where(
-      and(
-        eq(moneyDiscrepancy.institutionId, ids.institutionId),
-        eq(moneyDiscrepancy.kind, values.kind),
-        eq(moneyDiscrepancy.stripeReference, values.stripeReference),
-      ),
-    );
-  return existing?.id ?? null;
+/** Stripe keeps the processing fee on a refund, so a payment refunded unbooked still costs it. */
+async function recordRefundedFee(ids: Ids, paymentIntentId: string, currency: string, patience: Patience): Promise<void> {
+  const fee = await chargeFee(paymentIntentId, patience);
+  if (!fee) {
+    console.warn(`[checkout] no fee yet for refunded ${paymentIntentId}; the processor_fee row is not written`);
+    return;
+  }
+  await db
+    .insert(ledgerEntry)
+    .values({
+      ...ids,
+      type: "processor_fee",
+      amountMinor: fee.feeMinor,
+      currency,
+      stripeReference: fee.balanceTransactionId,
+    })
+    .onConflictDoNothing();
 }
 
-const live = (refund: { status: string | null }) => refund.status !== "failed" && refund.status !== "canceled";
+type Refunding = { currency: string; patience: Patience; discrepancyId?: string; since?: Date };
 
-async function refundPayment(ids: Ids, paymentIntentId: string, discrepancyId?: string): Promise<boolean> {
-  const gateway = stripeGateway();
-  const refund =
-    (await gateway.listRefunds(paymentIntentId)).find(live) ??
-    (await gateway.refund({ paymentIntentId, ...ids }));
-  if (!live(refund)) {
-    console.error(`[checkout] refund ${refund.id} for ${paymentIntentId} is ${refund.status}; not recorded`);
+/** Never re-issues over a refund Stripe could not deliver for this PaymentIntent, even once ops resolves it. */
+async function refundPayment(ids: Ids, paymentIntentId: string, refunding: Refunding): Promise<boolean> {
+  if ((await paymentRefundBlocker(paymentIntentId, ids.institutionId).limit(1)).length > 0) return false;
+  const onCharge = async () => {
+    const listed = await stripeGateway().listRefunds(paymentIntentId);
+    return listed.find(isLiveRefund) ?? listed.at(0);
+  };
+  let refund = await onCharge();
+  if (!refund) {
+    try {
+      refund = await createRefund({ paymentIntentId, ...ids }, `refund:${paymentIntentId}`, refunding.since ?? null, onCharge);
+    } catch (error) {
+      if (!(error instanceof GatewayError && error.refused)) throw error;
+      refund = await onCharge();
+      if (!refund) {
+        await recordRefundFailure(ids, { refund: null, paymentIntentId, amountMinor: null, currency: refunding.currency });
+        return false;
+      }
+    }
+  }
+  if (!isLiveRefund(refund)) {
+    await recordRefundFailure(ids, { refund, paymentIntentId, amountMinor: refund.amountMinor, currency: refunding.currency });
     return false;
   }
   console.warn(`[checkout] refunded ${paymentIntentId} for ${ids.engagementId}: ${refund.id}`);
 
-  if (discrepancyId) {
+  if (refunding.discrepancyId) {
     await db
       .update(moneyDiscrepancy)
       .set({ refundReference: refund.id })
       .where(
         and(
-          eq(moneyDiscrepancy.id, discrepancyId),
+          eq(moneyDiscrepancy.id, refunding.discrepancyId),
           eq(moneyDiscrepancy.institutionId, ids.institutionId),
           isNull(moneyDiscrepancy.refundReference),
         ),
       );
   }
+  await recordRefundedFee(ids, paymentIntentId, refunding.currency, refunding.patience).catch((error) =>
+    console.error(`[checkout] processor_fee for refunded ${paymentIntentId} not written`, errorFacts(error)),
+  );
   return true;
 }
 
@@ -311,7 +331,11 @@ async function fulfil(
           stripeAmountMinor: session.amountTotal,
           currency: session.currency ?? "usd",
         });
-  const refunded = await refundPayment(ids, paymentIntentId, discrepancyId ?? undefined);
+  const refunded = await refundPayment(ids, paymentIntentId, {
+    currency: session.currency?.toLowerCase() ?? "usd",
+    patience,
+    discrepancyId: discrepancyId ?? undefined,
+  });
   return refunded ? "refunded" : "refund_failed";
 }
 
@@ -425,6 +449,8 @@ async function retryDiscrepancyRefunds(
       id: moneyDiscrepancy.id,
       engagementId: moneyDiscrepancy.engagementId,
       paymentIntentId: moneyDiscrepancy.stripeReference,
+      currency: moneyDiscrepancy.currency,
+      detectedAt: moneyDiscrepancy.detectedAt,
     })
     .from(moneyDiscrepancy)
     .where(
@@ -435,6 +461,7 @@ async function retryDiscrepancyRefunds(
         isNull(moneyDiscrepancy.resolvedAt),
         like(moneyDiscrepancy.stripeReference, "pi\\_%"),
         isNotNull(moneyDiscrepancy.engagementId),
+        notExists(paymentRefundBlocker(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)),
         notExists(
           db
             .select({ id: ledgerEntry.id })
@@ -458,7 +485,12 @@ async function retryDiscrepancyRefunds(
     if (index > 0 && Date.now() > deadline) break;
     if (!row.engagementId || !row.paymentIntentId) continue;
     try {
-      const refunded = await refundPayment({ engagementId: row.engagementId, institutionId }, row.paymentIntentId, row.id);
+      const refunded = await refundPayment({ engagementId: row.engagementId, institutionId }, row.paymentIntentId, {
+        currency: row.currency,
+        patience: IMPATIENT,
+        discrepancyId: row.id,
+        since: row.detectedAt,
+      });
       if (refunded) settled += 1;
       else failed += 1;
     } catch (error) {

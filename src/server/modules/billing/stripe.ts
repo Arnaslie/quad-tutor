@@ -17,6 +17,7 @@ type ErrorFacts = {
   type?: string;
   requestId?: string;
   idempotency?: boolean;
+  replayed?: boolean;
 };
 
 export class GatewayError extends Error {
@@ -26,6 +27,8 @@ export class GatewayError extends Error {
   readonly type?: string;
   readonly requestId?: string;
   readonly idempotency: boolean;
+  /** Stripe answered from its idempotency cache rather than running the request. */
+  readonly replayed: boolean;
 
   constructor(message: string, facts: ErrorFacts = {}, options?: ErrorOptions) {
     super(message, options);
@@ -35,10 +38,20 @@ export class GatewayError extends Error {
     this.type = facts.type;
     this.requestId = facts.requestId;
     this.idempotency = facts.idempotency ?? false;
+    this.replayed = facts.replayed ?? false;
   }
 
   get missing(): boolean {
     return this.code === "resource_missing";
+  }
+
+  /** A card or charge refusal; asking again gets the same answer. Auth and lookup errors are not refusals. */
+  get refused(): boolean {
+    return (this.status === 400 || this.status === 402) && !this.idempotency;
+  }
+
+  get inFlight(): boolean {
+    return this.status === 409;
   }
 }
 
@@ -78,7 +91,26 @@ export type CheckoutSession = {
 
 export type ChargeFee = { feeMinor: number; balanceTransactionId: string } | null;
 
-export type Refund = { id: string; status: string | null };
+export type Refund = {
+  id: string;
+  status: string | null;
+  amountMinor: number;
+  currency: string;
+  paymentIntentId: string | null;
+  ledgerEntryId: string | null;
+  engagementId: string | null;
+  institutionId: string | null;
+  failureReason: string | null;
+};
+
+export type NewRefund = {
+  paymentIntentId: string;
+  engagementId: string;
+  institutionId: string;
+  amountMinor?: number;
+  ledgerEntryId?: string;
+  idempotencyKey: string;
+};
 
 export type WebhookEvent = {
   id: string;
@@ -97,8 +129,22 @@ export type Gateway = {
   findPaidCheckout(engagementId: string): Promise<CheckoutSession | null>;
   chargeFee(paymentIntentId: string): Promise<ChargeFee>;
   listRefunds(paymentIntentId: string): Promise<Refund[]>;
-  refund(params: { paymentIntentId: string; engagementId: string; institutionId: string }): Promise<Refund>;
+  chargeRefunds(chargeId: string): Promise<Refund[]>;
+  retrieveRefund(id: string): Promise<Refund>;
+  refund(params: NewRefund): Promise<Refund>;
 };
+
+function refundMetadata(params: {
+  engagementId: string | null;
+  institutionId: string | null;
+  ledgerEntryId?: string | null;
+}): Record<string, string | null> {
+  return {
+    engagement_id: params.engagementId,
+    institution_id: params.institutionId,
+    ...(params.ledgerEntryId ? { ledger_entry_id: params.ledgerEntryId } : {}),
+  };
+}
 
 function sessionView(session: Stripe.Checkout.Session): CheckoutSession {
   const paymentIntent = session.payment_intent;
@@ -113,6 +159,21 @@ function sessionView(session: Stripe.Checkout.Session): CheckoutSession {
     engagementId: session.metadata?.engagement_id ?? null,
     institutionId: session.metadata?.institution_id ?? null,
     successUrl: session.success_url,
+  };
+}
+
+function refundView(refund: Stripe.Refund): Refund {
+  const intent = refund.payment_intent;
+  return {
+    id: refund.id,
+    status: refund.status,
+    amountMinor: refund.amount,
+    currency: refund.currency,
+    paymentIntentId: typeof intent === "string" ? intent : (intent?.id ?? null),
+    ledgerEntryId: refund.metadata?.ledger_entry_id ?? null,
+    engagementId: refund.metadata?.engagement_id ?? null,
+    institutionId: refund.metadata?.institution_id ?? null,
+    failureReason: refund.failure_reason ?? null,
   };
 }
 
@@ -132,11 +193,15 @@ async function call<T>(work: () => Promise<T>): Promise<T> {
         type: error.rawType ?? error.type,
         requestId: error.requestId,
         idempotency: error instanceof Stripe.errors.StripeIdempotencyError && error.statusCode === 400,
+        replayed: error.headers?.["idempotent-replayed"] === "true",
       },
       { cause: error },
     );
   }
 }
+
+export const isLiveRefund = (refund: { status: string | null }) =>
+  refund.status !== "failed" && refund.status !== "canceled";
 
 function realGateway(): Gateway {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -147,7 +212,7 @@ function realGateway(): Gateway {
       "Live Stripe keys are refused until refunds through Stripe and tutor transfers ship (Stripe plan items 4 and 6). Use an sk_test_ key.",
     );
   }
-  const stripe = new Stripe(key, { apiVersion: API_VERSION, maxNetworkRetries: 2 });
+  const stripe = new Stripe(key, { apiVersion: API_VERSION, maxNetworkRetries: 2, timeout: 15_000 });
 
   return {
     livemode,
@@ -206,19 +271,26 @@ function realGateway(): Gateway {
       }),
     listRefunds: (paymentIntentId) =>
       call(async () => {
-        const refunds = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 10 });
-        return refunds.data.map((refund) => ({ id: refund.id, status: refund.status }));
+        const refunds = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 100 });
+        return refunds.data.map(refundView);
       }),
+    chargeRefunds: (chargeId) =>
+      call(async () => {
+        const refunds = await stripe.refunds.list({ charge: chargeId, limit: 100 });
+        return refunds.data.map(refundView);
+      }),
+    retrieveRefund: (id) => call(async () => refundView(await stripe.refunds.retrieve(id))),
     refund: (params) =>
       call(async () => {
         const refund = await stripe.refunds.create(
           {
             payment_intent: params.paymentIntentId,
-            metadata: { engagement_id: params.engagementId, institution_id: params.institutionId },
+            amount: params.amountMinor,
+            metadata: refundMetadata(params),
           },
-          { idempotencyKey: `refund:${params.paymentIntentId}` },
+          { idempotencyKey: params.idempotencyKey },
         );
-        return { id: refund.id, status: refund.status };
+        return refundView(refund);
       }),
   };
 }
@@ -355,7 +427,7 @@ const fakeGateway: Gateway = {
     return null;
   },
   async chargeFee(paymentIntentId) {
-    const payment = await fakeRead<{ sessionId: string; amountMinor: number }>(paymentIntentId);
+    const payment = await fakeRead<FakePayment>(paymentIntentId);
     if (!payment) throw missing("payment_intent", paymentIntentId);
     return {
       feeMinor: Math.round((payment.amountMinor * 29) / 1000) + 30,
@@ -363,24 +435,113 @@ const fakeGateway: Gateway = {
     };
   },
   async listRefunds(paymentIntentId) {
-    const payment = await fakeRead<{ sessionId: string }>(paymentIntentId);
+    const payment = await fakeRead<FakePayment>(paymentIntentId);
     if (!payment) throw missing("payment_intent", paymentIntentId);
     return (await fakeRecord(payment.sessionId)).refunds;
   },
-  async refund({ paymentIntentId }) {
-    const payment = await fakeRead<{ sessionId: string }>(paymentIntentId);
-    if (!payment) throw missing("payment_intent", paymentIntentId);
-    return locked(payment.sessionId, async () => {
-      const record = await fakeRecord(payment.sessionId);
-      const existing = record.refunds.at(0);
-      if (existing) return existing;
-      const refund = { id: `re_fake_${randomUUID().replaceAll("-", "")}`, status: "succeeded" };
-      record.refunds.push(refund);
-      await fakeWrite(payment.sessionId, record);
-      return refund;
-    });
+  chargeRefunds(chargeId) {
+    return fakeGateway.listRefunds(chargeId.replace(/^ch_/, "pi_"));
+  },
+  async retrieveRefund(id) {
+    const { refund } = await fakeRefund(id);
+    return refund;
+  },
+  async refund(params) {
+    const key = `idem-refund:${params.idempotencyKey}`;
+    if (fakeRefundsInFlight.has(key)) {
+      throw new GatewayError("There is currently another in-progress request using this Idempotent Key.", {
+        status: 409,
+        code: "idempotency_key_in_use",
+      });
+    }
+    fakeRefundsInFlight.add(key);
+    try {
+      await fakeRefundHold;
+      return await fakeCreateRefund(key, params);
+    } finally {
+      fakeRefundsInFlight.delete(key);
+    }
   },
 };
+
+function fakeCreateRefund(key: string, params: NewRefund): Promise<Refund> {
+  return locked(key, async () => {
+    const sent = JSON.stringify({ ...params, idempotencyKey: undefined });
+    const replay = await fakeRead<FakeRefundReplay>(key);
+    if (replay && Date.now() - replay.at < IDEMPOTENCY_TTL_MS) {
+      if (replay.params !== sent) {
+        throw new GatewayError(
+          "Keys for idempotent requests can only be used with the same parameters they were first used with.",
+          { status: 400, idempotency: true },
+        );
+      }
+      if (replay.error) throw new GatewayError(replay.error.message, { ...replay.error, replayed: true });
+      return replay.refund!;
+    }
+
+    const payment = await fakeRead<FakePayment>(params.paymentIntentId);
+    if (!payment) throw missing("payment_intent", params.paymentIntentId);
+    return locked(payment.sessionId, async () => {
+      const remember = (outcome: Pick<FakeRefundReplay, "refund" | "error">) =>
+        fakeWrite(key, { ...outcome, params: sent, at: Date.now() });
+
+      if (fakeRefundOutages > 0) {
+        fakeRefundOutages -= 1;
+        const error = { message: "An unknown error occurred", status: 500, type: "api_error" };
+        await remember({ refund: null, error });
+        throw new GatewayError(error.message, error);
+      }
+      const record = await fakeRecord(payment.sessionId);
+      const left = payment.amountMinor - record.refunds.filter(isLiveRefund).reduce((sum, r) => sum + r.amountMinor, 0);
+      const amountMinor = params.amountMinor ?? left;
+      if (left <= 0 || amountMinor <= 0 || amountMinor > left) {
+        const error = {
+          message: `Refund amount (${amountMinor}) is greater than the unrefunded amount on the charge (${left}).`,
+          status: 400,
+          code: left <= 0 ? "charge_already_refunded" : "amount_too_large",
+        };
+        await remember({ refund: null, error });
+        throw new GatewayError(error.message, error);
+      }
+      const refund: Refund = {
+        id: `re_fake_${randomUUID().replaceAll("-", "")}`,
+        status: "succeeded",
+        amountMinor,
+        currency: record.session.currency ?? "usd",
+        paymentIntentId: params.paymentIntentId,
+        ledgerEntryId: params.ledgerEntryId ?? null,
+        engagementId: params.engagementId,
+        institutionId: params.institutionId,
+        failureReason: null,
+      };
+      record.refunds.push(refund);
+      await fakeWrite(payment.sessionId, record);
+      await fakeWrite(refund.id, { sessionId: payment.sessionId });
+      await remember({ refund, error: null });
+      return refund;
+    });
+  });
+}
+
+type FakePayment = { sessionId: string; amountMinor: number };
+type FakeRefundReplay = {
+  refund: Refund | null;
+  error: (ErrorFacts & { message: string }) | null;
+  params: string;
+  at: number;
+};
+
+let fakeRefundOutages = 0;
+const fakeRefundsInFlight = new Set<string>();
+let fakeRefundHold: Promise<void> = Promise.resolve();
+
+async function fakeRefund(id: string): Promise<{ sessionId: string; record: FakeRecord; refund: Refund }> {
+  const owner = await fakeRead<{ sessionId: string }>(id);
+  const record = owner ? await fakeRecord(owner.sessionId) : null;
+  const refund = record?.refunds.find((r) => r.id === id);
+  if (!owner || !record || !refund) throw missing("refund", id);
+  return { sessionId: owner.sessionId, record, refund };
+}
 
 export const fakeStripe = {
   /** Plays the student paying on the hosted page; `amountTotal`/`currency` let tests fake a mismatch. */
@@ -411,6 +572,73 @@ export const fakeStripe = {
   },
   async refunds(id: string): Promise<Refund[]> {
     return (await fakeRecord(id)).refunds;
+  },
+  /** The next refund create fails as a Stripe 500 would, and its key replays that failure. */
+  failNextRefund(): void {
+    assertNotProduction();
+    fakeRefundOutages += 1;
+  },
+  /** Refund creates wait, their keys in flight, until the returned release is called. */
+  holdRefunds(): () => void {
+    assertNotProduction();
+    let release = () => {};
+    fakeRefundHold = new Promise((resolve) => (release = resolve));
+    return () => {
+      fakeRefundHold = Promise.resolve();
+      release();
+    };
+  },
+  /** Plays the card network bouncing a refund days after it was created. */
+  async failRefund(id: string, reason = "expired_or_canceled_card"): Promise<Refund> {
+    assertNotProduction();
+    const { sessionId } = await fakeRefund(id);
+    return locked(sessionId, async () => {
+      const { record, refund } = await fakeRefund(id);
+      const failed = { ...refund, status: "failed", failureReason: reason };
+      record.refunds = record.refunds.map((r) => (r.id === id ? failed : r));
+      await fakeWrite(sessionId, record);
+      return failed;
+    });
+  },
+  async refundEvent(
+    id: string,
+    type: "charge.refunded" | "refund.updated" | "refund.failed" | "charge.refund.updated",
+  ): Promise<{ payload: string; signature: string }> {
+    assertNotProduction();
+    const { record, refund } = await fakeRefund(id);
+    const metadata = refundMetadata(refund);
+    const chargeId = refund.paymentIntentId?.replace(/^pi_/, "ch_") ?? null;
+    const object =
+      type === "charge.refunded"
+        ? {
+            id: chargeId,
+            object: "charge",
+            payment_intent: refund.paymentIntentId,
+            amount: record.session.amountTotal,
+            amount_refunded: record.refunds.filter(isLiveRefund).reduce((sum, r) => sum + r.amountMinor, 0),
+            refunded: false,
+            metadata,
+          }
+        : {
+            id: refund.id,
+            object: "refund",
+            amount: refund.amountMinor,
+            charge: chargeId,
+            payment_intent: refund.paymentIntentId,
+            status: refund.status,
+            failure_reason: refund.failureReason,
+            metadata,
+          };
+    const payload = JSON.stringify({
+      id: `evt_fake_${randomUUID().replaceAll("-", "")}`,
+      object: "event",
+      api_version: API_VERSION,
+      created: Math.floor(Date.now() / 1000),
+      livemode: false,
+      type,
+      data: { object },
+    });
+    return { payload, signature: signWebhookPayload(payload) };
   },
   /** A signed event as Stripe would send it, from the session as the fake holds it now. */
   async event(id: string): Promise<{ payload: string; signature: string }> {
