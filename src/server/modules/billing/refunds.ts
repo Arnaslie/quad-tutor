@@ -66,7 +66,7 @@ const boughtThroughStripe = and(
   like(purchase.stripeReference, "pi\\_%"),
 );
 const unstampedRefund = and(eq(ledgerEntry.type, "refund"), isNull(ledgerEntry.stripeReference));
-const blocked = ledgerRefundBlocker(ledgerEntry.id, ledgerEntry.institutionId);
+const blocked = () => ledgerRefundBlocker(ledgerEntry.id, ledgerEntry.institutionId);
 
 /** Unstamped refund rows of engagements bought through Stripe; one bought before Stripe has no `pi_` and never appears. */
 async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[]> {
@@ -82,7 +82,7 @@ async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[
     })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
-    .where(and(unstampedRefund, notExists(blocked), ...where))
+    .where(and(unstampedRefund, notExists(blocked()), ...where))
     .orderBy(sql`random()`)
     .limit(limit);
   return rows.map((row) => ({ ...row, paymentIntentId: row.paymentIntentId! }));
@@ -94,7 +94,7 @@ async function blockedRefunds(institutionId: string): Promise<number> {
     .select({ n: sql<number>`count(*)::int` })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
-    .where(and(unstampedRefund, exists(blocked), eq(ledgerEntry.institutionId, institutionId)));
+    .where(and(unstampedRefund, exists(blocked()), eq(ledgerEntry.institutionId, institutionId)));
   return row?.n ?? 0;
 }
 
