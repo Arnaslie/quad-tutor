@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "tutor_profile_stripe_account_idx" ON "tutor_profile" USING btree ("stripe_account_id") WHERE "tutor_profile"."stripe_account_id" is not null;

@@ -177,7 +177,12 @@ export const tutorProfile = pgTable(
     expectedGraduationOn: date("expected_graduation_on"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("tutor_profile_user_idx").on(t.userId)],
+  (t) => [
+    uniqueIndex("tutor_profile_user_idx").on(t.userId),
+    uniqueIndex("tutor_profile_stripe_account_idx")
+      .on(t.stripeAccountId)
+      .where(sql`${t.stripeAccountId} is not null`),
+  ],
 );
 
 export const term = pgTable(
