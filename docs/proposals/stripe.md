@@ -351,7 +351,7 @@ reviews items 2, 4 and 6 (idempotency, webhook, after-commit calls, sweeps).
 | 5 | Connect: account creation, Account Link, pure KYC mapping + tests, `account.updated`, Connect secret, daily payout schedule at creation, `/tutor/payouts` route | payments | Tutor can onboard with Stripe test data |
 | 6 | Transfer sweep (never for an engagement whose `package_purchase` has no Stripe reference), `earnings.transferredMinor`, `transfer.created`/`transfer.reversed`, dispute events and pause | payments, with backend for `earnings.ts` | Owed → transferred after a confirmed session, past the cap too |
 | 7 | Onboarding UI: post-accept prompt, `/tutor/payouts` page, owed-but-unverified and restricted banners on `/tutor/sessions` | web | End-to-end tutor money path |
-| 8 | Reconciliation: `money_discrepancy` table (database), daily reconciliation (payments), `/ops` money list (web) | database → payments → web | Divergence visible and pauses transfers |
+| 8 | Reconciliation: `money_discrepancy` table (database), daily reconciliation (payments), `/ops` money list (web), which also lists booked `transfer_reversal` rows ops has not re-sent or written off | database → payments → web | Divergence visible and pauses transfers |
 | 9 | `stripe-smoke` CI job, after item 7 | payments | Real adapter exercised daily |
 
 ---

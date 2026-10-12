@@ -206,7 +206,6 @@ type Kyc = {
   refresh(accountId: string, institutionId: string): Promise<KycStatus | null>;
 };
 
-/** Asks Stripe once per account per run; a refusal asks again and the rest of the run sees that answer. */
 function kycThisRun(): Kyc {
   const seen = new Map<string, Promise<KycStatus | null>>();
   const refresh = (accountId: string, institutionId: string) => {
@@ -408,7 +407,7 @@ export async function handleTransferEvent(
   }
   await stamp({ ...ids, id: row.id }, transfer.id);
   if (transfer.reversals.length > 0) {
-    await db
+    const booked = await db
       .insert(ledgerEntry)
       .values(
         transfer.reversals.map((reversal) => ({
@@ -419,7 +418,13 @@ export async function handleTransferEvent(
           stripeReference: reversal.id,
         })),
       )
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ amountMinor: ledgerEntry.amountMinor, reference: ledgerEntry.stripeReference });
+    for (const reversal of booked) {
+      console.error(
+        `[transfer] ${reversal.reference} reversed ${reversal.amountMinor} ${transfer.currency} of ${transfer.id} on engagement ${ids.engagementId}; owed again until ops acts`,
+      );
+    }
   }
   return { outcome: "transfer_synced", institutionId: ids.institutionId };
 }

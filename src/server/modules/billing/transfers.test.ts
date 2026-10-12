@@ -529,6 +529,27 @@ test("a chargeback pauses transfers, Stripe closing it does not lift the pause, 
   assert.deepEqual(await sweep(w), { ...nothing, sent: 1 });
 });
 
+test("a closed dispute keeps its status when a stale open state arrives late", async () => {
+  const w = await world();
+  const { paymentIntentId } = await delivered(w);
+  const dispute = await fakeStripe.dispute(paymentIntentId);
+  await fakeStripe.closeDispute(dispute.id, "won");
+  await deliver(await fakeStripe.disputeEvent(dispute.id, "charge.dispute.closed"));
+  const record = async () =>
+    db
+      .select({ status: paymentDispute.status, closedAt: paymentDispute.closedAt })
+      .from(paymentDispute)
+      .where(eq(paymentDispute.stripeDisputeId, dispute.id));
+  const [closed] = await record();
+  assert.equal(closed.status, "won");
+
+  const real = stripeGateway().retrieveDispute;
+  await patched("retrieveDispute", async (id) => ({ ...(await real(id)), status: "needs_response" }), async () => {
+    await deliver(await fakeStripe.disputeEvent(dispute.id, "charge.dispute.updated"));
+  });
+  assert.deepEqual(await record(), [{ status: "won", closedAt: closed.closedAt }]);
+});
+
 test("a dispute on a payment no package was bought with is foreign", async () => {
   const w = await world();
   const { paymentIntentId } = await delivered(w);
