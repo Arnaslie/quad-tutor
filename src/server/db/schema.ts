@@ -12,6 +12,7 @@ import {
   uniqueIndex,
   primaryKey,
   check,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -107,6 +108,7 @@ export const moneyDiscrepancyKind = pgEnum("money_discrepancy_kind", [
   "ledger_vs_stripe_transfers",
   "unstamped_reference",
   "refund_failed",
+  "orphaned_account",
 ]);
 
 export const packageKind = pgEnum("package_kind", [
@@ -451,6 +453,7 @@ export const engagement = pgTable(
     status: engagementStatus("status").notNull().default("active"),
     stripeCheckoutSessionId: text("stripe_checkout_session_id").unique(),
     checkoutExpiresAt: timestamp("checkout_expires_at", { withTimezone: true }),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
@@ -547,6 +550,8 @@ export const ledgerEntry = pgTable(
     currency: text("currency").notNull().default("usd"),
 
     stripeReference: text("stripe_reference"),
+    correctsEntryId: uuid("corrects_entry_id").references((): AnyPgColumn => ledgerEntry.id),
+    recordedByUserId: text("recorded_by_user_id").references(() => user.id),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -557,6 +562,9 @@ export const ledgerEntry = pgTable(
     uniqueIndex("ledger_entry_stripe_reference_idx")
       .on(t.stripeReference)
       .where(sql`${t.stripeReference} is not null`),
+    uniqueIndex("ledger_entry_corrects_entry_idx")
+      .on(t.correctsEntryId)
+      .where(sql`${t.correctsEntryId} is not null`),
   ],
 );
 
@@ -575,6 +583,7 @@ export const moneyDiscrepancy = pgTable(
     detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolutionNote: text("resolution_note"),
+    resolvedByUserId: text("resolved_by_user_id").references(() => user.id),
     refundReference: text("refund_reference").unique(),
   },
   (t) => [
@@ -606,6 +615,7 @@ export const paymentDispute = pgTable(
     closedAt: timestamp("closed_at", { withTimezone: true }),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolutionNote: text("resolution_note"),
+    resolvedByUserId: text("resolved_by_user_id").references(() => user.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
