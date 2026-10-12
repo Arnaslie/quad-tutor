@@ -1,5 +1,5 @@
 import { and, eq, exists, isNotNull, isNull, like, lt, not, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { alias, type SelectedFields } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 import { db } from "@/server/db";
@@ -100,15 +100,16 @@ const paused = (engagementId: AnyColumn | string, institutionId: AnyColumn | str
         ),
   )})`;
 
-const payeeColumns = {
-  paymentIntentId: sql<string>`${purchase.stripeReference}`,
-  accountId: tutorProfile.stripeAccountId,
-  kycStatus: tutorProfile.kycStatus,
-};
-
-function payees() {
+function payees<T extends SelectedFields>(fields: T) {
   return db
-    .select({ engagementId: engagement.id, institutionId: engagement.institutionId, ...payeeColumns })
+    .select({
+      ...fields,
+      engagementId: engagement.id,
+      institutionId: engagement.institutionId,
+      paymentIntentId: sql<string>`${purchase.stripeReference}`,
+      accountId: tutorProfile.stripeAccountId,
+      kycStatus: tutorProfile.kycStatus,
+    })
     .from(engagement)
     .innerJoin(purchase, boughtThroughStripe(engagement.id, engagement.institutionId))
     .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
@@ -120,24 +121,13 @@ function payees() {
 
 /** Unstamped rows past the grace, so the sweep stays off a call still in flight. */
 function unstampedRows(institutionId: string) {
-  return db
-    .select({
-      id: ledgerEntry.id,
-      engagementId: ledgerEntry.engagementId,
-      institutionId: ledgerEntry.institutionId,
-      amountMinor: ledgerEntry.amountMinor,
-      currency: ledgerEntry.currency,
-      occurredAt: ledgerEntry.occurredAt,
-      ...payeeColumns,
-    })
-    .from(ledgerEntry)
-    .innerJoin(engagement, and(eq(engagement.id, ledgerEntry.engagementId), eq(engagement.institutionId, ledgerEntry.institutionId)))
-    .innerJoin(purchase, boughtThroughStripe(engagement.id, engagement.institutionId))
-    .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
-    .innerJoin(
-      tutorProfile,
-      and(eq(tutorProfile.id, tutorCourse.tutorProfileId), eq(tutorProfile.institutionId, engagement.institutionId)),
-    )
+  return payees({
+    id: ledgerEntry.id,
+    amountMinor: ledgerEntry.amountMinor,
+    currency: ledgerEntry.currency,
+    occurredAt: ledgerEntry.occurredAt,
+  })
+    .innerJoin(ledgerEntry, and(eq(ledgerEntry.engagementId, engagement.id), eq(ledgerEntry.institutionId, engagement.institutionId)))
     .where(
       and(
         eq(ledgerEntry.institutionId, institutionId),
@@ -154,7 +144,7 @@ function unstampedRows(institutionId: string) {
 
 /** The KYC status is only a prefilter; Stripe is asked again before any money moves. */
 function owedEngagements(institutionId: string) {
-  return payees()
+  return payees({})
     .where(
       and(
         eq(engagement.institutionId, institutionId),
