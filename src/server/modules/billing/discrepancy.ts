@@ -1,4 +1,4 @@
-import { and, eq, type AnyColumn } from "drizzle-orm";
+import { and, eq, sql, type AnyColumn } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -36,7 +36,8 @@ export const MANUAL_REFUND_PREFIX = "manual:";
 
 /**
  * A refund Stripe could not deliver is never re-issued by code: the card that bounced it would bounce
- * the next one too. Keyed on the PaymentIntent and, for a ledger refund, on its row.
+ * the next one too. Keyed on the PaymentIntent; a repeat on it fills in the ledger row if the first had none.
+ * One PaymentIntent never carries two refund rows: it is one engagement's purchase, with one refund.
  */
 export async function recordRefundFailure(
   ids: Ids,
@@ -51,14 +52,22 @@ export async function recordRefundFailure(
   console.error(
     `[refund] ${failed.refund?.id ?? "create"} on ${failed.paymentIntentId} for ${ids.engagementId} failed (${failed.refund?.failureReason ?? "refused at create"}); flagged for ops`,
   );
-  await recordDiscrepancy(ids, {
-    kind: "refund_failed",
-    stripeReference: failed.paymentIntentId,
-    ledgerEntryId: failed.ledgerEntryId,
-    ledgerAmountMinor: failed.amountMinor,
-    stripeAmountMinor: 0,
-    currency: failed.currency,
-  });
+  await db
+    .insert(moneyDiscrepancy)
+    .values({
+      ...ids,
+      kind: "refund_failed",
+      stripeReference: failed.paymentIntentId,
+      ledgerEntryId: failed.ledgerEntryId,
+      ledgerAmountMinor: failed.amountMinor,
+      stripeAmountMinor: 0,
+      currency: failed.currency,
+    })
+    .onConflictDoUpdate({
+      target: [moneyDiscrepancy.kind, moneyDiscrepancy.stripeReference],
+      targetWhere: sql`${moneyDiscrepancy.stripeReference} is not null`,
+      set: { ledgerEntryId: sql`coalesce(${moneyDiscrepancy.ledgerEntryId}, excluded.ledger_entry_id)` },
+    });
 }
 
 const blocker = alias(moneyDiscrepancy, "refund_blocker");

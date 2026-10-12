@@ -561,6 +561,35 @@ test("a paid PaymentIntent is never flagged on a 404, however old the row", asyn
   assert.deepEqual(await sweep(), { settled: 1, flagged: 0, failed: 0 });
 });
 
+test("a second failure on a PaymentIntent already flagged still blocks the refund row it names", async () => {
+  const { actor, engagementId, checkoutSessionId } = await bought();
+  const [paid] = await db
+    .select({ pi: ledgerEntry.stripeReference })
+    .from(ledgerEntry)
+    .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, "package_purchase")));
+  await recordRefundFailure(ids(engagementId), { refund: null, paymentIntentId: paid.pi!, amountMinor: null, currency: "usd" });
+
+  await endPackage({ actor, engagementId });
+  await patched("refund", refused, async () => {
+    assert.equal(await refundThroughStripe(ids(engagementId)), "refund_failed");
+  });
+  const row = await refundRow(engagementId);
+  const flags = await db
+    .select({ id: moneyDiscrepancy.id, ledgerEntryId: moneyDiscrepancy.ledgerEntryId })
+    .from(moneyDiscrepancy)
+    .where(eq(moneyDiscrepancy.engagementId, engagementId));
+  assert.deepEqual(flags.map((f) => f.ledgerEntryId), [row.id]);
+
+  await age(engagementId);
+  assert.equal(await creates(async () => {
+    assert.equal(await refundThroughStripe(ids(engagementId)), "skipped");
+    await sweep();
+  }), 0);
+  assert.equal(await recordManualRefund({ discrepancyId: flags[0].id, institutionId: home.institutionId, note: "paid by hand" }), true);
+  assert.equal((await refundRow(engagementId)).stripeReference, `manual:${flags[0].id}`);
+  assert.deepEqual(await fakeStripe.refunds(checkoutSessionId), []);
+});
+
 test("money invariants hold after every refund path", async () => {
   await assertMoneyInvariants(home.institutionId);
 });
