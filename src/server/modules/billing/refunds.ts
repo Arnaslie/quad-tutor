@@ -7,7 +7,7 @@ import { ledgerEntry, moneyDiscrepancy } from "@/server/db/schema";
 import { withLease } from "./lease";
 import {
   MANUAL_REFUND_PREFIX,
-  ledgerRefundBlocker,
+  ledgerRowBlocker,
   recordDiscrepancy,
   recordRefundFailure,
   type Ids,
@@ -40,22 +40,29 @@ export function retryKey(base: string, since: Date): string {
  * The base key first, so a retry overlapping a call still in flight gets Stripe's 409 or its answer.
  * Only a retry whose base key Stripe answers from its cache with a 5xx moves on, once nothing turned up.
  */
-export async function createRefund(
-  params: Omit<NewRefund, "idempotencyKey">,
+export async function createOnce<T>(
+  create: (idempotencyKey: string) => Promise<T>,
   base: string,
   retrySince: Date | null,
-  lookAgain: () => Promise<Refund | undefined>,
-): Promise<Refund> {
-  const gateway = stripeGateway();
+  lookAgain: () => Promise<T | undefined>,
+): Promise<T> {
   try {
-    return await gateway.refund({ ...params, idempotencyKey: base });
+    return await create(base);
   } catch (error) {
     if (!retrySince || !(error instanceof GatewayError) || !error.replayed || (error.status ?? 0) < 500) throw error;
     const found = await lookAgain();
     if (found) return found;
-    return gateway.refund({ ...params, idempotencyKey: retryKey(base, retrySince) });
+    return create(retryKey(base, retrySince));
   }
 }
+
+export const createRefund = (
+  params: Omit<NewRefund, "idempotencyKey">,
+  base: string,
+  retrySince: Date | null,
+  lookAgain: () => Promise<Refund | undefined>,
+): Promise<Refund> =>
+  createOnce((idempotencyKey) => stripeGateway().refund({ ...params, idempotencyKey }), base, retrySince, lookAgain);
 
 const purchase = alias(ledgerEntry, "purchase");
 
@@ -66,7 +73,7 @@ const boughtThroughStripe = and(
   like(purchase.stripeReference, "pi\\_%"),
 );
 const unstampedRefund = and(eq(ledgerEntry.type, "refund"), isNull(ledgerEntry.stripeReference));
-const blocked = () => ledgerRefundBlocker(ledgerEntry.id, ledgerEntry.institutionId);
+const blocked = () => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId);
 
 /** Unstamped refund rows of engagements bought through Stripe; one bought before Stripe has no `pi_` and never appears. */
 async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[]> {
