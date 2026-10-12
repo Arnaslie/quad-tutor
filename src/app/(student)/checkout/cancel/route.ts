@@ -15,11 +15,10 @@ export async function GET(request: NextRequest) {
   if (cancelled?.fulfilled) notifySessionChangesSoon(actor.institutionId);
   const state = cancelled?.checkout;
 
-  const to =
-    state?.status === "active"
-      ? `/sessions?package=${engagementId}`
-      : state?.kind === "top_up"
-        ? "/sessions?cancelled=1"
-        : "/requests?cancelled=1";
+  const to = !state
+    ? "/sessions"
+    : state.status === "cancelled"
+      ? `${state.restartPath}&cancelled=1`
+      : `/sessions?package=${engagementId}`;
   return Response.redirect(new URL(to, request.url), 303);
 }

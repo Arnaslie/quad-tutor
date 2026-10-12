@@ -42,7 +42,7 @@ export function BookAgainForm({
             currency={currency}
             selected={option === kind}
             onSelect={() => setKind(option)}
-            extra={option === "top_up" ? " · booked now" : ` · ${tutorName} says yes first`}
+            extra={option === "top_up" ? " · pay and book now" : ` · ${tutorName} says yes first`}
           />
         ))}
         <p className="text-sm text-muted">

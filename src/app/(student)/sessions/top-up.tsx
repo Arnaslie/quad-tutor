@@ -2,7 +2,8 @@
 
 import { useActionState, useState } from "react";
 
-import { Button, ButtonLink } from "@/components/button";
+import { Button } from "@/components/button";
+import { CheckoutFinePrint } from "@/components/checkout-fine-print";
 import { formatDay, formatTime } from "@/components/format";
 import { Money } from "@/components/money";
 
@@ -30,17 +31,6 @@ export function TopUp({
   );
   const [slot, setSlot] = useState<string>(slots.at(0) ?? "");
   const [showAll, setShowAll] = useState(false);
-
-  if (state?.ok) {
-    return (
-      <div className="flex flex-col items-start gap-3">
-        <p role="status" className="text-sm text-accent">
-          Booked. It is on your session board.
-        </p>
-        <ButtonLink href="/sessions">See your sessions</ButtonLink>
-      </div>
-    );
-  }
 
   const visible = showAll ? slots : slots.slice(0, 8);
 
@@ -93,15 +83,18 @@ export function TopUp({
         </p>
       ) : null}
 
-      <Button type="submit" size="lg" disabled={pending || slot === ""}>
-        {pending ? (
-          "Opening checkout…"
-        ) : (
-          <>
-            Book and pay <Money minor={priceMinor} currency={currency} />
-          </>
-        )}
-      </Button>
+      <div className="flex flex-col gap-2">
+        <Button type="submit" size="lg" disabled={pending || slot === ""}>
+          {pending ? (
+            "Opening Stripe…"
+          ) : (
+            <>
+              Continue to payment · <Money minor={priceMinor} currency={currency} />
+            </>
+          )}
+        </Button>
+        <CheckoutFinePrint />
+      </div>
     </form>
   );
 }
