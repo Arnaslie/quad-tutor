@@ -11,7 +11,7 @@ import {
 } from "@/server/db/schema";
 
 import { TAKE_RATE_BP, TERM_FEE_CAP_MINOR } from "./pricing";
-import { MANUAL_REFUND_PREFIX } from "./discrepancy";
+import { FORFEITED_PREFIX, MANUAL_PREFIX } from "./discrepancy";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type LedgerType = (typeof ledgerEntryType.enumValues)[number];
@@ -68,12 +68,14 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
     if (rows(e.totals, REFUND) > 1) flag("one refund per engagement", subject, `${rows(e.totals, REFUND)} refund rows`);
     const references = (type: LedgerType) => e.references?.[type] ?? [];
     for (const reference of references(REFUND)) {
-      if (reference && !reference.startsWith("re_") && !reference.startsWith(MANUAL_REFUND_PREFIX)) {
+      if (reference && !reference.startsWith("re_") && !reference.startsWith(MANUAL_PREFIX)) {
         flag("refund reference is re_ or manual:", subject, reference);
       }
     }
     for (const reference of references(TRANSFER)) {
-      if (reference && !reference.startsWith("tr_")) flag("transfer reference is tr_", subject, reference);
+      if (reference && !["tr_", MANUAL_PREFIX, FORFEITED_PREFIX].some((prefix) => reference.startsWith(prefix))) {
+        flag("transfer reference is tr_, manual: or forfeited:", subject, reference);
+      }
     }
     for (const reference of references(REVERSAL)) {
       if (!reference?.startsWith("trr_")) flag("reversal reference is trr_", subject, String(reference));

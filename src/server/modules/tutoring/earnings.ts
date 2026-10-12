@@ -7,6 +7,7 @@ import {
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
+import { FORFEITED_PREFIX, MANUAL_PREFIX } from "@/server/modules/billing/discrepancy";
 import { feeChargedThisTermMinor } from "@/server/modules/billing/ledger";
 import { TERM_FEE_CAP_MINOR } from "@/server/modules/billing/pricing";
 import { currentTerm } from "@/server/modules/catalog/courses";
@@ -30,16 +31,22 @@ export const NO_EARNINGS: TutorEarnings = {
   sessionsDelivered: 0,
 };
 
-/** Transferred counts only what Stripe confirmed (a stamped `tr_…`), less what ops reversed. */
+/**
+ * Transferred counts what Stripe confirmed (a stamped `tr_…`) or ops paid by hand (`manual:…`), less what ops
+ * reversed. Pay ops wrote off (`forfeited:…`) is neither transferred nor owed.
+ */
 export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings> {
   const accrued = sql`${ledgerEntry.type} = 'tutor_accrued'`;
+  const transfer = (prefix: string) =>
+    sql`${ledgerEntry.type} = 'tutor_transfer' and ${ledgerEntry.stripeReference} like ${`${prefix}%`}`;
   const rows = await db
     .select({
       earnedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${accrued}), 0)::int`,
       transferredMinor: sql<number>`(
-        coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'tutor_transfer' and ${ledgerEntry.stripeReference} is not null), 0)
+        coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${transfer("tr\\_")} or ${transfer(MANUAL_PREFIX)}), 0)
         - coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'transfer_reversal'), 0)
       )::int`,
+      forfeitedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${transfer(FORFEITED_PREFIX)}), 0)::int`,
       sessionsDelivered: sql<number>`count(${ledgerEntry.sessionId}) filter (where ${accrued})::int`,
       currency: sql<string>`coalesce(max(${ledgerEntry.currency}) filter (where ${accrued}), 'usd')`,
     })
@@ -60,7 +67,7 @@ export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings
 
   return {
     earnedMinor: totals.earnedMinor,
-    owedMinor: totals.earnedMinor - totals.transferredMinor,
+    owedMinor: totals.earnedMinor - totals.transferredMinor - totals.forfeitedMinor,
     transferredMinor: totals.transferredMinor,
     currency: totals.currency,
     sessionsDelivered: totals.sessionsDelivered,
