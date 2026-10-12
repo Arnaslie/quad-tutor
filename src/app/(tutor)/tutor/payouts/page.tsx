@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import type { ButtonVariant } from "@/components/button";
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icons";
 import { Money } from "@/components/money";
@@ -15,21 +16,23 @@ import { PAYOUTS_SUPPORT, STAGE_ICON } from "./stage";
 
 export const metadata: Metadata = { title: "Payouts" };
 
-const COPY: Record<PayoutStage, { heading: string; body: string; action: string | null }> = {
+type Copy = { heading: string; body: string; action: { label: string; variant: ButtonVariant } | null };
+
+const COPY: Record<PayoutStage, Copy> = {
   not_started: {
     heading: "Payouts aren't set up",
     body: "Stripe checks who you are and takes the bank account your pay goes to. Have your bank details and the last four of your SSN ready. It takes a few minutes.",
-    action: "Set up payouts",
+    action: { label: "Set up payouts", variant: "primary" },
   },
   pending: {
     heading: "Stripe is checking your details",
     body: "You don't need to do anything right now. If Stripe needs more from you, it shows up here.",
-    action: "Review your details",
+    action: { label: "Review your details", variant: "secondary" },
   },
   restricted: {
     heading: "Stripe needs more from you",
     body: "Stripe can't send your pay until you add what it's asking for.",
-    action: "Update your details",
+    action: { label: "Update your details", variant: "primary" },
   },
   needs_support: {
     heading: "Payouts are blocked on this account",
@@ -73,7 +76,10 @@ export default async function TutorPayoutsPage() {
 
         {copy.action ? (
           <form action={startOnboarding}>
-            <OnboardingButton label={unfinished ? "Continue setup" : copy.action} />
+            <OnboardingButton
+              label={unfinished ? "Continue setup" : copy.action.label}
+              variant={copy.action.variant}
+            />
           </form>
         ) : null}
       </Card>
