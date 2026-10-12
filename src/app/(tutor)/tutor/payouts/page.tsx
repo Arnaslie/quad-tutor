@@ -70,7 +70,7 @@ export default async function TutorPayoutsPage() {
           <p className="rounded-xl bg-surface-sunken px-3 py-2 text-sm text-foreground">
             You&apos;re owed{" "}
             <Money minor={earnings.owedMinor} currency={earnings.currency} className="font-semibold" />.
-            It&apos;s held for you until payouts are on.
+            It&apos;s held for you.
           </p>
         ) : null}
 

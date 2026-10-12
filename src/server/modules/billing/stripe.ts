@@ -802,6 +802,7 @@ const FAKE_ACCOUNT_STATES = {
     disabledReason: "requirements.past_due",
     pastDue: ["individual.verification.document"],
   },
+  rejected: { detailsSubmitted: true, payoutsEnabled: false, transfers: "inactive", disabledReason: "rejected.other", pastDue: [] },
 } satisfies Record<string, Partial<ConnectAccount>>;
 
 function fakeCreateRefund(key: string, params: NewRefund): Promise<Refund> {

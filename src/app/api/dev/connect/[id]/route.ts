@@ -9,7 +9,7 @@ function page(accountId: string): Response {
     `<!doctype html><meta name="viewport" content="width=device-width"><title>Fake onboarding</title>
 <body style="font-family:system-ui;max-width:28rem;margin:3rem auto;padding:0 1rem">
 <h1>Fake Stripe onboarding</h1><p>${accountId}</p>
-${link("verified", "Submit and verify")}${link("pending", "Submit, verification pending")}${link("restricted", "Submit, more information needed")}${link("refresh", "Link expired (refresh_url)")}
+${link("verified", "Submit and verify")}${link("pending", "Submit, verification pending")}${link("restricted", "Submit, more information needed")}${link("rejected", "Submit, rejected by Stripe")}${link("refresh", "Link expired (refresh_url)")}
 </body>`,
     { headers: { "content-type": "text/html; charset=utf-8" } },
   );
@@ -24,7 +24,9 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/dev/conn
   const outcome = request.nextUrl.searchParams.get("outcome");
 
   if (outcome === "refresh") return Response.redirect(link.refreshUrl, 303);
-  if (outcome !== "verified" && outcome !== "pending" && outcome !== "restricted") return page(link.accountId);
+  if (outcome !== "verified" && outcome !== "pending" && outcome !== "restricted" && outcome !== "rejected") {
+    return page(link.accountId);
+  }
 
   await fakeStripe.setAccount(link.accountId, outcome);
   const { payload, signature } = await fakeStripe.accountEvent(link.accountId);

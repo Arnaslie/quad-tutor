@@ -19,7 +19,7 @@ const BANNERS: Record<PayoutStage, (owed: string | null) => Banner | null> = {
     owed
       ? {
           heading: `${owed} is held for you`,
-          body: "Stripe is checking your details. It goes to your bank once they finish.",
+          body: "Stripe is checking your details.",
           action: null,
         }
       : null,
