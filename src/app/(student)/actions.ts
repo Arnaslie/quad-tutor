@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { awaitCoverage, enroll, offeringById } from "@/server/modules/catalog/courses";
@@ -26,8 +27,10 @@ import {
 import { SessionError } from "@/server/modules/engagements/access";
 import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
 import { endPackage } from "@/server/modules/engagements/termEnd";
-import { checkoutRedirect } from "@/server/modules/billing/checkout-session";
+import { checkoutRedirect, resumeCheckout } from "@/server/modules/billing/checkout-session";
 import { formatMinor } from "@/server/modules/billing/pricing";
+import { refundThroughStripe } from "@/server/modules/billing/refunds";
+import { errorFacts } from "@/server/modules/billing/stripe";
 import {
   requestRenewalInput,
   requestTutorsInput,
@@ -223,6 +226,30 @@ export async function topUp(
   redirect(target.url);
 }
 
+const continueSchema = z.object({ engagementId: z.uuid() });
+
+export async function continueCheckout(
+  _previous: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const actor = await requireActor();
+
+  const parsed = continueSchema.safeParse({ engagementId: formData.get("engagementId") });
+  if (!parsed.success) return { ok: false, error: "That checkout no longer exists." };
+
+  let target: Awaited<ReturnType<typeof resumeCheckout>>;
+  try {
+    target = await resumeCheckout(actor, parsed.data.engagementId);
+  } catch (error) {
+    return toResult(error);
+  }
+
+  if (target.fulfilled) notifySessionChangesSoon(actor.institutionId);
+  revalidatePath("/requests");
+  revalidatePath("/sessions");
+  redirect(target.url);
+}
+
 export async function askAgain(
   _previous: ActionResult | null,
   formData: FormData,
@@ -324,6 +351,12 @@ export async function endEarly(
   }
   if (!refund) return { ok: false, error: "That package is already closed." };
 
+  const ids = { engagementId: parsed.data.engagementId, institutionId: actor.institutionId };
+  after(() =>
+    refundThroughStripe(ids).catch((error) =>
+      console.error(`[refund] ${ids.engagementId} left for the retry sweep`, errorFacts(error)),
+    ),
+  );
   notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   revalidatePath("/sessions/[id]", "page");

@@ -12,6 +12,7 @@ import { END_BLOCK_MESSAGE } from "@/server/modules/engagements/attendance";
 import {
   bookAgainList,
   packagesForStudent,
+  pendingCheckoutsForStudent,
   sessionBoardForStudent,
   type StudentPackage,
 } from "@/server/modules/engagements/reads";
@@ -22,7 +23,7 @@ import { ownCheckout, syncOwnCheckouts } from "@/server/modules/billing/checkout
 import { notifySessionChangesSoon } from "@/server/modules/notifications/soon";
 
 import { BookAgainCard, BookAgainStep } from "./book-again";
-import { CheckoutCancelled, CheckoutClosed, ConfirmingPayment } from "./checkout-notice";
+import { CheckoutClosed, ConfirmingPayment, PendingCheckoutCard } from "./checkout-notice";
 import { BookNext } from "./book-next";
 import { EndedNotice, EndPackage } from "./end-package";
 import { SessionRow } from "./session-row";
@@ -47,27 +48,32 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
   const rawAgain = searchParams.again;
   const again = againParam.safeParse(Array.isArray(rawAgain) ? rawAgain[0] : rawAgain);
   if (again.success) {
-    return <BookAgainStep tutorCourseId={again.data} />;
+    return <BookAgainStep tutorCourseId={again.data} cancelled={Boolean(searchParams.cancelled)} />;
   }
 
   if (await syncOwnCheckouts(actor)) notifySessionChangesSoon(actor.institutionId);
 
   const rawPackage = searchParams.package;
   const returning = packageParam.safeParse(Array.isArray(rawPackage) ? rawPackage[0] : rawPackage);
-  const [board, packages, bookable, checkout] = await Promise.all([
+  const [board, packages, bookable, pending, checkout] = await Promise.all([
     sessionBoardForStudent(actor),
     packagesForStudent(actor),
     bookAgainList(actor),
+    pendingCheckoutsForStudent(actor),
     returning.success ? ownCheckout(actor, returning.data) : null,
   ]);
+  const returningId = returning.success ? returning.data : null;
+  const confirming = pending.find((row) => row.engagementId === returningId);
+  const unpaid = pending.filter((row) => row !== confirming);
 
-  const purchased = packages.find((pkg) => pkg.engagementId === searchParams.package);
+  const purchased = packages.find((pkg) => pkg.engagementId === returningId);
 
   const empty =
     board.awaitingAnswer.length === 0 &&
     board.upcoming.length === 0 &&
     board.past.length === 0 &&
-    packages.length === 0;
+    packages.length === 0 &&
+    pending.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -76,9 +82,8 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
         description="Everything booked, and everything still to settle."
       />
 
-      {searchParams.cancelled ? <CheckoutCancelled /> : null}
-      {checkout?.status === "pending_payment" ? <ConfirmingPayment /> : null}
-      {checkout?.status === "cancelled" ? <CheckoutClosed /> : null}
+      {confirming ? <ConfirmingPayment checkout={confirming} /> : null}
+      {checkout?.status === "cancelled" ? <CheckoutClosed restartPath={checkout.restartPath} /> : null}
 
       {purchased?.kind === "top_up" ? (
         <Card className="bg-accent-soft text-sm text-accent">
@@ -101,6 +106,17 @@ export default async function SessionsPage(props: PageProps<"/sessions">) {
             description="Sessions show up here once a tutor accepts and you pick a time. This is what day one looks like for everybody."
             action={<ButtonLink href="/courses">Find a tutor</ButtonLink>}
           />
+        ) : null}
+
+        {unpaid.length > 0 ? (
+          <section className="flex flex-col gap-2" aria-label="Not paid yet">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+              Not paid yet
+            </h2>
+            {unpaid.map((row) => (
+              <PendingCheckoutCard key={row.engagementId} checkout={row} />
+            ))}
+          </section>
         ) : null}
 
         <Section

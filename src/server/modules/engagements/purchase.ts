@@ -25,6 +25,7 @@ import {
   type PackageKind,
   type RequestedKind,
 } from "@/server/modules/billing/pricing";
+import { CHECKOUT_HOLD_MINUTES } from "@/server/modules/billing/checkout-window";
 
 import type { Executor } from "./access";
 import { SESSION_MINUTES, remindedAtForNewBooking } from "./attendance";
@@ -32,8 +33,6 @@ import { bookAgain } from "./reads";
 import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slots";
 
 export class PurchaseError extends Error {}
-
-export const CHECKOUT_HOLD_MINUTES = 35;
 
 export type Checkout = {
   engagementId: string;

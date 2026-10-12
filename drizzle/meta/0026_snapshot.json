@@ -1,5 +1,5 @@
 {
-  "id": "f90d0c4b-b810-4399-b67e-322dddcb8ecd",
+  "id": "72cabc25-bed6-45a6-8576-63f2e40c4611",
   "prevId": "eb5ab329-83cc-4f4a-bd1a-5682026b9258",
   "version": "7",
   "dialect": "postgresql",
@@ -4058,22 +4058,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "tutor_profile_stripe_account_idx": {
-          "name": "tutor_profile_stripe_account_idx",
-          "columns": [
-            {
-              "expression": "stripe_account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"tutor_profile\".\"stripe_account_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -4526,7 +4510,8 @@
         "checkout_amount",
         "ledger_vs_stripe_charge",
         "ledger_vs_stripe_transfers",
-        "unstamped_reference"
+        "unstamped_reference",
+        "refund_failed"
       ]
     },
     "public.package_kind": {

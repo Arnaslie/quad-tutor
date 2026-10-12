@@ -24,6 +24,7 @@ import {
   type RequestedKind,
   unusedRefundMinor,
 } from "@/server/modules/billing/pricing";
+import { resumableUntil } from "@/server/modules/billing/checkout-window";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 
 import {
@@ -55,6 +56,7 @@ export type SessionListItem = {
   status: SessionContextRow["status"];
   resolution: SessionContextRow["resolution"];
   confirmationWindowEndsAt: Date | null;
+  checkoutLapsed: boolean;
 
   courseCode: string | null;
   courseTitle: string;
@@ -107,6 +109,10 @@ function toListItem(
     status: row.status,
     resolution: row.resolution,
     confirmationWindowEndsAt: row.confirmationWindowEndsAt,
+    checkoutLapsed:
+      row.engagementStatus === "pending_payment" &&
+      row.checkoutExpiresAt !== null &&
+      resumableUntil(row.checkoutExpiresAt).getTime() <= now.getTime(),
     courseCode: row.courseCode,
     courseTitle: row.courseTitle,
     section: row.section,
@@ -253,6 +259,73 @@ export type BookAgain = {
 
 export function bookAgainPath(tutorCourseId: string): string {
   return `/sessions?again=${tutorCourseId}`;
+}
+
+export function checkoutRestartPath(row: { matchRequestId: string | null; tutorCourseId: string }): string {
+  return row.matchRequestId ? `/requests?buy=${row.matchRequestId}` : bookAgainPath(row.tutorCourseId);
+}
+
+export type PendingCheckout = {
+  engagementId: string;
+  matchRequestId: string | null;
+  tutorCourseId: string;
+  kind: PackageKind;
+  amountMinor: number;
+  currency: string;
+  payBy: Date;
+  lapsed: boolean;
+  slot: Date | null;
+  tutorName: string;
+  courseCode: string | null;
+  courseTitle: string;
+  restartPath: string;
+};
+
+export async function pendingCheckoutsForStudent(actor: Actor): Promise<PendingCheckout[]> {
+  const rows = await db
+    .select({
+      engagementId: engagement.id,
+      matchRequestId: engagement.matchRequestId,
+      tutorCourseId: engagement.tutorCourseId,
+      kind: engagement.kind,
+      amountMinor: engagement.pricePaidMinor,
+      currency: engagement.currency,
+      expiresAt: engagement.checkoutExpiresAt,
+      slot: sessionBooking.scheduledAt,
+      tutorName: user.name,
+      courseCode: courseCodeAlias.code,
+      courseTitle: course.title,
+    })
+    .from(engagement)
+    .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
+    .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
+    .innerJoin(user, eq(user.id, tutorProfile.userId))
+    .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
+    .innerJoin(course, eq(course.id, courseOffering.courseId))
+    .leftJoin(
+      courseCodeAlias,
+      and(eq(courseCodeAlias.courseId, course.id), isNull(courseCodeAlias.validToTermId)),
+    )
+    .leftJoin(
+      sessionBooking,
+      and(eq(sessionBooking.engagementId, engagement.id), eq(sessionBooking.status, "held")),
+    )
+    .where(
+      and(
+        eq(engagement.studentProfileId, actor.studentProfileId),
+        eq(engagement.institutionId, actor.institutionId),
+        eq(engagement.status, "pending_payment"),
+        eq(tutorProfile.institutionId, actor.institutionId),
+      ),
+    )
+    .orderBy(desc(engagement.createdAt));
+
+  const now = Date.now();
+  return rows.flatMap(({ expiresAt, ...row }) => {
+    if (!expiresAt) return [];
+    const payBy = resumableUntil(expiresAt);
+    return [{ ...row, payBy, lapsed: payBy.getTime() <= now, restartPath: checkoutRestartPath(row) }];
+  });
 }
 
 function termEndMoment(endsOn: string): Date {
