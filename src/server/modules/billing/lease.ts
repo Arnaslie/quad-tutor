@@ -6,13 +6,9 @@ import { sweepLease } from "@/server/db/schema";
 /**
  * One holder per campus and name, claimed in a single statement and held by a timestamp rather than a
  * lock or an open transaction, so Stripe calls can run under it. A crashed holder's lease lapses after `ttlMs`.
+ * Returns when the lease ends, or null when someone else holds it.
  */
-export async function withLease<T>(
-  institutionId: string,
-  name: string,
-  ttlMs: number,
-  work: () => Promise<T>,
-): Promise<T | null> {
+export async function claim(institutionId: string, name: string, ttlMs: number): Promise<Date | null> {
   const heldUntil = new Date(Date.now() + ttlMs);
   const claimed = await db
     .insert(sweepLease)
@@ -23,7 +19,17 @@ export async function withLease<T>(
       setWhere: lt(sweepLease.heldUntil, sql`now()`),
     })
     .returning({ heldUntil: sweepLease.heldUntil });
-  if (claimed.length === 0) return null;
+  return claimed.length > 0 ? heldUntil : null;
+}
+
+export async function withLease<T>(
+  institutionId: string,
+  name: string,
+  ttlMs: number,
+  work: () => Promise<T>,
+): Promise<T | null> {
+  const heldUntil = await claim(institutionId, name, ttlMs);
+  if (!heldUntil) return null;
 
   try {
     return await work();

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -92,6 +92,9 @@ export type CheckoutSession = {
 
 export type ChargeFee = { feeMinor: number; balanceTransactionId: string } | null;
 
+/** `amountMinor` is what the charge took, `refundedMinor` what its live refunds gave back. */
+export type Payment = { id: string; amountMinor: number; refundedMinor: number; currency: string };
+
 export type Refund = {
   id: string;
   status: string | null;
@@ -179,12 +182,14 @@ export type Gateway = {
   /** A paid Checkout Session for this engagement, found through its PaymentIntents' metadata. */
   findPaidCheckout(engagementId: string): Promise<CheckoutSession | null>;
   chargeFee(paymentIntentId: string): Promise<ChargeFee>;
+  retrievePayment(paymentIntentId: string): Promise<Payment>;
   listRefunds(paymentIntentId: string): Promise<Refund[]>;
   chargeRefunds(chargeId: string): Promise<Refund[]>;
   retrieveRefund(id: string): Promise<Refund>;
   refund(params: NewRefund): Promise<Refund>;
   createAccount(params: NewConnectAccount): Promise<ConnectAccount>;
   retrieveAccount(id: string): Promise<ConnectAccount>;
+  listAccounts(): Promise<ConnectAccount[]>;
   createAccountLink(params: NewAccountLink): Promise<string>;
   /** The PaymentIntent's `latest_charge`, which a transfer names as its `source_transaction`. */
   chargeOf(paymentIntentId: string): Promise<string | null>;
@@ -400,6 +405,17 @@ function realGateway(): Gateway {
         if (!transaction || typeof transaction !== "object") return null;
         return { feeMinor: transaction.fee, balanceTransactionId: transaction.id };
       }),
+    retrievePayment: (paymentIntentId) =>
+      call(async () => {
+        const intent = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ["latest_charge"] });
+        const charge = typeof intent.latest_charge === "object" ? intent.latest_charge : null;
+        return {
+          id: intent.id,
+          amountMinor: intent.amount_received,
+          refundedMinor: charge?.amount_refunded ?? 0,
+          currency: intent.currency,
+        };
+      }),
     listRefunds: (paymentIntentId) =>
       call(async () => {
         const refunds = await stripe.refunds.list({ payment_intent: paymentIntentId, limit: 100 });
@@ -441,6 +457,8 @@ function realGateway(): Gateway {
         return accountView(account);
       }),
     retrieveAccount: (id) => call(async () => accountView(await stripe.accounts.retrieve(id))),
+    listAccounts: () =>
+      call(async () => (await stripe.accounts.list({ limit: 100 }).autoPagingToArray({ limit: 10_000 })).map(accountView)),
     createAccountLink: (params) =>
       call(async () => {
         const link = await stripe.accountLinks.create({
@@ -470,7 +488,11 @@ function fakeDir(): string {
 }
 const fakeFile = (name: string) => path.join(fakeDir(), `${name.replace(/[^\w-]/g, "_")}.json`);
 
+/** Objects a test has hidden answer `resource_missing`, as they would to a key for another account. */
+const fakeHidden = new Set<string>();
+
 async function fakeRead<T>(name: string): Promise<T | null> {
+  if (fakeHidden.has(name)) return null;
   try {
     return JSON.parse(await readFile(fakeFile(name), "utf8")) as T;
   } catch {
@@ -599,6 +621,17 @@ const fakeGateway: Gateway = {
       balanceTransactionId: `txn_${paymentIntentId}`,
     };
   },
+  async retrievePayment(paymentIntentId) {
+    const payment = await fakeRead<FakePayment>(paymentIntentId);
+    if (!payment) throw missing("payment_intent", paymentIntentId);
+    const { session, refunds } = await fakeRecord(payment.sessionId);
+    return {
+      id: paymentIntentId,
+      amountMinor: payment.amountMinor,
+      refundedMinor: refunds.filter(isLiveRefund).reduce((sum, r) => sum + r.amountMinor, 0),
+      currency: session.currency ?? "usd",
+    };
+  },
   async listRefunds(paymentIntentId) {
     const payment = await fakeRead<FakePayment>(paymentIntentId);
     if (!payment) throw missing("payment_intent", paymentIntentId);
@@ -648,6 +681,12 @@ const fakeGateway: Gateway = {
     });
   },
   retrieveAccount: (id) => fakeAccount(id),
+  async listAccounts() {
+    const files = await readdir(fakeDir()).catch(() => []);
+    const ids = files.filter((file) => file.startsWith("acct_fake_")).map((file) => file.replace(/\.json$/, ""));
+    const accounts = await Promise.all(ids.map((id) => fakeRead<ConnectAccount>(id)));
+    return accounts.filter((account): account is ConnectAccount => account !== null);
+  },
   async createAccountLink(params) {
     await fakeAccount(params.accountId);
     const id = `acctlink_fake_${randomUUID().replaceAll("-", "")}`;
@@ -955,6 +994,38 @@ export const fakeStripe = {
     const secret = process.env.STRIPE_CONNECT_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET;
     return { payload, signature: signWebhookPayload(payload, secret) };
   },
+  /** Plays ops refunding the payment in the Dashboard: a refund with no metadata. */
+  async dashboardRefund(paymentIntentId: string, amountMinor: number): Promise<Refund> {
+    assertNotProduction();
+    const payment = await fakeRead<FakePayment>(paymentIntentId);
+    if (!payment) throw missing("payment_intent", paymentIntentId);
+    return locked(payment.sessionId, async () => {
+      const record = await fakeRecord(payment.sessionId);
+      const refund: Refund = {
+        id: `re_fake_${randomUUID().replaceAll("-", "")}`,
+        status: "succeeded",
+        amountMinor,
+        currency: record.session.currency ?? "usd",
+        paymentIntentId,
+        ledgerEntryId: null,
+        engagementId: null,
+        institutionId: null,
+        failureReason: null,
+      };
+      record.refunds.push(refund);
+      await fakeWrite(payment.sessionId, record);
+      await fakeWrite(refund.id, { sessionId: payment.sessionId });
+      return refund;
+    });
+  },
+  /** The objects answer `resource_missing` until shown again, as they would to a key for another account. */
+  hide(...ids: string[]): void {
+    assertNotProduction();
+    for (const id of ids) fakeHidden.add(id);
+  },
+  show(...ids: string[]): void {
+    for (const id of ids) fakeHidden.delete(id);
+  },
   /** The next refund create fails as a Stripe 500 would, and its key replays that failure. */
   failNextRefund(): void {
     assertNotProduction();
@@ -1036,6 +1107,28 @@ export const fakeStripe = {
       const reversed = { ...transfer, reversals: [...transfer.reversals, reversal] };
       await fakeWrite(id, reversed);
       return reversed;
+    });
+  },
+  /** Plays someone sending money into the engagement's transfer group from the Dashboard, with no metadata. */
+  async dashboardTransfer(params: { engagementId: string; accountId: string; amountMinor: number }): Promise<Transfer> {
+    assertNotProduction();
+    const transfer: Transfer = {
+      id: `tr_fake_${randomUUID().replaceAll("-", "")}`,
+      amountMinor: params.amountMinor,
+      currency: "usd",
+      destination: params.accountId,
+      transferGroup: params.engagementId,
+      sourceTransaction: null,
+      ledgerEntryId: null,
+      engagementId: null,
+      institutionId: null,
+      reversals: [],
+    };
+    const group = `transfer-group-${params.engagementId}`;
+    return locked(group, async () => {
+      await fakeWrite(transfer.id, transfer);
+      await fakeWrite(group, [...((await fakeRead<string[]>(group)) ?? []), transfer.id]);
+      return transfer;
     });
   },
   async transferEvent(id: string, type: "transfer.created" | "transfer.reversed"): Promise<{ payload: string; signature: string }> {
