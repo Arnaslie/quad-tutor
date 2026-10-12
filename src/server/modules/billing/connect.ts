@@ -70,14 +70,24 @@ async function applyAccount(account: ConnectAccount, institutionId: string): Pro
   return row ? status : null;
 }
 
+async function refreshAccount(accountId: string, institutionId: string): Promise<{ status: KycStatus; stage: PayoutStage } | null> {
+  const account = await stripeGateway().retrieveAccount(accountId);
+  const status = await applyAccount(account, institutionId);
+  return status ? { status, stage: payoutStageOf(account) } : null;
+}
+
+/** Stripe's current word on the account, written to its profile; null when the account is not this campus's tutor. */
+export async function refreshKyc(accountId: string, institutionId: string): Promise<KycStatus | null> {
+  return (await refreshAccount(accountId, institutionId))?.status ?? null;
+}
+
 /** Asks Stripe for the account's current state, so a read works where no webhook is registered (previews). */
 export async function payoutsFor(actor: TutorActor): Promise<Payouts> {
   const stored = await payoutsOf(actor);
   if (!stored.accountId) return stored;
   try {
-    const account = await stripeGateway().retrieveAccount(stored.accountId);
-    const status = await applyAccount(account, actor.institutionId);
-    return status ? { accountId: account.id, status, stage: payoutStageOf(account) } : stored;
+    const fresh = await refreshAccount(stored.accountId, actor.institutionId);
+    return fresh ? { accountId: stored.accountId, ...fresh } : stored;
   } catch (error) {
     console.error("[connect] account refresh failed", errorFacts(error));
     return stored;

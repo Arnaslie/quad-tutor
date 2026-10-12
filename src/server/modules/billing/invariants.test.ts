@@ -76,7 +76,7 @@ test("a session whose split does not add up to what was earned is flagged", () =
 });
 
 test("transfers net of reversals may not exceed what the tutor accrued", () => {
-  const base = { id: "e", status: "active" as const, pricePaidMinor: 14_000 };
+  const base = { id: "e", status: "active" as const, pricePaidMinor: 14_000, references: { package_purchase: ["pi_1"] } };
   const accrued = { package_purchase: t(14_000), session_earned: t(3_500), tutor_accrued: t(3_150), platform_fee: t(350) };
   assert.deepEqual(invariants({ ...healthy, engagements: [{ ...base, totals: { ...accrued, tutor_transfer: t(3_150) } }] }), []);
   assert.deepEqual(invariants({ ...healthy, engagements: [{ ...base, totals: { ...accrued, tutor_transfer: t(6_300, 2) } }] }), [
@@ -103,8 +103,45 @@ test("a refund row may carry only a Stripe refund or a manual settlement", () =>
     status: "refunded" as const,
     pricePaidMinor: 14_000,
     totals: { package_purchase: t(14_000), refund: t(14_000) },
-    refundReferences: [reference],
+    references: { refund: [reference] },
   });
   for (const ok of [null, "re_123", "manual:abc"]) assert.deepEqual(invariants({ ...healthy, engagements: [e(ok)] }), []);
   assert.deepEqual(invariants({ ...healthy, engagements: [e("pi_123")] }), ["refund reference is re_ or manual:"]);
+});
+
+test("transfer rows carry tr_ or nothing yet, reversals carry trr_, and reversals never exceed transfers", () => {
+  const e = (references: Record<string, (string | null)[]>, totals: Totals = {}) => ({
+    id: "e",
+    status: "active" as const,
+    pricePaidMinor: 14_000,
+    totals: { package_purchase: t(14_000), session_earned: t(3_500), tutor_accrued: t(3_150), platform_fee: t(350), tutor_transfer: t(3_150), ...totals },
+    references: { package_purchase: ["pi_123"], ...references },
+  });
+  for (const ok of [null, "tr_123"]) assert.deepEqual(invariants({ ...healthy, engagements: [e({ tutor_transfer: [ok] })] }), []);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e({ tutor_transfer: ["re_123"] })] }), ["transfer reference is tr_"]);
+  assert.deepEqual(
+    invariants({ ...healthy, engagements: [e({ tutor_transfer: ["tr_1"], transfer_reversal: ["trr_1"] }, { transfer_reversal: t(1_000) })] }),
+    [],
+  );
+  assert.deepEqual(
+    invariants({ ...healthy, engagements: [e({ tutor_transfer: ["tr_1"], transfer_reversal: [null] }, { transfer_reversal: t(1_000) })] }),
+    ["reversal reference is trr_"],
+  );
+  assert.deepEqual(
+    invariants({ ...healthy, engagements: [e({ tutor_transfer: ["tr_1"], transfer_reversal: ["trr_1"] }, { transfer_reversal: t(4_000) })] }),
+    ["reversals <= transfers"],
+  );
+});
+
+test("a transfer on an engagement whose purchase never went through Stripe is flagged", () => {
+  const e = (purchase: string | null) => ({
+    id: "e",
+    status: "active" as const,
+    pricePaidMinor: 14_000,
+    totals: { package_purchase: t(14_000), session_earned: t(3_500), tutor_accrued: t(3_150), platform_fee: t(350), tutor_transfer: t(3_150) },
+    references: { package_purchase: [purchase], tutor_transfer: ["tr_1"] },
+  });
+  assert.deepEqual(invariants({ ...healthy, engagements: [e("pi_123")] }), []);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e(null)] }), ["transfers only from a Stripe purchase"]);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e("pi_test_seeded")] }), []);
 });

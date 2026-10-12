@@ -22,7 +22,6 @@ import { sessionEndsAt, settle, type Settlement } from "./attendance";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/** TODO(stripe): the transfer against this accrual belongs in a payout run. */
 async function recognise(
   tx: Tx,
   session: Pick<

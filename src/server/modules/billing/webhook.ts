@@ -1,11 +1,17 @@
 import { syncCheckout, type SyncOutcome } from "./checkout-session";
 import { syncConnectAccount, type ConnectOutcome } from "./connect";
+import { DISPUTE_EVENTS, handleDisputeEvent, type DisputeOutcome } from "./disputes";
 import { REFUND_EVENTS, handleRefundEvent, type RefundOutcome } from "./refunds";
 import { GatewayError, stripeGateway, verifyWebhook } from "./stripe";
+import { TRANSFER_EVENTS, handleTransferEvent, type TransferEventOutcome } from "./transfers";
 
 export type WebhookResult =
   | { status: 400; reason: string }
-  | { status: 200; outcome: SyncOutcome | RefundOutcome | ConnectOutcome | "ignored"; institutionId: string | null };
+  | {
+      status: 200;
+      outcome: SyncOutcome | RefundOutcome | ConnectOutcome | TransferEventOutcome | DisputeOutcome | "ignored";
+      institutionId: string | null;
+    };
 
 const CHECKOUT_EVENTS = new Set(["checkout.session.completed", "checkout.session.expired"]);
 
@@ -33,6 +39,8 @@ export async function handleStripeWebhook(payload: string, signature: string | n
   try {
     if (CHECKOUT_EVENTS.has(event.type)) return { status: 200, ...(await syncCheckout(event.objectId)) };
     if (REFUND_EVENTS.has(event.type)) return { status: 200, ...(await handleRefundEvent(event.type, event.objectId)) };
+    if (TRANSFER_EVENTS.has(event.type)) return { status: 200, ...(await handleTransferEvent(event.objectId)) };
+    if (DISPUTE_EVENTS.has(event.type)) return { status: 200, ...(await handleDisputeEvent(event.objectId)) };
     return { status: 200, outcome: "ignored", institutionId: null };
   } catch (error) {
     if (error instanceof GatewayError && error.missing) {
