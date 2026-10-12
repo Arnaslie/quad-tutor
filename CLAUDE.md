@@ -179,12 +179,17 @@ earned.
 
 ## Working on this repo
 
-Work runs under pstack's `/poteto-mode`. Use one branch and one PR per item, and the user merges. Items with open product or money questions get a written proposal the user approves before anyone builds. Settled decisions are recorded in `docs/decisions.md`.
+Work runs under pstack's `/poteto-mode`. Use one branch and one PR per item. Items with open product or money questions get a written proposal the user approves before anyone builds. Settled decisions are recorded in `docs/decisions.md`.
 
 Before calling a branch ready to merge:
 - Run typecheck, lint and `npm test`, plus `db:check-money` for anything that touches money.
 - Run the build the way CI does. Extract the commit into a scratch directory (`git archive HEAD | tar -x -C <dir>`), copy `node_modules` (a symlink breaks Turbopack), then run `env -u DATABASE_URL -u STRIPE_SECRET_KEY -u STRIPE_WEBHOOK_SECRET npm run build` there. A build in a checkout reads `.env.local` and hides module-level database access, which then fails CI with `DATABASE_URL is not set`. Build Drizzle query builders inside functions; `alias()`, conditions and `sql` fragments are fine at module level.
 - An independent reviewer checks the final commit. A commit added after review needs another look.
 - State the result of the required GitHub check, or say it could not be seen.
+
+Who merges:
+- pstack may merge a PR itself (`gh pr merge --merge`) only when all of these hold: `npm run merge-gate -- <PR>` exits 0, an independent review passed on the final commit, and `gh pr checks` is green on that commit.
+- The user merges anything `merge-gate` flags: database migrations and schema, deploy and cron workflows, environment settings, Stripe keys and gateway settings, and prices, fees or the take cap. Leave those PRs open and tell the user.
+- After merging, confirm the head is in `origin/main` and the `migrate` job passed.
 
 Parallel work gets its own worktree, local database (`tutor_finder_<item>`), dev-server port and fake-Stripe state. Port 3000 belongs to the user.
