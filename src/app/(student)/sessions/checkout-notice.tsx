@@ -9,6 +9,9 @@ import { displayName } from "@/server/modules/identity/display-name";
 import { ContinuePayment } from "./continue-payment";
 import { RefreshWhilePending } from "./refresh-while-pending";
 
+export const CHECKOUT_RAN_OUT =
+  "This checkout ran out before a payment came through, so the time is being released.";
+
 function Summary({ checkout }: { checkout: PendingCheckout }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -28,8 +31,7 @@ export function CheckoutExpired({ checkout }: { checkout: PendingCheckout }) {
     <Card className="flex flex-col items-start gap-3">
       <Summary checkout={checkout} />
       <p className="text-sm text-muted">
-        This checkout ran out before a payment came through, so the time is being
-        released. Start again to pick a time.
+        {CHECKOUT_RAN_OUT} Start again to pick a time.
       </p>
       <ContinuePayment engagementId={checkout.engagementId} label="Start again" pendingLabel="Starting over…" />
     </Card>

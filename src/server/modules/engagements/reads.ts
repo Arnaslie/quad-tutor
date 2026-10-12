@@ -56,6 +56,7 @@ export type SessionListItem = {
   status: SessionContextRow["status"];
   resolution: SessionContextRow["resolution"];
   confirmationWindowEndsAt: Date | null;
+  checkoutLapsed: boolean;
 
   courseCode: string | null;
   courseTitle: string;
@@ -108,6 +109,10 @@ function toListItem(
     status: row.status,
     resolution: row.resolution,
     confirmationWindowEndsAt: row.confirmationWindowEndsAt,
+    checkoutLapsed:
+      row.engagementStatus === "pending_payment" &&
+      row.checkoutExpiresAt !== null &&
+      resumableUntil(row.checkoutExpiresAt).getTime() <= now.getTime(),
     courseCode: row.courseCode,
     courseTitle: row.courseTitle,
     section: row.section,
