@@ -101,8 +101,11 @@ test("onboarding mints a link back to /tutor/payouts, and the return page re-rea
   assert.equal((await payoutsFor(actor)).status, "not_started");
 
   await fakeStripe.setAccount(link.accountId, "verified");
-  assert.deepEqual(await payoutsFor(actor), { accountId: link.accountId, status: "verified" });
+  assert.deepEqual(await payoutsFor(actor), { accountId: link.accountId, status: "verified", stage: "verified" });
   assert.equal((await profile(actor)).status, "verified");
+
+  await fakeStripe.setAccount(link.accountId, "rejected");
+  assert.deepEqual(await payoutsFor(actor), { accountId: link.accountId, status: "restricted", stage: "needs_support" });
 });
 
 test("account.updated on the Connect secret maps each state, and a stale payload never wins", async () => {

@@ -14,6 +14,7 @@ import {
 } from "@/server/modules/engagements/reads";
 import { LATE_CANCEL_HOURS } from "@/server/modules/engagements/attendance";
 import { deliveredIfUnanswered, lapseCopy } from "@/server/modules/engagements/answer-outcome";
+import { payoutsFor, payoutsOf } from "@/server/modules/billing/connect";
 import { formatMinor, TAKE_RATE_BP } from "@/server/modules/billing/pricing";
 import {
   earningsForTutor,
@@ -25,19 +26,23 @@ import { defaultLocationFor } from "@/server/modules/tutoring/location";
 import { displayName } from "@/server/modules/identity/display-name";
 import { LocationForm } from "../location-form";
 import { LocationNudge } from "../location-nudge";
+import { PAYOUTS_HREF } from "../payouts/stage";
 import { changeSessionLocation } from "./actions";
+import { PayoutsBanner } from "./payouts-banner";
 import { SessionActions } from "./session-actions";
 
 export const metadata: Metadata = { title: "Sessions" };
 
 export default async function TutorSessionsPage() {
   const tutor = await requireTutor();
-  const [board, earnings, feeCap, location] = await Promise.all([
+  const [board, earnings, feeCap, location, stored] = await Promise.all([
     sessionBoardForTutor(tutor),
     earningsForTutor(tutor),
     feeCapProgressForTutor(tutor),
     defaultLocationFor(tutor),
+    payoutsOf(tutor),
   ]);
+  const payouts = stored.status === "restricted" ? await payoutsFor(tutor) : stored;
 
   const total =
     board.awaitingAnswer.length + board.upcoming.length + board.past.length;
@@ -50,6 +55,8 @@ export default async function TutorSessionsPage() {
       />
 
       {location ? null : <LocationNudge />}
+
+      <PayoutsBanner stage={payouts.stage} owedMinor={earnings.owedMinor} currency={earnings.currency} />
 
       <Card>
         <p className="text-sm text-foreground">
@@ -66,6 +73,9 @@ export default async function TutorSessionsPage() {
           A session is earned once its attendance is settled — never when it is
           booked.
         </p>
+        <ButtonLink href={PAYOUTS_HREF} variant="ghost" className="-ml-4 mt-2">
+          Payout settings
+        </ButtonLink>
       </Card>
 
       {feeCap ? <FeeCapCard progress={feeCap} /> : null}

@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { formatCountdown, formatDayTime } from "@/components/format";
 import { Icon } from "@/components/icons";
 import { PageHeader } from "@/components/page-header";
+import { payoutsOf } from "@/server/modules/billing/connect";
 import { packageSummary } from "@/server/modules/billing/pricing";
 import { requireTutor, type TutorActor } from "@/server/modules/identity/actor";
 import { inboxForTutor, type TutorInboxItem } from "@/server/modules/matching/requests";
@@ -24,10 +25,12 @@ const URGENT_MINUTES = 120;
 
 export default async function TutorInboxPage() {
   const tutor = await requireTutor();
-  const [requests, location] = await Promise.all([
+  const [requests, location, payouts] = await Promise.all([
     inboxForTutor(tutor),
     defaultLocationFor(tutor),
+    payoutsOf(tutor),
   ]);
+  const payoutsPrompt = payouts.status === "not_started";
 
   return (
     <div className="flex flex-col gap-6">
@@ -48,7 +51,7 @@ export default async function TutorInboxPage() {
           <ul className="flex flex-col gap-4">
             {requests.map((request) => (
               <li key={request.id}>
-                <RequestCard request={request} />
+                <RequestCard request={request} payoutsPrompt={payoutsPrompt} />
               </li>
             ))}
           </ul>
@@ -132,7 +135,7 @@ async function NothingWaiting({
   );
 }
 
-function RequestCard({ request }: { request: TutorInboxItem }) {
+function RequestCard({ request, payoutsPrompt }: { request: TutorInboxItem; payoutsPrompt: boolean }) {
   const context = [
     request.courseCode,
     request.section ? `Section ${request.section}` : null,
@@ -185,6 +188,7 @@ function RequestCard({ request }: { request: TutorInboxItem }) {
         requestId={request.id}
         studentName={displayName(request.studentName, "student")}
         packageLabel={request.requestedKind ? packageSummary(request.requestedKind) : null}
+        payoutsPrompt={payoutsPrompt}
       />
     </Card>
   );

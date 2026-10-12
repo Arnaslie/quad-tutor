@@ -125,7 +125,7 @@ them" reads honest, "that is all we found" reads broken.
 ```
 
 `IconName`: `book | send | calendar | inbox | clock | cap | user | check |
-arrow-right | chevron-down | pin | chat | flag`. No icon package. Need another? Add a path to `PATHS` — do not inline
+arrow-right | chevron-down | pin | chat | flag | star | bank | alert`. No icon package. Need another? Add a path to `PATHS` — do not inline
 an `<svg>` in a screen.
 
 ---

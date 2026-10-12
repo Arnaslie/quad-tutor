@@ -6,18 +6,18 @@ import { tutorProfile } from "@/server/db/schema";
 import type { TutorActor } from "@/server/modules/identity/actor";
 
 import { appUrl } from "./checkout-session";
-import { kycStatusOf, type KycStatus } from "./kyc";
+import { kycStatusOf, payoutStageOf, type KycStatus, type PayoutStage } from "./kyc";
 import { errorFacts, stripeGateway, type ConnectAccount } from "./stripe";
 
-export type Payouts = { accountId: string | null; status: KycStatus };
+export type Payouts = { accountId: string | null; status: KycStatus; stage: PayoutStage };
 
-async function payoutsOf(actor: TutorActor): Promise<Payouts> {
+export async function payoutsOf(actor: TutorActor): Promise<Payouts> {
   const [row] = await db
     .select({ accountId: tutorProfile.stripeAccountId, status: tutorProfile.kycStatus })
     .from(tutorProfile)
     .where(and(eq(tutorProfile.id, actor.tutorProfileId), eq(tutorProfile.institutionId, actor.institutionId)));
   if (!row) throw new Error("No tutor profile on this campus.");
-  return row;
+  return { ...row, stage: row.status };
 }
 
 export async function ensureConnectAccount(actor: TutorActor): Promise<string> {
@@ -70,9 +70,15 @@ async function applyAccount(account: ConnectAccount, institutionId: string): Pro
   return row ? status : null;
 }
 
+async function refreshAccount(accountId: string, institutionId: string): Promise<{ status: KycStatus; stage: PayoutStage } | null> {
+  const account = await stripeGateway().retrieveAccount(accountId);
+  const status = await applyAccount(account, institutionId);
+  return status ? { status, stage: payoutStageOf(account) } : null;
+}
+
 /** Stripe's current word on the account, written to its profile; null when the account is not this campus's tutor. */
 export async function refreshKyc(accountId: string, institutionId: string): Promise<KycStatus | null> {
-  return applyAccount(await stripeGateway().retrieveAccount(accountId), institutionId);
+  return (await refreshAccount(accountId, institutionId))?.status ?? null;
 }
 
 /** Asks Stripe for the account's current state, so a read works where no webhook is registered (previews). */
@@ -80,7 +86,8 @@ export async function payoutsFor(actor: TutorActor): Promise<Payouts> {
   const stored = await payoutsOf(actor);
   if (!stored.accountId) return stored;
   try {
-    return { accountId: stored.accountId, status: (await refreshKyc(stored.accountId, actor.institutionId)) ?? stored.status };
+    const fresh = await refreshAccount(stored.accountId, actor.institutionId);
+    return fresh ? { accountId: stored.accountId, ...fresh } : stored;
   } catch (error) {
     console.error("[connect] account refresh failed", errorFacts(error));
     return stored;
