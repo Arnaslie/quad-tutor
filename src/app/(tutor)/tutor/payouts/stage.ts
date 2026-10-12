@@ -3,7 +3,7 @@ import type { PayoutStage } from "@/server/modules/billing/kyc";
 
 export const PAYOUTS_HREF = "/tutor/payouts";
 
-export const SUPPORT_TWITTER_HANDLE = "@TODO";
+export const SUPPORT_TWITTER_HANDLE = "@ArnasLiesis";
 
 export const PAYOUTS_SUPPORT = `Stripe won't send pay to this account, and it can't be fixed from here. Message ${SUPPORT_TWITTER_HANDLE} on Twitter and we'll sort it out with Stripe.`;
 
