@@ -62,6 +62,7 @@ export type SessionContextRow = {
   tutorUserId: string;
   tutorName: string;
   engagementStatus: "pending_payment" | "active" | "completed" | "refunded" | "cancelled";
+  checkoutExpiresAt: Date | null;
   tutorCourseId: string;
   sessionsPurchased: number;
   pricePaidMinor: number;
@@ -102,6 +103,7 @@ export function sessionContext(exec: Executor = db) {
       tutorUserId: tutorProfile.userId,
       tutorName: tutorUser.name,
       engagementStatus: engagement.status,
+      checkoutExpiresAt: engagement.checkoutExpiresAt,
       tutorCourseId: engagement.tutorCourseId,
       sessionsPurchased: engagement.sessionsPurchased,
       pricePaidMinor: engagement.pricePaidMinor,

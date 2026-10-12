@@ -32,6 +32,7 @@ import { acceptRequest, requestTutors } from "@/server/modules/matching/requests
 import {
   cancelCheckout,
   checkoutRedirect,
+  resumeCheckout,
   settleCheckout,
   syncCheckout,
   syncOwnCheckouts,
@@ -88,7 +89,7 @@ async function opened(student?: Actor) {
   const buy = (slot = slots[0]) => purchasePackage({ actor, requestId, anchorExamId: null, slotStartsAt: slot });
   const { url } = await checkoutRedirect(home.institutionId, () => buy());
   const row = await pending(actor);
-  return { actor, buy, slots, url, engagementId: row.id, sessionId: row.sessionId! };
+  return { actor, buy, slots, url, requestId, engagementId: row.id, sessionId: row.sessionId! };
 }
 
 async function pending(actor: Actor) {
@@ -592,8 +593,30 @@ test("cancel and reads only touch the viewer's own checkouts", async () => {
   assert.equal(await syncOwnCheckouts(theirs.actor), true);
   assert.deepEqual(await state(theirs.engagementId), paidState);
 
-  assert.deepEqual(await cancelCheckout(mine.actor, mine.engagementId), { checkout: { status: "cancelled", kind: "exam_anchored" }, fulfilled: false });
+  assert.deepEqual(await cancelCheckout(mine.actor, mine.engagementId), {
+    checkout: { status: "cancelled", kind: "exam_anchored", restartPath: `/requests?buy=${mine.requestId}` },
+    fulfilled: false,
+  });
   assert.equal((await stripeGateway().retrieveCheckout(mine.sessionId)).status, "expired");
+});
+
+test("continuing a checkout reopens the same Session, and a lapsed one starts over", async () => {
+  const open = await opened();
+  assert.deepEqual(await resumeCheckout(open.actor, open.engagementId), { url: open.url, fulfilled: false });
+
+  const theirs = await opened();
+  await assert.rejects(resumeCheckout(open.actor, theirs.engagementId), PurchaseError);
+
+  await db.update(engagement).set({ checkoutExpiresAt: new Date(Date.now() - 60_000) }).where(eq(engagement.id, open.engagementId));
+  assert.deepEqual(await resumeCheckout(open.actor, open.engagementId), {
+    url: `/requests?buy=${open.requestId}`,
+    fulfilled: false,
+  });
+  assert.equal((await state(open.engagementId)).status, "cancelled");
+  assert.deepEqual(await resumeCheckout(open.actor, open.engagementId), {
+    url: `/sessions?package=${open.engagementId}`,
+    fulfilled: false,
+  });
 });
 
 test("a paid Session found while settling is reported so the caller can notify", async () => {
@@ -604,7 +627,10 @@ test("a paid Session found while settling is reported so the caller can notify",
 
   const other = await opened();
   await fakeStripe.pay(other.sessionId);
-  assert.deepEqual(await cancelCheckout(other.actor, other.engagementId), { checkout: { status: "active", kind: "exam_anchored" }, fulfilled: true });
+  assert.deepEqual(await cancelCheckout(other.actor, other.engagementId), {
+    checkout: { status: "active", kind: "exam_anchored", restartPath: `/requests?buy=${other.requestId}` },
+    fulfilled: true,
+  });
   assert.equal((await state(engagementId)).status, "active");
 });
 

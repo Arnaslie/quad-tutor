@@ -18,6 +18,7 @@ import { requireActor } from "@/server/modules/identity/actor";
 import { displayName } from "@/server/modules/identity/display-name";
 import { sessionRatingState, type SessionRatingState } from "@/server/modules/ratings/reads";
 
+import { CHECKOUT_RAN_OUT } from "../checkout-notice";
 import { RatingForm } from "./rating-form";
 import { SessionActions } from "./session-actions";
 
@@ -181,7 +182,7 @@ function Row({ label, value }: { label: string; value: string }) {
 function statusLine(session: SessionDetail, otherParty: string): string {
   switch (session.status) {
     case "held":
-      return "Confirming payment";
+      return session.checkoutLapsed ? CHECKOUT_RAN_OUT : "Confirming payment";
     case "scheduled":
       switch (session.action) {
         case "confirm_or_deny":

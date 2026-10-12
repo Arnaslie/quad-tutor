@@ -4,6 +4,8 @@ import { Icon } from "@/components/icons";
 import type { SessionListItem } from "@/server/modules/engagements/reads";
 import { displayName } from "@/server/modules/identity/display-name";
 
+import { CHECKOUT_RAN_OUT } from "./checkout-notice";
+
 export function SessionRow({ session }: { session: SessionListItem }) {
   const course = [session.courseCode ?? session.courseTitle, session.professorName]
     .filter(Boolean)
@@ -33,6 +35,11 @@ export function SessionRow({ session }: { session: SessionListItem }) {
 
 function statusFor(session: SessionListItem): string | null {
   const tutor = displayName(session.otherPartyName, "tutor");
+  if (session.status === "held") {
+    return session.checkoutLapsed
+      ? CHECKOUT_RAN_OUT
+      : "Held while you pay — not booked yet";
+  }
   switch (session.action) {
     case "cancel":
     case "late_cancel":

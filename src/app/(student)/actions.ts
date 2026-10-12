@@ -26,7 +26,7 @@ import {
 import { SessionError } from "@/server/modules/engagements/access";
 import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
 import { endPackage } from "@/server/modules/engagements/termEnd";
-import { checkoutRedirect } from "@/server/modules/billing/checkout-session";
+import { checkoutRedirect, resumeCheckout } from "@/server/modules/billing/checkout-session";
 import { formatMinor } from "@/server/modules/billing/pricing";
 import {
   requestRenewalInput,
@@ -219,6 +219,30 @@ export async function topUp(
   }
 
   if (target.fulfilled) notifySessionChangesSoon(actor.institutionId);
+  revalidatePath("/sessions");
+  redirect(target.url);
+}
+
+const continueSchema = z.object({ engagementId: z.uuid() });
+
+export async function continueCheckout(
+  _previous: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const actor = await requireActor();
+
+  const parsed = continueSchema.safeParse({ engagementId: formData.get("engagementId") });
+  if (!parsed.success) return { ok: false, error: "That checkout no longer exists." };
+
+  let target: Awaited<ReturnType<typeof resumeCheckout>>;
+  try {
+    target = await resumeCheckout(actor, parsed.data.engagementId);
+  } catch (error) {
+    return toResult(error);
+  }
+
+  if (target.fulfilled) notifySessionChangesSoon(actor.institutionId);
+  revalidatePath("/requests");
   revalidatePath("/sessions");
   redirect(target.url);
 }

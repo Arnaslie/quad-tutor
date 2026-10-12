@@ -11,13 +11,19 @@ import { PageHeader } from "@/components/page-header";
 import { packageOptions, packageSummary } from "@/server/modules/billing/pricing";
 import { upcomingExams } from "@/server/modules/catalog/courses";
 import { PurchaseError, slotsForRequest } from "@/server/modules/engagements/purchase";
+import {
+  pendingCheckoutsForStudent,
+  type PendingCheckout,
+} from "@/server/modules/engagements/reads";
+import { syncOwnCheckouts } from "@/server/modules/billing/checkout-session";
 import { requireActor } from "@/server/modules/identity/actor";
+import { notifySessionChangesSoon } from "@/server/modules/notifications/soon";
 import {
   requestsForStudent,
   type StudentRequest,
 } from "@/server/modules/matching/requests";
 
-import { CheckoutCancelled } from "../sessions/checkout-notice";
+import { CheckoutCancelled, OpenCheckout, PendingCheckoutCard } from "../sessions/checkout-notice";
 import { PurchasePanel } from "./purchase-panel";
 import { displayName } from "@/server/modules/identity/display-name";
 
@@ -29,18 +35,30 @@ export default async function RequestsPage(props: PageProps<"/requests">) {
   const actor = await requireActor();
   const searchParams = await props.searchParams;
 
-  const requests = await requestsForStudent(actor);
+  if (await syncOwnCheckouts(actor)) notifySessionChangesSoon(actor.institutionId);
+  const [requests, pending] = await Promise.all([
+    requestsForStudent(actor),
+    pendingCheckoutsForStudent(actor),
+  ]);
+  const checkoutFor = (request: StudentRequest) =>
+    pending.find((row) => row.matchRequestId === request.id);
 
   const raw = searchParams.buy;
   const buying = buyParam.safeParse(Array.isArray(raw) ? raw[0] : raw);
   if (buying.success) {
     const request = requests.find((row) => row.id === buying.data);
     if (request && request.status === "accepted" && request.engagementId === null) {
-      return <PurchaseStep actorRequest={request} />;
+      return (
+        <PurchaseStep
+          actorRequest={request}
+          checkout={checkoutFor(request)}
+          cancelled={Boolean(searchParams.cancelled)}
+        />
+      );
     }
   }
 
-  const pending = requests.filter((request) => request.status === "pending");
+  const waiting = requests.filter((request) => request.status === "pending");
   const accepted = requests.filter((request) => request.status === "accepted");
   const closed = requests.filter(
     (request) => request.status !== "pending" && request.status !== "accepted",
@@ -70,17 +88,17 @@ export default async function RequestsPage(props: PageProps<"/requests">) {
             Said yes
           </h2>
           {accepted.map((request) => (
-            <Accepted key={request.id} request={request} />
+            <Accepted key={request.id} request={request} checkout={checkoutFor(request)} />
           ))}
         </section>
       ) : null}
 
-      {pending.length > 0 ? (
+      {waiting.length > 0 ? (
         <section className="flex flex-col gap-2" aria-label="Waiting">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
             Waiting to hear back
           </h2>
-          {pending.map((request) => (
+          {waiting.map((request) => (
             <Card key={request.id} className="flex flex-col items-start gap-3">
               <div className="flex w-full items-center gap-3">
                 <div className="min-w-0 flex-1">
@@ -149,7 +167,13 @@ function outcome(status: StudentRequest["status"]): string {
   }
 }
 
-function Accepted({ request }: { request: StudentRequest }) {
+function Accepted({
+  request,
+  checkout,
+}: {
+  request: StudentRequest;
+  checkout: PendingCheckout | undefined;
+}) {
   if (request.engagementId) {
     return (
       <CardLink href="/sessions" className="flex items-center gap-3">
@@ -164,6 +188,8 @@ function Accepted({ request }: { request: StudentRequest }) {
       </CardLink>
     );
   }
+
+  if (checkout) return <PendingCheckoutCard checkout={checkout} />;
 
   return (
     <Card className="flex flex-col items-start gap-3">
@@ -182,7 +208,15 @@ function Accepted({ request }: { request: StudentRequest }) {
   );
 }
 
-async function PurchaseStep({ actorRequest }: { actorRequest: StudentRequest }) {
+async function PurchaseStep({
+  actorRequest,
+  checkout,
+  cancelled,
+}: {
+  actorRequest: StudentRequest;
+  checkout: PendingCheckout | undefined;
+  cancelled: boolean;
+}) {
   const actor = await requireActor();
 
   let slots: Date[];
@@ -223,6 +257,10 @@ async function PurchaseStep({ actorRequest }: { actorRequest: StudentRequest }) 
           </ButtonLink>
         }
       />
+
+      {cancelled ? <CheckoutCancelled /> : null}
+
+      <OpenCheckout checkout={checkout} />
 
       <PurchasePanel
         requestId={actorRequest.id}

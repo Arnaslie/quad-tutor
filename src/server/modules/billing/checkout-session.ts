@@ -11,11 +11,12 @@ import {
   type Checkout,
   type PurchaseResult,
 } from "@/server/modules/engagements/purchase";
+import { checkoutRestartPath } from "@/server/modules/engagements/reads";
+import { resumableUntil } from "./checkout-window";
 import type { Actor } from "@/server/modules/identity/actor";
 
 import { GatewayError, errorFacts, stripeGateway, type ChargeFee, type CheckoutSession } from "./stripe";
 
-const RESUME_MARGIN_MS = 5 * 60 * 1000;
 const STRIPE_MIN_EXPIRY_MS = 30 * 60 * 1000;
 const SWEEP_GRACE_MS = 2 * 60 * 1000;
 const SWEEP_LIMIT = 20;
@@ -106,7 +107,7 @@ async function resumeUrl(checkout: Checkout): Promise<string | null> {
   if (!checkout.stripeCheckoutSessionId) {
     return left < STRIPE_MIN_EXPIRY_MS ? null : openCheckout(checkout);
   }
-  if (left < RESUME_MARGIN_MS) return null;
+  if (Date.now() >= resumableUntil(checkout.expiresAt).getTime()) return null;
   try {
     const session = await stripeGateway().retrieveCheckout(checkout.stripeCheckoutSessionId);
     return session.status === "open" ? session.url : null;
@@ -529,11 +530,20 @@ export async function syncOwnCheckouts(actor: Actor): Promise<boolean> {
   return fulfilled;
 }
 
-export type OwnCheckout = { status: (typeof engagement.$inferSelect)["status"]; kind: (typeof engagement.$inferSelect)["kind"] };
+export type OwnCheckout = {
+  status: (typeof engagement.$inferSelect)["status"];
+  kind: (typeof engagement.$inferSelect)["kind"];
+  restartPath: string;
+};
 
 export async function ownCheckout(actor: Actor, engagementId: string): Promise<OwnCheckout | null> {
   const rows = await db
-    .select({ status: engagement.status, kind: engagement.kind })
+    .select({
+      status: engagement.status,
+      kind: engagement.kind,
+      matchRequestId: engagement.matchRequestId,
+      tutorCourseId: engagement.tutorCourseId,
+    })
     .from(engagement)
     .where(
       and(
@@ -543,7 +553,35 @@ export async function ownCheckout(actor: Actor, engagementId: string): Promise<O
       ),
     )
     .limit(1);
-  return rows.at(0) ?? null;
+  const row = rows.at(0);
+  return row ? { status: row.status, kind: row.kind, restartPath: checkoutRestartPath(row) } : null;
+}
+
+/** Back to Stripe's page while the Session is open; otherwise end it and start the purchase over. */
+export async function resumeCheckout(
+  actor: Actor,
+  engagementId: string,
+): Promise<{ url: string; fulfilled: boolean }> {
+  const own = await ownCheckout(actor, engagementId);
+  if (!own) throw new PurchaseError("That checkout is not yours.");
+  const back = { url: `/sessions?package=${engagementId}`, fulfilled: false };
+  if (own.status !== "pending_payment") return back;
+
+  const ids = { engagementId, institutionId: actor.institutionId };
+  try {
+    const found = await checkoutDetails(db, ids);
+    if (found?.status === "pending_payment" && found.checkout && found.checkout.expiresAt.getTime() > Date.now()) {
+      const url = await resumeUrl(found.checkout);
+      if (url) return { url, fulfilled: false };
+    }
+    const fulfilled = (await settleCheckout(ids)) === "fulfilled";
+    const after = await ownCheckout(actor, engagementId);
+    return { url: after?.status === "cancelled" ? after.restartPath : back.url, fulfilled };
+  } catch (error) {
+    if (!(error instanceof GatewayError)) throw error;
+    console.error("[checkout] gateway error", errorFacts(error));
+    throw new PurchaseError(UNREACHABLE);
+  }
 }
 
 /** The student backed out on Stripe's page: expire the Session, then release the hold. */

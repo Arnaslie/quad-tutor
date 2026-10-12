@@ -478,6 +478,18 @@ test("a checkout past its expiry is returned as expired, not reopened", async ()
   assert.equal(opened(await purchasePackage(params)).amountMinor, 14_000, "released, the request opens a fresh checkout");
 });
 
+test("a held session reads as lapsed once its checkout's pay-by time passes", async () => {
+  const student = await person(home.institutionId);
+  const requestId = await acceptedRequest(student);
+  const [slot] = await slotsForRequest({ actor: student, requestId });
+  const { engagementId } = await purchasePackage({ actor: student, requestId, anchorExamId: null, slotStartsAt: slot });
+  const lapsed = async () => onBoard(await sessionBoardForStudent(student), engagementId).map((item) => item.checkoutLapsed);
+
+  assert.deepEqual(await lapsed(), [false]);
+  await db.update(engagement).set({ checkoutExpiresAt: new Date(Date.now() + 60_000) }).where(eq(engagement.id, engagementId));
+  assert.deepEqual(await lapsed(), [true]);
+});
+
 test("an open package checkout is resumed only for the same slot, package and exam", async () => {
   const student = await person(home.institutionId);
   const [legacy] = await db
