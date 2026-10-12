@@ -18,9 +18,11 @@ export function kycStatusOf(account: AccountState): KycStatus {
   return "pending";
 }
 
-/** A restriction that is not a `requirements.*` reason is Stripe's call, so the tutor has nothing to fill in. */
+/** A restriction whose reason is neither a requirement nor a review is Stripe's call, so the tutor has nothing to fill in. */
 export function payoutStageOf(account: AccountState): PayoutStage {
   const status = kycStatusOf(account);
   const reason = account?.disabledReason;
-  return status === "restricted" && reason && !reason.startsWith("requirements.") ? "needs_support" : status;
+  return status === "restricted" && reason && !reason.startsWith("requirements.") && !STRIPE_REVIEWING.has(reason)
+    ? "needs_support"
+    : status;
 }

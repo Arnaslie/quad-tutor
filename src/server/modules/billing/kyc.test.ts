@@ -48,6 +48,10 @@ test("a restriction Stripe imposed, not one the tutor can fill in, needs support
     "restricted",
   );
   assert.equal(payoutStageOf({ ...verified, pastDue: ["individual.verification.document"] }), "restricted");
+  assert.equal(
+    payoutStageOf({ ...verified, transfers: "inactive", payoutsEnabled: false, disabledReason: "under_review", pastDue: ["individual.verification.document"] }),
+    "restricted",
+  );
   assert.equal(payoutStageOf(verified), "verified");
   assert.equal(payoutStageOf(null), "not_started");
 });

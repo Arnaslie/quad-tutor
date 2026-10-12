@@ -30,7 +30,7 @@ export default async function TutorInboxPage() {
     defaultLocationFor(tutor),
     payoutsOf(tutor),
   ]);
-  const payoutsPrompt = payouts.status === "not_started" || payouts.status === "restricted";
+  const payoutsPrompt = payouts.status === "not_started";
 
   return (
     <div className="flex flex-col gap-6">

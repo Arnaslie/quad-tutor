@@ -8,7 +8,7 @@ import { PAYOUTS_HREF, PAYOUTS_SUPPORT, STAGE_ICON } from "../payouts/stage";
 
 type Banner = { heading: string; body: string; action: string | null };
 
-const owing = (owed: string | null) => (owed ? ` You're owed ${owed}.` : "");
+const owing = (owed: string | null) => (owed ? ` You're owed ${owed}, held for you.` : "");
 
 const BANNERS: Record<PayoutStage, (owed: string | null) => Banner | null> = {
   not_started: (owed) =>
@@ -25,12 +25,12 @@ const BANNERS: Record<PayoutStage, (owed: string | null) => Banner | null> = {
       : null,
   restricted: (owed) => ({
     heading: "Stripe needs more from you",
-    body: `Your pay is held until you update your details.${owing(owed)}`,
+    body: `Update your details so Stripe can send your pay.${owing(owed)}`,
     action: "Update your details",
   }),
   needs_support: (owed) => ({
     heading: "Payouts are blocked on this account",
-    body: `${PAYOUTS_SUPPORT}${owed ? ` You're owed ${owed}, held for you.` : ""}`,
+    body: `${PAYOUTS_SUPPORT}${owing(owed)}`,
     action: null,
   }),
   verified: () => null,

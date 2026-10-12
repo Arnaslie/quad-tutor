@@ -14,7 +14,7 @@ import {
 } from "@/server/modules/engagements/reads";
 import { LATE_CANCEL_HOURS } from "@/server/modules/engagements/attendance";
 import { deliveredIfUnanswered, lapseCopy } from "@/server/modules/engagements/answer-outcome";
-import { payoutsFor } from "@/server/modules/billing/connect";
+import { payoutsFor, payoutsOf } from "@/server/modules/billing/connect";
 import { formatMinor, TAKE_RATE_BP } from "@/server/modules/billing/pricing";
 import {
   earningsForTutor,
@@ -35,13 +35,14 @@ export const metadata: Metadata = { title: "Sessions" };
 
 export default async function TutorSessionsPage() {
   const tutor = await requireTutor();
-  const [board, earnings, feeCap, location, payouts] = await Promise.all([
+  const [board, earnings, feeCap, location, stored] = await Promise.all([
     sessionBoardForTutor(tutor),
     earningsForTutor(tutor),
     feeCapProgressForTutor(tutor),
     defaultLocationFor(tutor),
-    payoutsFor(tutor),
+    payoutsOf(tutor),
   ]);
+  const payouts = stored.status === "restricted" ? await payoutsFor(tutor) : stored;
 
   const total =
     board.awaitingAnswer.length + board.upcoming.length + board.past.length;

@@ -21,7 +21,7 @@ type Copy = { heading: string; body: string; action: { label: string; variant: B
 const COPY: Record<PayoutStage, Copy> = {
   not_started: {
     heading: "Payouts aren't set up",
-    body: "Stripe checks who you are and takes the bank account your pay goes to. Have your bank details and the last four of your SSN ready. It takes a few minutes.",
+    body: "Stripe checks who you are and takes the bank account your pay goes to. Have your bank details and your Social Security number ready. It takes a few minutes.",
     action: { label: "Set up payouts", variant: "primary" },
   },
   pending: {

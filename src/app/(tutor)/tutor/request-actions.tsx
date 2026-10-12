@@ -72,8 +72,8 @@ function Outcome({
 }) {
   if (state.status === "accepted") {
     return (
-      <div className="flex flex-col items-start gap-3" role="status">
-        <p className="flex items-start gap-2 text-sm text-foreground">
+      <div className="flex flex-col items-start gap-3">
+        <p className="flex items-start gap-2 text-sm text-foreground" role="status">
           <Icon name="check" className="mt-0.5 size-[18px] shrink-0 text-accent" />
           <span>
             {packageLabel ? `Accepted: ${packageLabel}.` : "Accepted."} {studentName} picks a time from your hours and pays — it shows up
