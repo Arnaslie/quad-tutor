@@ -683,7 +683,10 @@ and `db:check-money` accepts only `re_…` or `manual:…` on a refund row.
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 Transfers go per engagement once the tutor is verified and the engagement has no open
 discrepancy or dispute. Refunds return only undelivered sessions, so none needs a
-reversal. Bank payouts are daily. Reversals are an ops tool.
+reversal. Bank payouts are daily. Reversals are an ops tool. A reversal books a
+`transfer_reversal` row and leaves that money owed to the tutor until ops acts; the sweep
+never re-sends it. Ops either sends it again or appends a corrective `tutor_transfer` row
+marked forfeited or manual, and item 8's `/ops` page gets that write path.
 
 **KYC never blocks an accept.** An unverified tutor's pay accrues and
 waits, and the student's sessions proceed. Hiding unverified tutors from decks was

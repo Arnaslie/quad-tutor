@@ -319,6 +319,52 @@ test("transfer events in any order and any number stamp once and record each rev
   }), []);
 });
 
+test("a fully reversed transfer stays owed and is never re-sent by the sweep", async () => {
+  const w = await world();
+  const { engagementId } = await delivered(w);
+  await sweep(w);
+  const [row] = await rows(engagementId, "tutor_transfer");
+  await fakeStripe.reverseTransfer(row.stripeReference!);
+  await deliver(await fakeStripe.transferEvent(row.stripeReference!, "transfer.reversed"));
+  assert.deepEqual((await rows(engagementId, "transfer_reversal")).map((r) => r.amountMinor), [3_150]);
+  assert.deepEqual(await earningsForTutor(w.tutor), { earnedMinor: 3_150, owedMinor: 3_150, transferredMinor: 0, currency: "usd", sessionsDelivered: 1 });
+
+  await age(engagementId);
+  assert.deepEqual(await creates(async () => {
+    assert.deepEqual(await sweep(w), nothing);
+  }), []);
+  assert.deepEqual((await rows(engagementId, "tutor_transfer")).map((r) => r.amountMinor), [3_150]);
+});
+
+test("a second transfer naming an already stamped row is flagged and its reversals are not booked", async () => {
+  const w = await world();
+  const { engagementId, paymentIntentId } = await delivered(w);
+  await sweep(w);
+  const [row] = await rows(engagementId, "tutor_transfer");
+  const stray = await stripeGateway().createTransfer({
+    accountId: w.accountId,
+    chargeId: paymentIntentId.replace(/^pi_/, "ch_"),
+    amountMinor: 500,
+    currency: "usd",
+    engagementId,
+    institutionId: w.institutionId,
+    ledgerEntryId: row.id,
+    idempotencyKey: `stray:${row.id}`,
+  });
+  await fakeStripe.reverseTransfer(stray.id);
+
+  assert.deepEqual(await deliver(await fakeStripe.transferEvent(stray.id, "transfer.reversed")), {
+    status: 200,
+    outcome: "flagged",
+    institutionId: w.institutionId,
+  });
+  assert.deepEqual((await rows(engagementId, "tutor_transfer")).map((r) => r.stripeReference), [row.stripeReference]);
+  assert.deepEqual(await rows(engagementId, "transfer_reversal"), []);
+  assert.deepEqual(await discrepancies(engagementId), [
+    { kind: "ledger_vs_stripe_transfers", ledgerEntryId: row.id, ledgerAmountMinor: 3_150, stripeAmountMinor: 500 },
+  ]);
+});
+
 test("a transfer that disagrees with its ledger row is stamped and flagged, and a foreign one is ignored", async () => {
   const w = await world();
   const { engagementId } = await delivered(w);

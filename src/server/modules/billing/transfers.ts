@@ -356,7 +356,7 @@ export async function runTransfers(institutionId: string, deadline: number): Pro
 
 export const TRANSFER_EVENTS = new Set(["transfer.created", "transfer.reversed"]);
 
-export type TransferEventOutcome = "transfer_synced" | "foreign";
+export type TransferEventOutcome = "transfer_synced" | "flagged" | "foreign";
 
 const transferIds = z.object({ ledgerEntryId: z.uuid(), engagementId: z.uuid(), institutionId: z.uuid() });
 
@@ -382,8 +382,8 @@ export async function handleTransferEvent(
     );
   if (!row) return { outcome: "foreign", institutionId: null };
 
-  await stamp({ ...ids, id: row.id }, transfer.id);
-  if ((row.reference ?? transfer.id) !== transfer.id || row.amountMinor !== transfer.amountMinor || row.currency !== transfer.currency) {
+  const otherTransfer = row.reference !== null && row.reference !== transfer.id;
+  if (otherTransfer || row.amountMinor !== transfer.amountMinor || row.currency !== transfer.currency) {
     console.error(`[transfer] ${transfer.id} does not match ledger row ${row.id}; flagged for ops`);
     await recordDiscrepancy(ids, {
       kind: "ledger_vs_stripe_transfers",
@@ -393,7 +393,10 @@ export async function handleTransferEvent(
       stripeAmountMinor: transfer.amountMinor,
       currency: row.currency,
     });
+    // A second transfer on a row already stamped is not one the ledger knows; its reversals are ops' to book.
+    if (otherTransfer) return { outcome: "flagged", institutionId: ids.institutionId };
   }
+  await stamp({ ...ids, id: row.id }, transfer.id);
   if (transfer.reversals.length > 0) {
     await db
       .insert(ledgerEntry)
