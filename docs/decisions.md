@@ -128,6 +128,7 @@ drift:
   | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation could hold (inside 12h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
   | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment` and the Checkout Session id matches), then its `held` `session_booking` rows. An amount or currency mismatch cancels both and inserts a `money_discrepancy` row in the same transaction |
   | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the unstamped `refund` row, calls Stripe, then stamps `re_…` with `where stripe_reference is null`. The retry sweep runs each campus under a `sweep_lease` row (a timestamp claimed by one conditional upsert, not a lock) |
+  | transfer sweep | `engagement` (no key update) alone. Re-reads what is owed and the pause after the lock, inserts the unstamped `tutor_transfer` row and commits; Stripe is called after commit, and the stamp `where stripe_reference is null` is the only guard after that. Each campus runs under its own `sweep_lease` row |
 
   The rules behind it:
   - Student before request; tutor before request.
@@ -698,7 +699,13 @@ its fields as past due; one Stripe is still reviewing (`pending_verification`,
 reason or past-due field is `restricted`.
 
 **A chargeback is recorded, not judged.** It pauses that engagement's
-transfers and goes to ops; it writes no reliability fact on its own.
+transfers and goes to ops; it writes no reliability fact on its own. Each dispute event
+re-reads the dispute and upserts one `payment_dispute` row for the engagement its
+PaymentIntent bought. Stripe closing it (won, lost) sets `closed_at`; only ops setting
+`resolved_at` lifts the pause, since what a lost dispute means for the tutor's pay is ops' call. A
+transfer Stripe refuses for an account it still verifies is flagged as a discrepancy
+too, which pauses the engagement the same way; one refused because the account lost
+verification waits, and goes out once Stripe verifies it again.
 
 **CI and local dev run on a signed fake, not Stripe.** One gateway module is the only
 importer of `stripe`. Its fake signs real webhook events with the configured secret, so
