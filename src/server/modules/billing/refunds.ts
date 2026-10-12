@@ -12,6 +12,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const RETRY_GRACE_MS = 5 * 60 * 1000;
 const RETRY_LIMIT = 20;
 const RETRY_LEASE_MS = 2 * 60 * 1000;
+const UNKNOWN_INTENT_GIVE_UP_MS = 24 * HOUR_MS;
 export const SWEEP_BUDGET_MS = 30_000;
 export const MANUAL_REFUND_PREFIX = "manual:";
 
@@ -135,7 +136,19 @@ async function settleFound(row: Settling, found: { mine?: Refund; foreign?: Refu
   return "flagged";
 }
 
+/** A PaymentIntent Stripe still does not know a day on (seeded `pi_test_…` ids) is flagged, not retried forever. */
 async function issue(row: RefundRow, retry: boolean): Promise<RefundOutcome> {
+  try {
+    return await attempt(row, retry);
+  } catch (error) {
+    const stale = Date.now() - row.occurredAt.getTime() > UNKNOWN_INTENT_GIVE_UP_MS;
+    if (!(retry && stale && error instanceof GatewayError && error.missing)) throw error;
+    await recordRefundFailure(row, { refund: null, paymentIntentId: row.paymentIntentId, amountMinor: row.amountMinor, currency: row.currency });
+    return "refund_failed";
+  }
+}
+
+async function attempt(row: RefundRow, retry: boolean): Promise<RefundOutcome> {
   const settled = await settleFound(row, await onCharge(row));
   if (settled) return settled;
 

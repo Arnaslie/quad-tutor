@@ -652,6 +652,8 @@ bought before Stripe have no `pi_…` and are never sent. Stripe keeps the proce
 refund, so a payment refunded with nothing booked still writes its `processor_fee`.
 
 Only a 400 or 402 from Stripe is a refusal; 401, 403 and 404 are logged and retried. A
+PaymentIntent Stripe still does not know a day after the row was written (seeded
+`pi_test_…` ids) is flagged `refund_failed` instead, so it is not retried forever. A
 refusal first re-lists the refunds and settles with ours if Stripe already holds one. A
 refund refused with none, or that fails later (closed or lost card), writes a `refund_failed`
 discrepancy, and the row keeps any `re_…` it was tried against. Code never re-sends a

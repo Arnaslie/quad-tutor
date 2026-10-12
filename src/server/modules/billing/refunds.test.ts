@@ -104,10 +104,10 @@ async function discrepancies(engagementId: string) {
 }
 
 /** Puts the row past the sweep's grace, as if the after-commit call died a while ago. */
-async function age(engagementId: string) {
+async function age(engagementId: string, ms = 10 * 60 * 1000) {
   await db
     .update(ledgerEntry)
-    .set({ occurredAt: new Date(Date.now() - 10 * 60 * 1000) })
+    .set({ occurredAt: new Date(Date.now() - ms) })
     .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, "refund")));
 }
 
@@ -482,6 +482,26 @@ test("a second sweep on the same campus is skipped while the first holds the lea
 
   const [lease] = await db.select({ heldUntil: sweepLease.heldUntil }).from(sweepLease).where(eq(sweepLease.institutionId, home.institutionId));
   assert.ok(lease.heldUntil.getTime() < Date.now(), "released when the sweep ends");
+});
+
+test("a PaymentIntent Stripe does not know is retried for a day, then flagged and left alone", async () => {
+  const actor = await person();
+  const [seeded] = await db
+    .insert(engagement)
+    .values({ institutionId: home.institutionId, studentProfileId: actor.studentProfileId, tutorCourseId, courseOfferingId: home.offeringId, kind: "exam_anchored", sessionsPurchased: 4, pricePaidMinor: 14_000 })
+    .returning({ id: engagement.id });
+  await db.insert(ledgerEntry).values({ engagementId: seeded.id, institutionId: home.institutionId, type: "package_purchase", amountMinor: 14_000, stripeReference: `pi_test_${seeded.id}` });
+  await endPackage({ actor, engagementId: seeded.id });
+  const sweep = () => retryUnstampedRefunds(home.institutionId, Date.now() + 10_000);
+
+  await age(seeded.id);
+  assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 1 });
+  assert.deepEqual(await discrepancies(seeded.id), []);
+
+  await age(seeded.id, 25 * 3_600_000);
+  assert.deepEqual(await sweep(), { settled: 0, flagged: 1, failed: 0 });
+  assert.deepEqual(await discrepancies(seeded.id), [{ kind: "refund_failed", stripeReference: `pi_test_${seeded.id}`, ledgerAmountMinor: 14_000 }]);
+  assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
 });
 
 test("money invariants hold after every refund path", async () => {
