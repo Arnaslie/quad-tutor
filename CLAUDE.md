@@ -144,3 +144,47 @@ earned.
 - DRY - Don't repeat yourself
 - KISS - Keep it simple stupid
 - Chill with the comments, 95% of what i see isn't needed
+
+## Rules by area
+
+**Payments.** The ledger is the source of truth; the Stripe balance is float.
+- Every Stripe call goes through the gateway in `billing/stripe.ts`, which has a real and a fake driver. Tests and CI use the fake and make zero Stripe calls.
+- A redirect back from Checkout never proves payment. Only a verified webhook, or a sweep that asks Stripe, fulfils a purchase.
+- Webhooks verify their signature and are idempotent: events repeat and arrive out of order.
+- Every create call sends an idempotency key.
+- Never call Stripe while holding a row lock. Read and lock, commit, call Stripe, then record the result.
+- A refund never claws back pay a tutor has earned (`docs/decisions.md`).
+- Stripe metadata carries `institution_id`.
+- Agents never handle live keys. Test keys live only in `.env.local` and Vercel Preview, and the user sets them.
+
+**Background work.**
+- Deadlines and anything time-based run in the sweep behind `GET /api/cron`, never in a new scheduler.
+- Email goes through `src/server/modules/notifications/`. A sent-at timestamp or a unique constraint makes sure a re-run sweep never sends twice.
+- Messages stay within a campus and between parties who already share a request or package. No cold messages.
+- Message content never feeds reliability, matching or any score.
+- Start with Postgres and the sweep. Add a real-time transport only with a stated reason the simpler design fails. No second service.
+
+**Database and migrations.** `migrate.yml` migrates prod before Vercel promotes the deploy, so the old code runs against the new schema for a while.
+- Keep migrations additive. Renames, drops and `NOT NULL` without a default go through add, copy, then drop later.
+- Generate migrations with `npm run db:generate`; never hand-edit a snapshot or the journal. The exception is renaming an enum value: use `drizzle-kit generate --custom` with a hand-written `RENAME VALUE`, because a plain generate drops and recreates the type.
+- A value added with `ALTER TYPE … ADD VALUE` cannot be used by another migration in the same push. Merge enum-adding changes on their own.
+- A new unique index on a table that already has data needs a duplicate-count query run against prod before merge. One duplicate fails the migrate job and holds the deploy.
+- When two open branches carry the same migration number, the second to merge regenerates its migration on top of main.
+- `db:seed` stays idempotent. Fixture people are plus-aliases of `SEED_INBOX`, never addresses on a real campus domain.
+
+**UI.**
+- Author screens at 390px wide first, then scale up.
+- Read the relevant guide in `node_modules/next/dist/docs/` before writing framework code.
+- Match the copy voice: plain, direct, second person.
+
+## Working on this repo
+
+Work runs under pstack's `/poteto-mode`. Use one branch and one PR per item, and the user merges. Items with open product or money questions get a written proposal the user approves before anyone builds. Settled decisions are recorded in `docs/decisions.md`.
+
+Before calling a branch ready to merge:
+- Run typecheck, lint and `npm test`, plus `db:check-money` for anything that touches money.
+- Run the build the way CI does. Extract the commit into a scratch directory (`git archive HEAD | tar -x -C <dir>`), copy `node_modules` (a symlink breaks Turbopack), then run `env -u DATABASE_URL -u STRIPE_SECRET_KEY -u STRIPE_WEBHOOK_SECRET npm run build` there. A build in a checkout reads `.env.local` and hides module-level database access, which then fails CI with `DATABASE_URL is not set`. Build Drizzle query builders inside functions; `alias()`, conditions and `sql` fragments are fine at module level.
+- An independent reviewer checks the final commit. A commit added after review needs another look.
+- State the result of the required GitHub check, or say it could not be seen.
+
+Parallel work gets its own worktree, local database (`tutor_finder_<item>`), dev-server port and fake-Stripe state. Port 3000 belongs to the user.
