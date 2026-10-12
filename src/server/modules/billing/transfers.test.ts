@@ -319,6 +319,42 @@ test("transfer events in any order and any number stamp once and record each rev
   }), []);
 });
 
+test("a tutor restricted during one create gets no more rows or creates in the same run", async () => {
+  const w = await world();
+  const first = await delivered(w);
+  const second = await delivered(w);
+  const real = stripeGateway().createTransfer;
+  const keys: string[] = [];
+  await patched("createTransfer", async (params) => {
+    keys.push(params.idempotencyKey);
+    await fakeStripe.setAccount(w.accountId, "restricted");
+    return real(params);
+  }, async () => {
+    assert.deepEqual(await sweep(w), { ...nothing, waiting: 2 });
+  });
+  assert.equal(keys.length, 1);
+  const sent = [...(await rows(first.engagementId, "tutor_transfer")), ...(await rows(second.engagementId, "tutor_transfer"))];
+  assert.deepEqual(sent.map((r) => [r.amountMinor, r.stripeReference]), [[3_150, null]]);
+});
+
+test("a key Stripe says was used with other parameters is flagged rather than retried every run", async () => {
+  const w = await world();
+  const { engagementId } = await delivered(w);
+  await patched("createTransfer", async () => {
+    throw new GatewayError("Keys for idempotent requests can only be used with the same parameters.", { status: 400, idempotency: true });
+  }, async () => {
+    assert.deepEqual(await sweep(w), { ...nothing, flagged: 1, blocked: 1 });
+  });
+  const [row] = await rows(engagementId, "tutor_transfer");
+  assert.deepEqual(await discrepancies(engagementId), [
+    { kind: "ledger_vs_stripe_transfers", ledgerEntryId: row.id, ledgerAmountMinor: 3_150, stripeAmountMinor: null },
+  ]);
+  await age(engagementId);
+  assert.deepEqual(await creates(async () => {
+    assert.deepEqual(await sweep(w), { ...nothing, blocked: 1 });
+  }), []);
+});
+
 test("a fully reversed transfer stays owed and is never re-sent by the sweep", async () => {
   const w = await world();
   const { engagementId } = await delivered(w);
@@ -532,5 +568,8 @@ test("an engagement bought before Stripe is never sent, and the sweep makes no S
 });
 
 test("money invariants hold on every campus after every transfer path", async () => {
+  const w = await world();
+  await delivered(w);
+  assert.deepEqual(await sweep(w), { ...nothing, sent: 1 });
   for (const institutionId of campuses) await assertMoneyInvariants(institutionId);
 });

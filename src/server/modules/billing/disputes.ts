@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { ledgerEntry, paymentDispute } from "@/server/db/schema";
@@ -57,7 +57,10 @@ export async function handleDisputeEvent(
         amountMinor: dispute.amountMinor,
         closedAt: sql`coalesce(${paymentDispute.closedAt}, excluded.closed_at)`,
       },
-      setWhere: eq(paymentDispute.institutionId, bought.institutionId),
+      setWhere: and(
+        eq(paymentDispute.institutionId, bought.institutionId),
+        or(isNull(paymentDispute.closedAt), sql`excluded.closed_at is not null`),
+      ),
     })
     .returning({ created: sql<boolean>`xmax = 0` });
   if (row?.created) {

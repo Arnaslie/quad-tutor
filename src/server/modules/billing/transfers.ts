@@ -201,15 +201,25 @@ async function stamp(row: Ids & { id: string }, reference: string): Promise<void
 const ours = async (row: Ids & { id: string }) =>
   (await stripeGateway().listTransfers(row.engagementId)).find((t) => t.ledgerEntryId === row.id);
 
-type Kyc = (payee: Payee) => Promise<KycStatus | null>;
+type Kyc = {
+  check(payee: Payee): Promise<KycStatus | null>;
+  refresh(accountId: string, institutionId: string): Promise<KycStatus | null>;
+};
 
+/** Asks Stripe once per account per run; a refusal asks again and the rest of the run sees that answer. */
 function kycThisRun(): Kyc {
   const seen = new Map<string, Promise<KycStatus | null>>();
-  return (payee) => {
-    if (!payee.accountId || payee.kycStatus !== "verified") return Promise.resolve(payee.kycStatus);
-    const status = seen.get(payee.accountId) ?? refreshKyc(payee.accountId, payee.institutionId);
-    seen.set(payee.accountId, status);
+  const refresh = (accountId: string, institutionId: string) => {
+    const status = refreshKyc(accountId, institutionId);
+    seen.set(accountId, status);
     return status;
+  };
+  return {
+    check: (payee) => {
+      if (!payee.accountId || payee.kycStatus !== "verified") return Promise.resolve(payee.kycStatus);
+      return seen.get(payee.accountId) ?? refresh(payee.accountId, payee.institutionId);
+    },
+    refresh,
   };
 }
 
@@ -219,7 +229,7 @@ async function chargeOf(payee: Payee): Promise<string | null> {
   return chargeId;
 }
 
-async function send(row: Sending, retry: boolean): Promise<Outcome> {
+async function send(row: Sending, retry: boolean, kyc: Kyc): Promise<Outcome> {
   const gateway = stripeGateway();
   let transfer: Transfer;
   try {
@@ -244,9 +254,9 @@ async function send(row: Sending, retry: boolean): Promise<Outcome> {
   } catch (error) {
     if (!(error instanceof GatewayError)) throw error;
     if (error.inFlight) return "in_flight";
-    if (!error.refused) throw error;
-    if ((await refreshKyc(row.accountId, row.institutionId)) !== "verified") return "waiting";
-    console.error(`[transfer] ${row.id} refused for a verified account ${errorFacts(error)}; flagged for ops`);
+    if (!error.idempotency && !error.refused) throw error;
+    if (!error.idempotency && (await kyc.refresh(row.accountId, row.institutionId)) !== "verified") return "waiting";
+    console.error(`[transfer] ${row.id} refused ${errorFacts(error)}; flagged for ops`);
     await recordDiscrepancy(row, {
       kind: "ledger_vs_stripe_transfers",
       ledgerEntryId: row.id,
@@ -267,14 +277,14 @@ async function retry(row: Awaited<ReturnType<typeof unstampedRows>>[number], kyc
     return "transferred";
   }
   if (row.paused) return null;
-  if (!row.accountId || (await kyc(row)) !== "verified") return "waiting";
+  if (!row.accountId || (await kyc.check(row)) !== "verified") return "waiting";
   const chargeId = await chargeOf(row);
   if (!chargeId) return "failed";
-  return send({ ...row, accountId: row.accountId, chargeId }, true);
+  return send({ ...row, accountId: row.accountId, chargeId }, true, kyc);
 }
 
 async function decide(payee: Payee, kyc: Kyc): Promise<Outcome | null> {
-  if (!payee.accountId || (await kyc(payee)) !== "verified") return "waiting";
+  if (!payee.accountId || (await kyc.check(payee)) !== "verified") return "waiting";
   const chargeId = await chargeOf(payee);
   if (!chargeId) return "failed";
 
@@ -309,7 +319,7 @@ async function decide(payee: Payee, kyc: Kyc): Promise<Outcome | null> {
     return inserted;
   });
   if (!row) return null;
-  return send({ ...payee, ...row, accountId: payee.accountId, chargeId }, false);
+  return send({ ...payee, ...row, accountId: payee.accountId, chargeId }, false, kyc);
 }
 
 async function attempt(subject: string, work: () => Promise<Outcome | null>): Promise<Outcome | null> {
