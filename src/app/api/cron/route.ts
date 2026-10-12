@@ -54,6 +54,7 @@ export async function GET(request: Request) {
     let checkoutsFailed = 0;
     let cardRefundsSettled = 0;
     let cardRefundsFlagged = 0;
+    let cardRefundsBlocked = 0;
     let cardRefundsFailed = 0;
 
     for (const campus of campuses) {
@@ -81,10 +82,11 @@ export async function GET(request: Request) {
       checkoutsFailed += checkouts.failed;
       const cardRefunds = await retryUnstampedRefunds(campus.id, startedAt + SWEEP_BUDGET_MS).catch((error) => {
         console.error(`[cron] card refund retries for ${campus.slug} failed`, errorFacts(error));
-        return { settled: 0, flagged: 0, failed: 1 };
+        return { settled: 0, flagged: 0, blocked: 0, failed: 1 };
       });
       cardRefundsSettled += cardRefunds.settled;
       cardRefundsFlagged += cardRefunds.flagged;
+      cardRefundsBlocked += cardRefunds.blocked;
       cardRefundsFailed += cardRefunds.failed;
       notified += await runNotifications(campus.id);
       refreshedScores += await refreshScores(campus.id).catch((error) => {
@@ -108,6 +110,7 @@ export async function GET(request: Request) {
       checkoutsFailed,
       cardRefundsSettled,
       cardRefundsFlagged,
+      cardRefundsBlocked,
       cardRefundsFailed,
       campuses: campuses.length,
       tookMs: Date.now() - startedAt,

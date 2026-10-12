@@ -17,6 +17,7 @@ type ErrorFacts = {
   type?: string;
   requestId?: string;
   idempotency?: boolean;
+  replayed?: boolean;
 };
 
 export class GatewayError extends Error {
@@ -26,6 +27,8 @@ export class GatewayError extends Error {
   readonly type?: string;
   readonly requestId?: string;
   readonly idempotency: boolean;
+  /** Stripe answered from its idempotency cache rather than running the request. */
+  readonly replayed: boolean;
 
   constructor(message: string, facts: ErrorFacts = {}, options?: ErrorOptions) {
     super(message, options);
@@ -35,6 +38,7 @@ export class GatewayError extends Error {
     this.type = facts.type;
     this.requestId = facts.requestId;
     this.idempotency = facts.idempotency ?? false;
+    this.replayed = facts.replayed ?? false;
   }
 
   get missing(): boolean {
@@ -189,6 +193,7 @@ async function call<T>(work: () => Promise<T>): Promise<T> {
         type: error.rawType ?? error.type,
         requestId: error.requestId,
         idempotency: error instanceof Stripe.errors.StripeIdempotencyError && error.statusCode === 400,
+        replayed: error.headers?.["idempotent-replayed"] === "true",
       },
       { cause: error },
     );
@@ -470,7 +475,7 @@ function fakeCreateRefund(key: string, params: NewRefund): Promise<Refund> {
           { status: 400, idempotency: true },
         );
       }
-      if (replay.error) throw new GatewayError(replay.error.message, replay.error);
+      if (replay.error) throw new GatewayError(replay.error.message, { ...replay.error, replayed: true });
       return replay.refund!;
     }
 

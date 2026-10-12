@@ -624,12 +624,11 @@ test("a refund that comes back failed is not recorded, waits for ops, and is nev
       assert.equal((await syncCheckout(sessionId)).outcome, "refund_failed");
     });
   });
-  const [failed] = await fakeStripe.refunds(sessionId);
   assert.deepEqual(
     (await discrepancies(engagementId)).sort((a, b) => a.kind.localeCompare(b.kind)),
     [
       { kind: "checkout_amount", stripeReference: paymentIntentId, refundReference: null },
-      { kind: "refund_failed", stripeReference: failed.id, refundReference: null },
+      { kind: "refund_failed", stripeReference: paymentIntentId, refundReference: null },
     ],
   );
 

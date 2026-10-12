@@ -31,6 +31,7 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
 
 import { checkoutRedirect, syncCheckout } from "./checkout-session";
+import { recordRefundFailure } from "./discrepancy";
 import { assertMoneyInvariants } from "./invariants";
 import { recordManualRefund, refundThroughStripe, retryUnstampedRefunds } from "./refunds";
 import { GatewayError, fakeStripe, stripeGateway, type Gateway } from "./stripe";
@@ -130,6 +131,12 @@ const lostResponse: Gateway["refund"] = async (params) => {
   throw new GatewayError("socket hang up");
 };
 
+/** The retry sweep's own work; `blocked` counts the whole campus and is checked on its own. */
+async function sweep() {
+  const { settled, flagged, failed } = await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000);
+  return { settled, flagged, failed };
+}
+
 /** Counts every refund create while the work runs. */
 async function creates(work: () => Promise<void>): Promise<number> {
   let calls = 0;
@@ -222,7 +229,7 @@ test("ending early writes the refund row unstamped, then refunds it through Stri
 
   assert.equal(await refundThroughStripe(ids(engagementId)), "skipped");
   await age(engagementId);
-  assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, failed: 0 });
+  assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
   assert.equal((await fakeStripe.refunds(checkoutSessionId)).length, 1);
 });
 
@@ -255,10 +262,10 @@ test("a call whose response was lost is finished by the sweep from the refund's 
   });
   assert.equal((await refundRow(engagementId)).stripeReference, null);
 
-  assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, failed: 0 }, "inside the grace the sweep leaves it alone");
+  assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 }, "inside the grace the sweep leaves it alone");
   await age(engagementId);
   await patched("refund", async () => { throw new Error("must not create: the refund already exists"); }, async () => {
-    assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 1, flagged: 0, failed: 0 });
+    assert.deepEqual(await sweep(), { settled: 1, flagged: 0, failed: 0 });
   });
   const refunds = await fakeStripe.refunds(checkoutSessionId);
   assert.equal(refunds.length, 1);
@@ -273,7 +280,7 @@ test("an errored create is retried on a fresh key, since the first key replays t
   await assert.rejects(refundThroughStripe(ids(engagementId)), /unknown error/, "the same key replays Stripe's cached 500");
 
   await age(engagementId);
-  assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 1, flagged: 0, failed: 0 });
+  assert.deepEqual(await sweep(), { settled: 1, flagged: 0, failed: 0 });
   const [refund] = await fakeStripe.refunds(checkoutSessionId);
   assert.equal(refund.amountMinor, 14_000);
   assert.equal((await refundRow(engagementId)).stripeReference, refund.id);
@@ -310,11 +317,11 @@ test("a refund that fails after creation is flagged for ops, keeps its stamp, an
   assert.deepEqual(await deliver(created.id, "refund.failed"), failed);
   assert.deepEqual(await deliver(created.id, "charge.refund.updated"), failed);
   assert.deepEqual(await handleStripeWebhook(late.payload, late.signature), failed, "a stale charge.refunded re-reads the refund and sees it failed");
-  assert.deepEqual(await discrepancies(engagementId), [{ kind: "refund_failed", stripeReference: created.id, ledgerAmountMinor: 14_000 }]);
+  assert.deepEqual(await discrepancies(engagementId), [{ kind: "refund_failed", stripeReference: created.paymentIntentId, ledgerAmountMinor: 14_000 }]);
   assert.equal((await refundRow(engagementId)).stripeReference, created.id);
 
   await age(engagementId);
-  await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000);
+  await sweep();
   assert.equal(await refundThroughStripe(ids(engagementId)), "skipped");
   assert.equal((await fakeStripe.refunds(checkoutSessionId)).length, 1);
 });
@@ -343,7 +350,7 @@ test("a create Stripe refuses outright is flagged, and resolving the flag never 
   await age(engagementId);
   const calls = await creates(async () => {
     assert.equal(await refundThroughStripe(ids(engagementId)), "skipped");
-    assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, failed: 0 });
+    assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
   });
   assert.equal(calls, 0);
   assert.deepEqual(await fakeStripe.refunds(checkoutSessionId), []);
@@ -367,7 +374,7 @@ test("ops settling by hand stamps the row manual:<discrepancy>, resolves the fla
 
   await age(engagementId);
   assert.equal(await creates(async () => {
-    await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000);
+    await sweep();
   }), 0);
   await assertMoneyInvariants(home.institutionId);
 });
@@ -380,12 +387,12 @@ test("a sweep overlapping the after-commit call gets the in-flight 409, leaves t
   const first = refundThroughStripe(ids(engagementId));
   try {
     await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, failed: 0 });
+    assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
   } finally {
     release();
   }
   assert.equal(await first, "refunded");
-  assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, failed: 0 });
+  assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
   assert.equal((await fakeStripe.refunds(checkoutSessionId)).length, 1);
   assert.deepEqual(await discrepancies(engagementId), []);
 });
@@ -402,7 +409,7 @@ test("a refund on the charge that is not ours, such as one made in the Dashboard
   const calls = await creates(async () => {
     assert.equal(await refundThroughStripe(ids(engagementId)), "flagged");
     await age(engagementId);
-    assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, failed: 0 });
+    assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
   });
   assert.equal(calls, 0);
   assert.deepEqual(await discrepancies(engagementId), [{ kind: "ledger_vs_stripe_charge", stripeReference: dashboard.id, ledgerAmountMinor: 14_000 }]);
@@ -457,7 +464,7 @@ test("an engagement bought before Stripe is closed on the ledger and never sent 
   await patched("refund", untouchable, () =>
     patched("listRefunds", untouchable, async () => {
       assert.equal(await refundThroughStripe(ids(legacy.id)), "skipped");
-      assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, failed: 0 });
+      assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
     }),
   );
   assert.equal((await refundRow(legacy.id)).stripeReference, null);
@@ -468,11 +475,11 @@ test("a second sweep on the same campus is skipped while the first holds the lea
   await endPackage({ actor, engagementId });
   await age(engagementId);
   const release = fakeStripe.holdRefunds();
-  const first = retryUnstampedRefunds(home.institutionId, Date.now() + 10_000);
+  const first = sweep();
   try {
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(await creates(async () => {
-      assert.deepEqual(await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, failed: 0 });
+      assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
     }), 0);
   } finally {
     release();
@@ -492,7 +499,6 @@ test("a PaymentIntent Stripe does not know is retried for a day, then flagged an
     .returning({ id: engagement.id });
   await db.insert(ledgerEntry).values({ engagementId: seeded.id, institutionId: home.institutionId, type: "package_purchase", amountMinor: 14_000, stripeReference: `pi_test_${seeded.id}` });
   await endPackage({ actor, engagementId: seeded.id });
-  const sweep = () => retryUnstampedRefunds(home.institutionId, Date.now() + 10_000);
 
   await age(seeded.id);
   assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 1 });
@@ -502,6 +508,57 @@ test("a PaymentIntent Stripe does not know is retried for a day, then flagged an
   assert.deepEqual(await sweep(), { settled: 0, flagged: 1, failed: 0 });
   assert.deepEqual(await discrepancies(seeded.id), [{ kind: "refund_failed", stripeReference: `pi_test_${seeded.id}`, ledgerAmountMinor: 14_000 }]);
   assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
+});
+
+test("a failed stray payment on the engagement neither blocks its package refund nor takes its manual settlement", async () => {
+  const { actor, engagementId, checkoutSessionId } = await bought();
+  const stray = `pi_stray_${run}_${engagementId.slice(0, 8)}`;
+  await recordRefundFailure(ids(engagementId), { refund: null, paymentIntentId: stray, amountMinor: null, currency: "usd" });
+  const [flag] = await db.select({ id: moneyDiscrepancy.id }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.engagementId, engagementId));
+
+  await endPackage({ actor, engagementId });
+  await patched("refund", lostResponse, async () => {
+    await assert.rejects(refundThroughStripe(ids(engagementId)), /socket hang up/);
+  });
+  assert.equal(await recordManualRefund({ discrepancyId: flag.id, institutionId: home.institutionId, note: "stray paid back by Zelle" }), true);
+  assert.equal((await refundRow(engagementId)).stripeReference, null, "settling the stray payment does not stamp the package's refund");
+
+  await age(engagementId);
+  assert.deepEqual(await sweep(), { settled: 1, flagged: 0, failed: 0 });
+  const [refund] = await fakeStripe.refunds(checkoutSessionId);
+  assert.equal((await refundRow(engagementId)).stripeReference, refund.id);
+});
+
+test("a blocked refund row is counted by the sweep, not passed over in silence", async () => {
+  const before = (await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000)).blocked;
+  const { actor, engagementId } = await bought();
+  await endPackage({ actor, engagementId });
+  await patched("refund", refused, async () => {
+    await refundThroughStripe(ids(engagementId));
+  });
+  assert.equal((await retryUnstampedRefunds(home.institutionId, Date.now() + 10_000)).blocked, before + 1);
+});
+
+test("a fresh 5xx in the sweep is left for the next pass, which moves keys only once Stripe replays it", async () => {
+  const { actor, engagementId, checkoutSessionId } = await bought();
+  await endPackage({ actor, engagementId });
+  await age(engagementId);
+  fakeStripe.failNextRefund();
+  assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 1 });
+  assert.deepEqual(await fakeStripe.refunds(checkoutSessionId), []);
+  assert.deepEqual(await sweep(), { settled: 1, flagged: 0, failed: 0 });
+  assert.equal((await fakeStripe.refunds(checkoutSessionId)).length, 1);
+});
+
+test("a paid PaymentIntent is never flagged on a 404, however old the row", async () => {
+  const { actor, engagementId } = await bought();
+  await endPackage({ actor, engagementId });
+  await age(engagementId, 25 * 3_600_000);
+  await patched("listRefunds", async () => { throw new GatewayError("No such payment_intent", { status: 404, code: "resource_missing" }); }, async () => {
+    assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 1 });
+  });
+  assert.deepEqual(await discrepancies(engagementId), []);
+  assert.deepEqual(await sweep(), { settled: 1, flagged: 0, failed: 0 });
 });
 
 test("money invariants hold after every refund path", async () => {

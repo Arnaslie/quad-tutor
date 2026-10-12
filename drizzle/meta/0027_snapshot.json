@@ -1,5 +1,5 @@
 {
-  "id": "e3a6ac6e-ea89-4eca-ae7d-33f381315d13",
+  "id": "42e5fbb8-bb43-4273-9900-640b3fe2fe37",
   "prevId": "72cabc25-bed6-45a6-8576-63f2e40c4611",
   "version": "7",
   "dialect": "postgresql",
@@ -2312,6 +2312,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "ledger_entry_id": {
+          "name": "ledger_entry_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "kind": {
           "name": "kind",
           "type": "money_discrepancy_kind",
@@ -2407,6 +2413,21 @@
           "method": "btree",
           "with": {}
         },
+        "money_discrepancy_ledger_entry_idx": {
+          "name": "money_discrepancy_ledger_entry_idx",
+          "columns": [
+            {
+              "expression": "ledger_entry_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "money_discrepancy_kind_reference_idx": {
           "name": "money_discrepancy_kind_reference_idx",
           "columns": [
@@ -2450,6 +2471,19 @@
           "tableTo": "engagement",
           "columnsFrom": [
             "engagement_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "money_discrepancy_ledger_entry_id_ledger_entry_id_fk": {
+          "name": "money_discrepancy_ledger_entry_id_ledger_entry_id_fk",
+          "tableFrom": "money_discrepancy",
+          "tableTo": "ledger_entry",
+          "columnsFrom": [
+            "ledger_entry_id"
           ],
           "columnsTo": [
             "id"

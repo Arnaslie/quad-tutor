@@ -11,7 +11,7 @@ import {
 } from "@/server/db/schema";
 
 import { TAKE_RATE_BP, TERM_FEE_CAP_MINOR } from "./pricing";
-import { MANUAL_REFUND_PREFIX } from "./refunds";
+import { MANUAL_REFUND_PREFIX } from "./discrepancy";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type LedgerType = (typeof ledgerEntryType.enumValues)[number];

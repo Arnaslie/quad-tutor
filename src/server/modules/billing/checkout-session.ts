@@ -13,7 +13,7 @@ import {
 } from "@/server/modules/engagements/purchase";
 import type { Actor } from "@/server/modules/identity/actor";
 
-import { recordDiscrepancy, recordRefundFailure, refundBlocked, refundBlocker, type Ids } from "./discrepancy";
+import { paymentRefundBlocker, recordDiscrepancy, recordRefundFailure, type Ids } from "./discrepancy";
 import { SWEEP_BUDGET_MS, createRefund } from "./refunds";
 import {
   GatewayError,
@@ -185,9 +185,9 @@ async function recordRefundedFee(ids: Ids, paymentIntentId: string, currency: st
 
 type Refunding = { currency: string; patience: Patience; discrepancyId?: string; since?: Date };
 
-/** Never re-issues over a refund Stripe could not deliver, even once ops resolves it. */
+/** Never re-issues over a refund Stripe could not deliver for this PaymentIntent, even once ops resolves it. */
 async function refundPayment(ids: Ids, paymentIntentId: string, refunding: Refunding): Promise<boolean> {
-  if (await refundBlocked(ids)) return false;
+  if ((await paymentRefundBlocker(paymentIntentId, ids.institutionId).limit(1)).length > 0) return false;
   const onCharge = async () => {
     const listed = await stripeGateway().listRefunds(paymentIntentId);
     return listed.find(isLiveRefund) ?? listed.at(0);
@@ -460,7 +460,7 @@ async function retryDiscrepancyRefunds(
         isNull(moneyDiscrepancy.resolvedAt),
         like(moneyDiscrepancy.stripeReference, "pi\\_%"),
         isNotNull(moneyDiscrepancy.engagementId),
-        notExists(refundBlocker(moneyDiscrepancy.engagementId, moneyDiscrepancy.institutionId)),
+        notExists(paymentRefundBlocker(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)),
         notExists(
           db
             .select({ id: ledgerEntry.id })

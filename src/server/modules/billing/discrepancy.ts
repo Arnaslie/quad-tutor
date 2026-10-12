@@ -1,4 +1,4 @@
-import { and, eq, like, or, type AnyColumn } from "drizzle-orm";
+import { and, eq, type AnyColumn } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -32,21 +32,29 @@ export async function recordDiscrepancy(
   return existing?.id ?? null;
 }
 
+export const MANUAL_REFUND_PREFIX = "manual:";
+
 /**
  * A refund Stripe could not deliver is never re-issued by code: the card that bounced it would bounce
- * the next one too. Ops pays the student another way and appends the corrective row.
+ * the next one too. Keyed on the PaymentIntent and, for a ledger refund, on its row.
  */
 export async function recordRefundFailure(
   ids: Ids,
-  failed: { refund: Refund | null; paymentIntentId: string; amountMinor: number | null; currency: string },
+  failed: {
+    paymentIntentId: string;
+    refund: Refund | null;
+    amountMinor: number | null;
+    currency: string;
+    ledgerEntryId?: string;
+  },
 ): Promise<void> {
-  const reference = failed.refund?.id ?? failed.paymentIntentId;
   console.error(
-    `[refund] ${reference} for ${ids.engagementId} failed (${failed.refund?.failureReason ?? "refused at create"}); flagged for ops`,
+    `[refund] ${failed.refund?.id ?? "create"} on ${failed.paymentIntentId} for ${ids.engagementId} failed (${failed.refund?.failureReason ?? "refused at create"}); flagged for ops`,
   );
   await recordDiscrepancy(ids, {
     kind: "refund_failed",
-    stripeReference: reference,
+    stripeReference: failed.paymentIntentId,
+    ledgerEntryId: failed.ledgerEntryId,
     ledgerAmountMinor: failed.amountMinor,
     stripeAmountMinor: 0,
     currency: failed.currency,
@@ -55,22 +63,22 @@ export async function recordRefundFailure(
 
 const blocker = alias(moneyDiscrepancy, "refund_blocker");
 
-/**
- * A failed refund, or one Stripe holds that is not ours, stops every automatic refund for the engagement
- * for good. Resolving it never re-arms one: ops settles the student by hand (`recordManualRefund`).
- */
-export const refundBlocker = (engagementId: AnyColumn | string, institutionId: AnyColumn | string) =>
+/** Any discrepancy on a refund row stops it for good; resolving one never re-arms it (`recordManualRefund`). */
+export const ledgerRefundBlocker = (ledgerEntryId: AnyColumn, institutionId: AnyColumn | string) =>
+  db
+    .select({ id: blocker.id })
+    .from(blocker)
+    .where(and(eq(blocker.ledgerEntryId, ledgerEntryId), eq(blocker.institutionId, institutionId)));
+
+/** A failed refund of a payment that was never booked stops that PaymentIntent's refunds for good. */
+export const paymentRefundBlocker = (paymentIntentId: AnyColumn | string, institutionId: AnyColumn | string) =>
   db
     .select({ id: blocker.id })
     .from(blocker)
     .where(
       and(
-        eq(blocker.engagementId, engagementId),
+        eq(blocker.kind, "refund_failed"),
+        eq(blocker.stripeReference, paymentIntentId),
         eq(blocker.institutionId, institutionId),
-        or(eq(blocker.kind, "refund_failed"), like(blocker.stripeReference, "re\\_%")),
       ),
     );
-
-export async function refundBlocked(ids: Ids): Promise<boolean> {
-  return (await refundBlocker(ids.engagementId, ids.institutionId).limit(1)).length > 0;
-}

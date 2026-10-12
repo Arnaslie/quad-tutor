@@ -561,6 +561,7 @@ export const moneyDiscrepancy = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     institutionId: uuid("institution_id").notNull().references(() => institution.id),
     engagementId: uuid("engagement_id").references(() => engagement.id),
+    ledgerEntryId: uuid("ledger_entry_id").references(() => ledgerEntry.id),
     kind: moneyDiscrepancyKind("kind").notNull(),
     stripeReference: text("stripe_reference"),
     ledgerAmountMinor: integer("ledger_amount_minor"),
@@ -574,6 +575,7 @@ export const moneyDiscrepancy = pgTable(
   (t) => [
     index("money_discrepancy_institution_idx").on(t.institutionId, t.resolvedAt),
     index("money_discrepancy_engagement_idx").on(t.engagementId),
+    index("money_discrepancy_ledger_entry_idx").on(t.ledgerEntryId),
     uniqueIndex("money_discrepancy_kind_reference_idx")
       .on(t.kind, t.stripeReference)
       .where(sql`${t.stripeReference} is not null`),

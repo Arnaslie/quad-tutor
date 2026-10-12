@@ -636,36 +636,48 @@ its held sessions; the transfer sweep takes the engagement (no key update) alone
 `closeWithRefund` writes the `refund` row under its lock with no reference. After commit,
 every attempt first lists the PaymentIntent's refunds: one carrying this row's id in
 metadata is stamped; a live one that is not ours (a Dashboard refund) writes a discrepancy
-and nothing is created. Otherwise it creates on `refund:<ledger_entry_id>` and stamps the
-`re_…`. A row the after-commit call left unstamped is retried by the sweep after a 5-minute
-grace, on the same base key, so an overlapping call gets Stripe's 409 (left for the next
-pass) or its answer. Only when the base key replays a 5xx does the retry move to
+on the row and nothing is created. Otherwise it creates on `refund:<ledger_entry_id>` and
+stamps the `re_…`. A row the after-commit call left unstamped is retried by the sweep after
+a 5-minute grace, on the same base key, so an overlapping call gets Stripe's 409 (left for
+the next pass) or its answer. Only when Stripe answers the base key from its idempotency
+cache (`Idempotent-Replayed: true`) with a 5xx does the retry move to
 `refund:<id>:<hours since the row>`, since Stripe keeps a failed response for 24h.
-Two retry sweeps never run one campus at once: each claims a `sweep_lease` row (campus,
-name, `held_until`) with one conditional upsert and releases it at the end, and a sweep
-that cannot claim skips the campus. A Postgres advisory lock was rejected because holding
-it means an open transaction across the Stripe calls; the lease is a timestamp, holds no
-lock, and lapses after two minutes if its holder dies. The Stripe client times out a call
-at 15s, so one call and its two retries fit inside the cron's 60s and the 5-minute grace.
 `charge.refunded` and the refund events re-read the refund and stamp the row. Engagements
 bought before Stripe have no `pi_…` and are never sent. Stripe keeps the processing fee on a
 refund, so a payment refunded with nothing booked still writes its `processor_fee`.
 
-Only a 400 or 402 from Stripe is a refusal; 401, 403 and 404 are logged and retried. A
-PaymentIntent Stripe still does not know a day after the row was written (seeded
-`pi_test_…` ids) is flagged `refund_failed` instead, so it is not retried forever. A
-refusal first re-lists the refunds and settles with ours if Stripe already holds one. A
-refund refused with none, or that fails later (closed or lost card), writes a `refund_failed`
-discrepancy, and the row keeps any `re_…` it was tried against. Code never re-sends a
-refund to that card: a `refund_failed` discrepancy, or any discrepancy naming a `re_…`,
-stops automatic refunds for the engagement whether or not it is resolved. The halt is per
-engagement, not per payment: a failed refund of a stray payment on a superseded Checkout
-Session also pauses that engagement's later term-end or end-early card refund until ops
-acts. Ops pays the
-student another way and records it with `recordManualRefund`, which stamps the unstamped
-refund row `manual:<discrepancy id>` and resolves the discrepancy in one transaction. The
-row stays the engagement's one refund, the sweep never sees a stamped row, and
-`db:check-money` accepts only `re_…` or `manual:…` on a refund row.
+Two retry sweeps never run one campus at once: each claims a `sweep_lease` row (campus,
+name, `held_until`) with one conditional upsert and releases it at the end, and a sweep
+that cannot claim skips the campus. A Postgres advisory lock was rejected because holding
+it means an open transaction across the Stripe calls; the lease is a timestamp, holds no
+lock, and lapses after five minutes if its holder dies. The Stripe client times out a
+request at 15s, so one request with its two network retries takes at most about 45s. A
+row can make up to five requests (list, create, list, suffixed create, list), about four
+minutes at worst, which the five-minute lease and grace cover; the cron's 60s limit ends a
+run sooner, and its lease then lapses.
+
+Only a 400 or 402 from Stripe is a refusal; 401, 403 and 404 are logged and retried. The
+one exception: a PaymentIntent Stripe still does not know a day after the row was written,
+on an engagement with no `processor_fee` row (no charge was ever recorded, as with seeded
+`pi_test_…` ids), is flagged `refund_failed` so it is not retried forever. A PaymentIntent
+with a fee is never flagged on a 404, so a key for the wrong account cannot flag paid
+refunds en masse. A refusal first re-lists the refunds and settles with ours if Stripe
+already holds one. A refund refused with none, or that fails later (closed or lost card),
+writes a `refund_failed` discrepancy keyed on the PaymentIntent, and the row keeps any
+`re_…` it was tried against.
+
+Code never re-sends a refund to that card. A discrepancy carries `ledger_entry_id` when it
+is about a ledger refund row (a failure or a foreign refund), and any discrepancy on a row
+stops that row's automatic refund whether or not it is resolved. A refund of a payment
+that was never booked has no row; a `refund_failed` on its PaymentIntent stops that
+PaymentIntent's refunds the same way. The halt is per row or per PaymentIntent, never per
+engagement: a failed refund of a stray payment on a superseded Checkout Session does not
+hold up the engagement's own term-end or end-early refund. The retry sweep reports rows it
+skips as `blocked`, so a halted row stays visible in the cron response. Ops pays the student
+another way and records it with `recordManualRefund`, which resolves the discrepancy and,
+when it names a ledger row, stamps that row `manual:<discrepancy id>` in the same
+transaction. The row stays the engagement's one refund, the sweep never sees a stamped row,
+and `db:check-money` accepts only `re_…` or `manual:…` on a refund row.
 
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 Transfers go per engagement once the tutor is verified and the engagement has no open
