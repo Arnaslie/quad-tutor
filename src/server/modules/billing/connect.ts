@@ -6,18 +6,18 @@ import { tutorProfile } from "@/server/db/schema";
 import type { TutorActor } from "@/server/modules/identity/actor";
 
 import { appUrl } from "./checkout-session";
-import { kycStatusOf, type KycStatus } from "./kyc";
+import { kycStatusOf, payoutStageOf, type KycStatus, type PayoutStage } from "./kyc";
 import { errorFacts, stripeGateway, type ConnectAccount } from "./stripe";
 
-export type Payouts = { accountId: string | null; status: KycStatus };
+export type Payouts = { accountId: string | null; status: KycStatus; stage: PayoutStage };
 
-async function payoutsOf(actor: TutorActor): Promise<Payouts> {
+export async function payoutsOf(actor: TutorActor): Promise<Payouts> {
   const [row] = await db
     .select({ accountId: tutorProfile.stripeAccountId, status: tutorProfile.kycStatus })
     .from(tutorProfile)
     .where(and(eq(tutorProfile.id, actor.tutorProfileId), eq(tutorProfile.institutionId, actor.institutionId)));
   if (!row) throw new Error("No tutor profile on this campus.");
-  return row;
+  return { ...row, stage: row.status };
 }
 
 export async function ensureConnectAccount(actor: TutorActor): Promise<string> {
@@ -76,7 +76,8 @@ export async function payoutsFor(actor: TutorActor): Promise<Payouts> {
   if (!stored.accountId) return stored;
   try {
     const account = await stripeGateway().retrieveAccount(stored.accountId);
-    return { accountId: account.id, status: (await applyAccount(account, actor.institutionId)) ?? stored.status };
+    const status = await applyAccount(account, actor.institutionId);
+    return status ? { accountId: account.id, status, stage: payoutStageOf(account) } : stored;
   } catch (error) {
     console.error("[connect] account refresh failed", errorFacts(error));
     return stored;
