@@ -9,6 +9,7 @@ const API_VERSION = "2026-09-30.endive";
 const MIN_EXPIRY_SECONDS = 30 * 60;
 const MAX_EXPIRY_SECONDS = 24 * 60 * 60;
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+const TUTOR_PRODUCT_DESCRIPTION = "Peer tutoring sessions for university courses, booked and paid through Quad Tutor.";
 
 type ErrorFacts = {
   status?: number;
@@ -120,6 +121,21 @@ export type WebhookEvent = {
   objectId: string | null;
 };
 
+export type NewConnectAccount = { tutorProfileId: string; institutionId: string; email: string };
+
+export type ConnectAccount = {
+  id: string;
+  detailsSubmitted: boolean;
+  payoutsEnabled: boolean;
+  transfers: string | null;
+  disabledReason: string | null;
+  pastDue: string[];
+  tutorProfileId: string | null;
+  institutionId: string | null;
+};
+
+export type NewAccountLink = { accountId: string; refreshUrl: string; returnUrl: string };
+
 export type Gateway = {
   livemode: boolean;
   createCheckout(params: NewCheckout): Promise<CheckoutSession>;
@@ -132,6 +148,9 @@ export type Gateway = {
   chargeRefunds(chargeId: string): Promise<Refund[]>;
   retrieveRefund(id: string): Promise<Refund>;
   refund(params: NewRefund): Promise<Refund>;
+  createAccount(params: NewConnectAccount): Promise<ConnectAccount>;
+  retrieveAccount(id: string): Promise<ConnectAccount>;
+  createAccountLink(params: NewAccountLink): Promise<string>;
 };
 
 function refundMetadata(params: {
@@ -159,6 +178,19 @@ function sessionView(session: Stripe.Checkout.Session): CheckoutSession {
     engagementId: session.metadata?.engagement_id ?? null,
     institutionId: session.metadata?.institution_id ?? null,
     successUrl: session.success_url,
+  };
+}
+
+function accountView(account: Stripe.Account): ConnectAccount {
+  return {
+    id: account.id,
+    detailsSubmitted: account.details_submitted ?? false,
+    payoutsEnabled: account.payouts_enabled ?? false,
+    transfers: account.capabilities?.transfers ?? null,
+    disabledReason: account.requirements?.disabled_reason ?? null,
+    pastDue: account.requirements?.past_due ?? [],
+    tutorProfileId: account.metadata?.tutor_profile_id ?? null,
+    institutionId: account.metadata?.institution_id ?? null,
   };
 }
 
@@ -291,6 +323,35 @@ function realGateway(): Gateway {
           { idempotencyKey: params.idempotencyKey },
         );
         return refundView(refund);
+      }),
+    createAccount: (params) =>
+      call(async () => {
+        const account = await stripe.accounts.create(
+          {
+            type: "express",
+            country: "US",
+            email: params.email,
+            business_type: "individual",
+            capabilities: { transfers: { requested: true } },
+            business_profile: { product_description: TUTOR_PRODUCT_DESCRIPTION },
+            settings: { payouts: { schedule: { interval: "daily" } } },
+            metadata: { tutor_profile_id: params.tutorProfileId, institution_id: params.institutionId },
+          },
+          { idempotencyKey: `connect-account:${params.tutorProfileId}` },
+        );
+        return accountView(account);
+      }),
+    retrieveAccount: (id) => call(async () => accountView(await stripe.accounts.retrieve(id))),
+    createAccountLink: (params) =>
+      call(async () => {
+        const link = await stripe.accountLinks.create({
+          account: params.accountId,
+          type: "account_onboarding",
+          collection_options: { fields: "eventually_due" },
+          refresh_url: params.refreshUrl,
+          return_url: params.returnUrl,
+        });
+        return link.url;
       }),
   };
 }
@@ -462,7 +523,58 @@ const fakeGateway: Gateway = {
       fakeRefundsInFlight.delete(key);
     }
   },
+  createAccount(params) {
+    const key = `idem-connect-account:${params.tutorProfileId}`;
+    return locked(key, async () => {
+      const replay = await fakeRead<{ accountId: string; at: number }>(key);
+      if (replay && Date.now() - replay.at < IDEMPOTENCY_TTL_MS) return fakeAccount(replay.accountId);
+      const account: ConnectAccount = {
+        id: `acct_fake_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
+        detailsSubmitted: false,
+        payoutsEnabled: false,
+        transfers: "inactive",
+        disabledReason: "requirements.past_due",
+        pastDue: ["external_account", "individual.dob.day", "individual.ssn_last_4", "tos_acceptance.date"],
+        tutorProfileId: params.tutorProfileId,
+        institutionId: params.institutionId,
+      };
+      await fakeWrite(account.id, account);
+      await fakeWrite(key, { accountId: account.id, at: Date.now() });
+      return account;
+    });
+  },
+  retrieveAccount: (id) => fakeAccount(id),
+  async createAccountLink(params) {
+    await fakeAccount(params.accountId);
+    const id = `acctlink_fake_${randomUUID().replaceAll("-", "")}`;
+    await fakeWrite(id, params);
+    return `${new URL(params.returnUrl).origin}/api/dev/connect/${id}`;
+  },
 };
+
+async function fakeAccount(id: string): Promise<ConnectAccount> {
+  const account = await fakeRead<ConnectAccount>(id);
+  if (!account) throw missing("account", id);
+  return account;
+}
+
+const FAKE_ACCOUNT_STATES = {
+  verified: { detailsSubmitted: true, payoutsEnabled: true, transfers: "active", disabledReason: null, pastDue: [] },
+  pending: {
+    detailsSubmitted: true,
+    payoutsEnabled: false,
+    transfers: "pending",
+    disabledReason: "requirements.pending_verification",
+    pastDue: [],
+  },
+  restricted: {
+    detailsSubmitted: true,
+    payoutsEnabled: false,
+    transfers: "inactive",
+    disabledReason: "requirements.past_due",
+    pastDue: ["individual.verification.document"],
+  },
+} satisfies Record<string, Partial<ConnectAccount>>;
 
 function fakeCreateRefund(key: string, params: NewRefund): Promise<Refund> {
   return locked(key, async () => {
@@ -573,6 +685,47 @@ export const fakeStripe = {
   async refunds(id: string): Promise<Refund[]> {
     return (await fakeRecord(id)).refunds;
   },
+  async accountLink(id: string): Promise<NewAccountLink> {
+    const link = await fakeRead<NewAccountLink>(id);
+    if (!link) throw missing("account_link", id);
+    return link;
+  },
+  /** Fake onboarding is instant: finishing the hosted form verifies the account. */
+  setAccount(id: string, state: keyof typeof FAKE_ACCOUNT_STATES): Promise<ConnectAccount> {
+    assertNotProduction();
+    return locked(id, async () => {
+      const account = { ...(await fakeAccount(id)), ...FAKE_ACCOUNT_STATES[state] };
+      await fakeWrite(id, account);
+      return account;
+    });
+  },
+  /** A signed Connect `account.updated`; `object` lets tests send a stale payload. */
+  async accountEvent(id: string, object?: ConnectAccount): Promise<{ payload: string; signature: string }> {
+    assertNotProduction();
+    const account = object ?? (await fakeAccount(id));
+    const payload = JSON.stringify({
+      id: `evt_fake_${randomUUID().replaceAll("-", "")}`,
+      object: "event",
+      api_version: API_VERSION,
+      created: Math.floor(Date.now() / 1000),
+      livemode: false,
+      account: id,
+      type: "account.updated",
+      data: {
+        object: {
+          id,
+          object: "account",
+          details_submitted: account.detailsSubmitted,
+          payouts_enabled: account.payoutsEnabled,
+          capabilities: { transfers: account.transfers },
+          requirements: { disabled_reason: account.disabledReason, past_due: account.pastDue },
+          metadata: { tutor_profile_id: account.tutorProfileId, institution_id: account.institutionId },
+        },
+      },
+    });
+    const secret = process.env.STRIPE_CONNECT_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET;
+    return { payload, signature: signWebhookPayload(payload, secret) };
+  },
   /** The next refund create fails as a Stripe 500 would, and its key replays that failure. */
   failNextRefund(): void {
     assertNotProduction();
@@ -673,7 +826,7 @@ export const fakeStripe = {
   },
 };
 
-/** Signs with the platform endpoint's secret; only the fake and tests may produce signatures. */
+/** Signs with the platform endpoint's secret unless given another; only the fake and tests may produce signatures. */
 export function signWebhookPayload(payload: string, secret = process.env.STRIPE_WEBHOOK_SECRET): string {
   assertNotProduction();
   if (!secret) throw new GatewayError("STRIPE_WEBHOOK_SECRET is not set.");
