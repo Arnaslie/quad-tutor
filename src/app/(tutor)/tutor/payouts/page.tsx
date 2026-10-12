@@ -1,53 +1,91 @@
 import type { Metadata } from "next";
 
-import { Button } from "@/components/button";
 import { Card } from "@/components/card";
+import { Icon } from "@/components/icons";
+import { Money } from "@/components/money";
 import { PageHeader } from "@/components/page-header";
 import { payoutsFor } from "@/server/modules/billing/connect";
-import type { KycStatus } from "@/server/modules/billing/kyc";
+import type { PayoutStage } from "@/server/modules/billing/kyc";
 import { requireTutor } from "@/server/modules/identity/actor";
+import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
 import { startOnboarding } from "./actions";
+import { OnboardingButton } from "./onboarding-button";
+import { PAYOUTS_SUPPORT, STAGE_ICON } from "./stage";
 
 export const metadata: Metadata = { title: "Payouts" };
 
-const COPY: Record<KycStatus, { status: string; action: string | null }> = {
+const COPY: Record<PayoutStage, { heading: string; body: string; action: string | null }> = {
   not_started: {
-    status: "Payouts are not set up yet. Stripe verifies who you are and takes the bank account your pay goes to.",
+    heading: "Payouts aren't set up",
+    body: "Stripe checks who you are and takes the bank account your pay goes to. Have your bank details and the last four of your SSN ready. It takes a few minutes.",
     action: "Set up payouts",
   },
   pending: {
-    status: "Stripe is checking your details. Pay you earn is held for you until it finishes.",
+    heading: "Stripe is checking your details",
+    body: "You don't need to do anything right now. If Stripe needs more from you, it shows up here.",
     action: "Review your details",
   },
-  verified: {
-    status: "Payouts are on. Earned pay goes to your bank daily, usually arriving two business days later.",
+  restricted: {
+    heading: "Stripe needs more from you",
+    body: "Stripe can't send your pay until you add what it's asking for.",
+    action: "Update your details",
+  },
+  needs_support: {
+    heading: "Payouts are blocked on this account",
+    body: PAYOUTS_SUPPORT,
     action: null,
   },
-  restricted: {
-    status: "Stripe needs more information before it can send your pay. Pay you earn is held for you meanwhile.",
-    action: "Update your details",
+  verified: {
+    heading: "Payouts are on",
+    body: "The pay you earn goes to your bank on its own. There's nothing else to do.",
+    action: null,
   },
 };
 
 export default async function TutorPayoutsPage() {
   const tutor = await requireTutor();
-  const payouts = await payoutsFor(tutor);
-  const copy = COPY[payouts.status];
+  const [payouts, earnings] = await Promise.all([payoutsFor(tutor), earningsForTutor(tutor)]);
+  const copy = COPY[payouts.stage];
+  const icon = STAGE_ICON[payouts.stage];
+  const unfinished = payouts.accountId && payouts.stage === "not_started";
 
   return (
     <div className="flex max-w-xl flex-col gap-6">
       <PageHeader title="Payouts" description="Stripe sends the pay you earn to your bank." />
-      <Card>
-        <p className="text-sm text-foreground">{copy.status}</p>
+
+      <Card className="flex flex-col gap-4">
+        <div className="flex gap-3">
+          <Icon name={icon.name} className={`mt-0.5 size-5 shrink-0 ${icon.className}`} />
+          <div className="flex flex-col gap-1">
+            <h2 className="text-base font-semibold tracking-tight">{copy.heading}</h2>
+            <p className="text-sm text-muted">{copy.body}</p>
+          </div>
+        </div>
+
+        {payouts.stage !== "verified" && earnings.owedMinor > 0 ? (
+          <p className="rounded-xl bg-surface-sunken px-3 py-2 text-sm text-foreground">
+            You&apos;re owed{" "}
+            <Money minor={earnings.owedMinor} currency={earnings.currency} className="font-semibold" />.
+            It&apos;s held for you until payouts are on.
+          </p>
+        ) : null}
+
+        {copy.action ? (
+          <form action={startOnboarding}>
+            <OnboardingButton label={unfinished ? "Continue setup" : copy.action} />
+          </form>
+        ) : null}
       </Card>
-      {copy.action ? (
-        <form action={startOnboarding}>
-          <Button type="submit" size="lg" className="w-full sm:w-auto">
-            {payouts.accountId && payouts.status === "not_started" ? "Continue setup" : copy.action}
-          </Button>
-        </form>
-      ) : null}
+
+      <Card className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-foreground">How payouts work</h2>
+        <ul className="flex list-disc flex-col gap-2 pl-5 text-sm text-muted">
+          <li>Pay is earned once a session&apos;s attendance settles.</li>
+          <li>Stripe sends it to your bank daily. It usually arrives two business days later.</li>
+          <li>Stripe collects your bank and ID details, not Quad Tutor.</li>
+        </ul>
+      </Card>
     </div>
   );
 }
