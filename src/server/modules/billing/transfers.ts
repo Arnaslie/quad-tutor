@@ -126,6 +126,7 @@ function unstampedRows(institutionId: string) {
     amountMinor: ledgerEntry.amountMinor,
     currency: ledgerEntry.currency,
     occurredAt: ledgerEntry.occurredAt,
+    paused: paused(ledgerEntry.engagementId, ledgerEntry.institutionId),
   })
     .innerJoin(ledgerEntry, and(eq(ledgerEntry.engagementId, engagement.id), eq(ledgerEntry.institutionId, engagement.institutionId)))
     .where(
@@ -135,7 +136,6 @@ function unstampedRows(institutionId: string) {
         isNull(ledgerEntry.stripeReference),
         lt(ledgerEntry.occurredAt, new Date(Date.now() - RETRY_GRACE_MS)),
         notExists(ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId)),
-        not(paused(ledgerEntry.engagementId, ledgerEntry.institutionId)),
       ),
     )
     .orderBy(sql`random()`)
@@ -259,12 +259,14 @@ async function send(row: Sending, retry: boolean): Promise<Outcome> {
   return "transferred";
 }
 
-async function retry(row: Awaited<ReturnType<typeof unstampedRows>>[number], kyc: Kyc): Promise<Outcome> {
+/** A paused engagement's row is still stamped when Stripe has its transfer; only a new create waits on ops. */
+async function retry(row: Awaited<ReturnType<typeof unstampedRows>>[number], kyc: Kyc): Promise<Outcome | null> {
   const found = await ours(row);
   if (found) {
     await stamp(row, found.id);
     return "transferred";
   }
+  if (row.paused) return null;
   if (!row.accountId || (await kyc(row)) !== "verified") return "waiting";
   const chargeId = await chargeOf(row);
   if (!chargeId) return "failed";

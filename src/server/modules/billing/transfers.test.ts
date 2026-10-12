@@ -262,6 +262,23 @@ test("a transfer whose response was lost is stamped by a later run from its meta
   assert.equal((await stripeGateway().listTransfers(engagementId)).length, 1);
 });
 
+test("a lost transfer on an engagement disputed since is still stamped, and nothing new is created", async () => {
+  const w = await world();
+  const { engagementId, paymentIntentId } = await delivered(w);
+  fakeStripe.loseNextTransferResponse();
+  assert.deepEqual(await sweep(w), { ...nothing, failed: 1 });
+  const [made] = await stripeGateway().listTransfers(engagementId);
+
+  const dispute = await fakeStripe.dispute(paymentIntentId);
+  await deliver(await fakeStripe.disputeEvent(dispute.id, "charge.dispute.created"));
+  await age(engagementId);
+  assert.deepEqual(await creates(async () => {
+    assert.deepEqual(await sweep(w), { ...nothing, settled: 1 });
+  }), []);
+  assert.deepEqual((await rows(engagementId, "tutor_transfer")).map((r) => [r.amountMinor, r.stripeReference]), [[3_150, made.id]]);
+  assert.deepEqual(await earningsForTutor(w.tutor), { earnedMinor: 3_150, owedMinor: 0, transferredMinor: 3_150, currency: "usd", sessionsDelivered: 1 });
+});
+
 test("a 500 Stripe replays under the base key moves the retry to the hour key, and one transfer is made", async () => {
   const w = await world();
   const { engagementId } = await delivered(w);
