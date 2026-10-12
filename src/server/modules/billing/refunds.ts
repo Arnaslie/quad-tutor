@@ -45,11 +45,12 @@ export async function createOnce<T>(
   base: string,
   retrySince: Date | null,
   lookAgain: () => Promise<T | undefined>,
+  stale: (replayed: GatewayError) => boolean = (error) => (error.status ?? 0) >= 500,
 ): Promise<T> {
   try {
     return await create(base);
   } catch (error) {
-    if (!retrySince || !(error instanceof GatewayError) || !error.replayed || (error.status ?? 0) < 500) throw error;
+    if (!retrySince || !(error instanceof GatewayError) || !error.replayed || !stale(error)) throw error;
     const found = await lookAgain();
     if (found) return found;
     return create(retryKey(base, retrySince));
