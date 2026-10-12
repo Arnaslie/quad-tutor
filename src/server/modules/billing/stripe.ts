@@ -113,6 +113,41 @@ export type NewRefund = {
   idempotencyKey: string;
 };
 
+export type Transfer = {
+  id: string;
+  amountMinor: number;
+  currency: string;
+  destination: string | null;
+  transferGroup: string | null;
+  sourceTransaction: string | null;
+  ledgerEntryId: string | null;
+  engagementId: string | null;
+  institutionId: string | null;
+  reversals: { id: string; amountMinor: number }[];
+};
+
+export type NewTransfer = {
+  accountId: string;
+  chargeId: string;
+  amountMinor: number;
+  currency: string;
+  engagementId: string;
+  institutionId: string;
+  ledgerEntryId: string;
+  idempotencyKey: string;
+};
+
+export type Dispute = {
+  id: string;
+  paymentIntentId: string | null;
+  chargeId: string | null;
+  amountMinor: number;
+  currency: string;
+  reason: string | null;
+  status: string;
+  createdAt: Date;
+};
+
 export type WebhookEvent = {
   id: string;
   type: string;
@@ -151,9 +186,15 @@ export type Gateway = {
   createAccount(params: NewConnectAccount): Promise<ConnectAccount>;
   retrieveAccount(id: string): Promise<ConnectAccount>;
   createAccountLink(params: NewAccountLink): Promise<string>;
+  /** The PaymentIntent's `latest_charge`, which a transfer names as its `source_transaction`. */
+  chargeOf(paymentIntentId: string): Promise<string | null>;
+  createTransfer(params: NewTransfer): Promise<Transfer>;
+  listTransfers(transferGroup: string): Promise<Transfer[]>;
+  retrieveTransfer(id: string): Promise<Transfer>;
+  retrieveDispute(id: string): Promise<Dispute>;
 };
 
-function refundMetadata(params: {
+function ledgerMetadata(params: {
   engagementId: string | null;
   institutionId: string | null;
   ledgerEntryId?: string | null;
@@ -206,6 +247,36 @@ function refundView(refund: Stripe.Refund): Refund {
     engagementId: refund.metadata?.engagement_id ?? null,
     institutionId: refund.metadata?.institution_id ?? null,
     failureReason: refund.failure_reason ?? null,
+  };
+}
+
+const idOf = (value: string | { id: string } | null) => (typeof value === "string" ? value : (value?.id ?? null));
+
+function transferView(transfer: Stripe.Transfer, reversals: Stripe.TransferReversal[]): Transfer {
+  return {
+    id: transfer.id,
+    amountMinor: transfer.amount,
+    currency: transfer.currency,
+    destination: idOf(transfer.destination),
+    transferGroup: transfer.transfer_group,
+    sourceTransaction: idOf(transfer.source_transaction),
+    ledgerEntryId: transfer.metadata?.ledger_entry_id ?? null,
+    engagementId: transfer.metadata?.engagement_id ?? null,
+    institutionId: transfer.metadata?.institution_id ?? null,
+    reversals: reversals.map((r) => ({ id: r.id, amountMinor: r.amount })),
+  };
+}
+
+function disputeView(dispute: Stripe.Dispute): Dispute {
+  return {
+    id: dispute.id,
+    paymentIntentId: idOf(dispute.payment_intent),
+    chargeId: idOf(dispute.charge),
+    amountMinor: dispute.amount,
+    currency: dispute.currency,
+    reason: dispute.reason ?? null,
+    status: dispute.status,
+    createdAt: new Date(dispute.created * 1000),
   };
 }
 
@@ -277,6 +348,34 @@ function realGateway(): Gateway {
         return sessionView(session);
       }),
     retrieveCheckout: (id) => call(async () => sessionView(await stripe.checkout.sessions.retrieve(id))),
+    chargeOf: (paymentIntentId) => call(async () => idOf((await stripe.paymentIntents.retrieve(paymentIntentId)).latest_charge)),
+    createTransfer: (params) =>
+      call(async () => {
+        const transfer = await stripe.transfers.create(
+          {
+            amount: params.amountMinor,
+            currency: params.currency,
+            destination: params.accountId,
+            source_transaction: params.chargeId,
+            transfer_group: params.engagementId,
+            metadata: ledgerMetadata(params),
+          },
+          { idempotencyKey: params.idempotencyKey },
+        );
+        return transferView(transfer, transfer.reversals.data);
+      }),
+    listTransfers: (transferGroup) =>
+      call(async () => {
+        const transfers = await stripe.transfers.list({ transfer_group: transferGroup, limit: 100 });
+        return transfers.data.map((t) => transferView(t, t.reversals.data));
+      }),
+    retrieveTransfer: (id) =>
+      call(async () => {
+        const transfer = await stripe.transfers.retrieve(id);
+        const reversals = await stripe.transfers.listReversals(id, { limit: 100 }).autoPagingToArray({ limit: 10_000 });
+        return transferView(transfer, reversals);
+      }),
+    retrieveDispute: (id) => call(async () => disputeView(await stripe.disputes.retrieve(id))),
     expireCheckout: (id) => call(async () => sessionView(await stripe.checkout.sessions.expire(id))),
     findPaidCheckout: (engagementId) =>
       call(async () => {
@@ -318,7 +417,7 @@ function realGateway(): Gateway {
           {
             payment_intent: params.paymentIntentId,
             amount: params.amountMinor,
-            metadata: refundMetadata(params),
+            metadata: ledgerMetadata(params),
           },
           { idempotencyKey: params.idempotencyKey },
         );
@@ -555,7 +654,131 @@ const fakeGateway: Gateway = {
     await fakeWrite(id, params);
     return `${new URL(params.returnUrl).origin}/api/dev/connect/${id}`;
   },
+  async chargeOf(paymentIntentId) {
+    if (!(await fakeRead<FakePayment>(paymentIntentId))) throw missing("payment_intent", paymentIntentId);
+    return paymentIntentId.replace(/^pi_/, "ch_");
+  },
+  async createTransfer(params) {
+    const transfer = await fakeCreateTransfer(params);
+    if (fakeTransferLostResponses > 0) {
+      fakeTransferLostResponses -= 1;
+      throw new GatewayError("socket hang up");
+    }
+    return transfer;
+  },
+  async listTransfers(transferGroup) {
+    const ids = (await fakeRead<string[]>(`transfer-group-${transferGroup}`)) ?? [];
+    return Promise.all(ids.map(fakeTransfer));
+  },
+  retrieveTransfer: (id) => fakeTransfer(id),
+  async retrieveDispute(id) {
+    const dispute = await fakeRead<Dispute>(id);
+    if (!dispute) throw missing("dispute", id);
+    return { ...dispute, createdAt: new Date(dispute.createdAt) };
+  },
 };
+
+async function fakeTransfer(id: string): Promise<Transfer> {
+  const transfer = await fakeRead<Transfer>(id);
+  if (!transfer) throw missing("transfer", id);
+  return transfer;
+}
+
+type FakeTransferReplay = {
+  transfer: Transfer | null;
+  error: (ErrorFacts & { message: string }) | null;
+  params: string;
+  at: number;
+};
+
+let fakeTransferOutages = 0;
+let fakeTransferLostResponses = 0;
+
+function fakeCreateTransfer(params: NewTransfer): Promise<Transfer> {
+  const key = `idem-transfer:${params.idempotencyKey}`;
+  return locked(key, async () => {
+    const sent = JSON.stringify({ ...params, idempotencyKey: undefined });
+    const replay = await fakeRead<FakeTransferReplay>(key);
+    if (replay && Date.now() - replay.at < IDEMPOTENCY_TTL_MS) {
+      if (replay.params !== sent) {
+        throw new GatewayError(
+          "Keys for idempotent requests can only be used with the same parameters they were first used with.",
+          { status: 400, idempotency: true },
+        );
+      }
+      if (replay.error) throw new GatewayError(replay.error.message, { ...replay.error, replayed: true });
+      return replay.transfer!;
+    }
+
+    return locked(params.chargeId, async () => {
+      const refuse = async (error: ErrorFacts & { message: string }) => {
+        await fakeWrite(key, { transfer: null, error, params: sent, at: Date.now() });
+        throw new GatewayError(error.message, error);
+      };
+      if (fakeTransferOutages > 0) {
+        fakeTransferOutages -= 1;
+        return refuse({ message: "An unknown error occurred", status: 500, type: "api_error" });
+      }
+      const account = await fakeRead<ConnectAccount>(params.accountId);
+      if (!account) throw missing("account", params.accountId);
+      if (account.transfers !== "active") {
+        return refuse({
+          message: "Your destination account needs to have at least one of the following capabilities enabled: transfers.",
+          status: 400,
+          code: "insufficient_capabilities_for_transfer",
+        });
+      }
+      const paymentIntentId = params.chargeId.replace(/^ch_/, "pi_");
+      const payment = await fakeRead<FakePayment>(paymentIntentId);
+      if (!payment) throw missing("charge", params.chargeId);
+      const record = await fakeRecord(payment.sessionId);
+      if (params.currency !== record.session.currency) {
+        return refuse({ message: `The currency of source_transaction's balance transaction must match ${params.currency}.`, status: 400 });
+      }
+      const onCharge = (await fakeRead<string[]>(`transfer-charge-${params.chargeId}`)) ?? [];
+      const sentBefore = (await Promise.all(onCharge.map(fakeTransfer))).reduce((sum, t) => sum + t.amountMinor, 0);
+      if (sentBefore + params.amountMinor > payment.amountMinor) {
+        return refuse({
+          message: `Transfers using source_transaction ${params.chargeId} may not exceed its amount (${payment.amountMinor}).`,
+          status: 400,
+          code: "amount_too_large",
+        });
+      }
+
+      const transfer: Transfer = {
+        id: `tr_fake_${randomUUID().replaceAll("-", "")}`,
+        amountMinor: params.amountMinor,
+        currency: params.currency,
+        destination: params.accountId,
+        transferGroup: params.engagementId,
+        sourceTransaction: params.chargeId,
+        ledgerEntryId: params.ledgerEntryId,
+        engagementId: params.engagementId,
+        institutionId: params.institutionId,
+        reversals: [],
+      };
+      const group = (await fakeRead<string[]>(`transfer-group-${params.engagementId}`)) ?? [];
+      await fakeWrite(transfer.id, transfer);
+      await fakeWrite(`transfer-charge-${params.chargeId}`, [...onCharge, transfer.id]);
+      await fakeWrite(`transfer-group-${params.engagementId}`, [...group, transfer.id]);
+      await fakeWrite(key, { transfer, error: null, params: sent, at: Date.now() });
+      return transfer;
+    });
+  });
+}
+
+function signedEvent(type: string, object: Record<string, unknown>): { payload: string; signature: string } {
+  const payload = JSON.stringify({
+    id: `evt_fake_${randomUUID().replaceAll("-", "")}`,
+    object: "event",
+    api_version: API_VERSION,
+    created: Math.floor(Date.now() / 1000),
+    livemode: false,
+    type,
+    data: { object },
+  });
+  return { payload, signature: signWebhookPayload(payload) };
+}
 
 async function fakeAccount(id: string): Promise<ConnectAccount> {
   const account = await fakeRead<ConnectAccount>(id);
@@ -764,7 +987,7 @@ export const fakeStripe = {
   ): Promise<{ payload: string; signature: string }> {
     assertNotProduction();
     const { record, refund } = await fakeRefund(id);
-    const metadata = refundMetadata(refund);
+    const metadata = ledgerMetadata(refund);
     const chargeId = refund.paymentIntentId?.replace(/^pi_/, "ch_") ?? null;
     const object =
       type === "charge.refunded"
@@ -787,16 +1010,94 @@ export const fakeStripe = {
             failure_reason: refund.failureReason,
             metadata,
           };
-    const payload = JSON.stringify({
-      id: `evt_fake_${randomUUID().replaceAll("-", "")}`,
-      object: "event",
-      api_version: API_VERSION,
-      created: Math.floor(Date.now() / 1000),
-      livemode: false,
-      type,
-      data: { object },
+    return signedEvent(type, object);
+  },
+  /** The next transfer create fails as a Stripe 500 would, and its key replays that failure. */
+  failNextTransfer(): void {
+    assertNotProduction();
+    fakeTransferOutages += 1;
+  },
+  /** The next transfer is created, then its response is lost on the way back, as a timeout would. */
+  loseNextTransferResponse(): void {
+    assertNotProduction();
+    fakeTransferLostResponses += 1;
+  },
+  /** Plays ops reversing a transfer in the Dashboard; the whole remainder unless an amount is given. */
+  reverseTransfer(id: string, amountMinor?: number): Promise<Transfer> {
+    assertNotProduction();
+    return locked(id, async () => {
+      const transfer = await fakeTransfer(id);
+      const left = transfer.amountMinor - transfer.reversals.reduce((sum, r) => sum + r.amountMinor, 0);
+      const reversal = { id: `trr_fake_${randomUUID().replaceAll("-", "")}`, amountMinor: amountMinor ?? left };
+      if (reversal.amountMinor <= 0 || reversal.amountMinor > left) {
+        throw new GatewayError(`Reversal amount (${reversal.amountMinor}) exceeds what is left (${left}).`, { status: 400 });
+      }
+      const reversed = { ...transfer, reversals: [...transfer.reversals, reversal] };
+      await fakeWrite(id, reversed);
+      return reversed;
     });
-    return { payload, signature: signWebhookPayload(payload) };
+  },
+  async transferEvent(id: string, type: "transfer.created" | "transfer.reversed"): Promise<{ payload: string; signature: string }> {
+    assertNotProduction();
+    const transfer = await fakeTransfer(id);
+    return signedEvent(type, {
+      id,
+      object: "transfer",
+      amount: transfer.amountMinor,
+      amount_reversed: transfer.reversals.reduce((sum, r) => sum + r.amountMinor, 0),
+      currency: transfer.currency,
+      destination: transfer.destination,
+      source_transaction: transfer.sourceTransaction,
+      transfer_group: transfer.transferGroup,
+      metadata: ledgerMetadata(transfer),
+    });
+  },
+  /** Plays the cardholder's bank opening a chargeback on the payment. */
+  async dispute(paymentIntentId: string, reason = "fraudulent"): Promise<Dispute> {
+    assertNotProduction();
+    const payment = await fakeRead<FakePayment>(paymentIntentId);
+    if (!payment) throw missing("payment_intent", paymentIntentId);
+    const record = await fakeRecord(payment.sessionId);
+    const dispute: Dispute = {
+      id: `dp_fake_${randomUUID().replaceAll("-", "")}`,
+      paymentIntentId,
+      chargeId: paymentIntentId.replace(/^pi_/, "ch_"),
+      amountMinor: payment.amountMinor,
+      currency: record.session.currency ?? "usd",
+      reason,
+      status: "needs_response",
+      createdAt: new Date(),
+    };
+    await fakeWrite(dispute.id, dispute);
+    return dispute;
+  },
+  closeDispute(id: string, status: "won" | "lost"): Promise<Dispute> {
+    assertNotProduction();
+    return locked(id, async () => {
+      const closed = { ...(await fakeGateway.retrieveDispute(id)), status };
+      await fakeWrite(id, closed);
+      return closed;
+    });
+  },
+  async disputeEvent(id: string, type:
+      | "charge.dispute.created"
+      | "charge.dispute.updated"
+      | "charge.dispute.closed"
+      | "charge.dispute.funds_withdrawn"
+      | "charge.dispute.funds_reinstated"): Promise<{ payload: string; signature: string }> {
+    assertNotProduction();
+    const dispute = await fakeGateway.retrieveDispute(id);
+    return signedEvent(type, {
+      id,
+      object: "dispute",
+      amount: dispute.amountMinor,
+      charge: dispute.chargeId,
+      payment_intent: dispute.paymentIntentId,
+      currency: dispute.currency,
+      reason: dispute.reason,
+      status: dispute.status,
+      created: Math.floor(dispute.createdAt.getTime() / 1000),
+    });
   },
   /** A signed event as Stripe would send it, from the session as the fake holds it now. */
   async event(id: string): Promise<{ payload: string; signature: string }> {
@@ -804,30 +1105,19 @@ export const fakeStripe = {
     const record = await fakeRecord(id);
     const type = record.session.status === "complete" ? "checkout.session.completed" : "checkout.session.expired";
     const { params, expiresAt } = record;
-    const payload = JSON.stringify({
-      id: `evt_fake_${randomUUID().replaceAll("-", "")}`,
-      object: "event",
-      api_version: API_VERSION,
-      created: Math.floor(Date.now() / 1000),
-      livemode: false,
-      type,
-      data: {
-        object: {
-          id,
-          object: "checkout.session",
-          status: record.session.status,
-          payment_status: record.session.paymentStatus,
-          payment_intent: record.session.paymentIntentId,
-          amount_total: record.session.amountTotal,
-          currency: record.session.currency,
-          expires_at: expiresAt,
-          metadata: { engagement_id: params.engagementId, institution_id: params.institutionId },
-          success_url: params.successUrl,
-          cancel_url: params.cancelUrl,
-        },
-      },
+    return signedEvent(type, {
+      id,
+      object: "checkout.session",
+      status: record.session.status,
+      payment_status: record.session.paymentStatus,
+      payment_intent: record.session.paymentIntentId,
+      amount_total: record.session.amountTotal,
+      currency: record.session.currency,
+      expires_at: expiresAt,
+      metadata: { engagement_id: params.engagementId, institution_id: params.institutionId },
+      success_url: params.successUrl,
+      cancel_url: params.cancelUrl,
     });
-    return { payload, signature: signWebhookPayload(payload) };
   },
 };
 
