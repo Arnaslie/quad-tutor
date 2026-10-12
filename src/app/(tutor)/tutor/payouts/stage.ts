@@ -3,8 +3,9 @@ import type { PayoutStage } from "@/server/modules/billing/kyc";
 
 export const PAYOUTS_HREF = "/tutor/payouts";
 
-export const PAYOUTS_SUPPORT =
-  "Stripe won't send pay to this account, and it can't be fixed from here. Reply to any email from Quad Tutor and we'll sort it out with Stripe.";
+export const SUPPORT_TWITTER_HANDLE = "@TODO";
+
+export const PAYOUTS_SUPPORT = `Stripe won't send pay to this account, and it can't be fixed from here. Message ${SUPPORT_TWITTER_HANDLE} on Twitter and we'll sort it out with Stripe.`;
 
 export const STAGE_ICON: Record<PayoutStage, { name: IconName; className: string }> = {
   not_started: { name: "bank", className: "text-muted" },
