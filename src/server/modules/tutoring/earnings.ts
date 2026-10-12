@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -16,7 +16,6 @@ export type TutorEarnings = {
   earnedMinor: number;
 
   owedMinor: number;
-  /** Always 0 in this draft — see TODO(stripe) below. */
   transferredMinor: number;
   currency: string;
 
@@ -31,14 +30,18 @@ export const NO_EARNINGS: TutorEarnings = {
   sessionsDelivered: 0,
 };
 
+/** Transferred counts only what Stripe confirmed (a stamped `tr_…`), less what ops reversed. */
 export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings> {
+  const accrued = sql`${ledgerEntry.type} = 'tutor_accrued'`;
   const rows = await db
     .select({
-      earnedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}), 0)::int`,
-
-      sessionsDelivered: sql<number>`count(${ledgerEntry.sessionId})::int`,
-
-      currency: sql<string>`coalesce(max(${ledgerEntry.currency}), 'usd')`,
+      earnedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${accrued}), 0)::int`,
+      transferredMinor: sql<number>`(
+        coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'tutor_transfer' and ${ledgerEntry.stripeReference} is not null), 0)
+        - coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'transfer_reversal'), 0)
+      )::int`,
+      sessionsDelivered: sql<number>`count(${ledgerEntry.sessionId}) filter (where ${accrued})::int`,
+      currency: sql<string>`coalesce(max(${ledgerEntry.currency}) filter (where ${accrued}), 'usd')`,
     })
     .from(ledgerEntry)
     .innerJoin(engagement, eq(engagement.id, ledgerEntry.engagementId))
@@ -48,21 +51,17 @@ export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings
       and(
         eq(tutorProfile.id, tutor.tutorProfileId),
         eq(tutorProfile.institutionId, tutor.institutionId),
-        eq(ledgerEntry.type, "tutor_accrued"),
+        inArray(ledgerEntry.type, ["tutor_accrued", "tutor_transfer", "transfer_reversal"]),
       ),
     );
 
   const totals = rows.at(0);
   if (!totals) return NO_EARNINGS;
 
-  // TODO(stripe): when a payout run exists, this is the one line that changes
-
-  const transferredMinor = 0;
-
   return {
     earnedMinor: totals.earnedMinor,
-    owedMinor: totals.earnedMinor - transferredMinor,
-    transferredMinor,
+    owedMinor: totals.earnedMinor - totals.transferredMinor,
+    transferredMinor: totals.transferredMinor,
     currency: totals.currency,
     sessionsDelivered: totals.sessionsDelivered,
   };
