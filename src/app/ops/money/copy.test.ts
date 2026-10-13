@@ -30,7 +30,7 @@ test("money taken with nothing booked says whether its refund went out, retries 
   const retrying = { kind: "checkout_amount", stripeReference: "pi_1", refund: "retrying" } as const;
   assert.deepEqual(explained(item(retrying)), {
     title: "Checkout took the wrong amount",
-    body: "Stripe charged a different amount than the package costs, so the package was cancelled and the payment is refunded.",
+    body: "Stripe charged a different amount than the package costs, so the package was cancelled and the payment is sent back.",
     note: "The refund has not gone out yet and keeps retrying. Resolving stops the retries.",
     settle: null,
   });
@@ -40,7 +40,7 @@ test("money taken with nothing booked says whether its refund went out, retries 
   assert.deepEqual(explained(item({ stripeReference: "pi_1", refund: "failed", refundReference: "re_1" })).note, bounced);
   assert.deepEqual(explained(item({ stripeReference: "pi_1" })), {
     title: "Stripe took money no package booked",
-    body: "The student paid, but no package on the ledger booked the payment, so the payment is refunded.",
+    body: "The student paid, but no package on the ledger booked the payment, so the payment is sent back.",
     note: "Its refund failed and is not retried.",
     settle: null,
   });
@@ -80,10 +80,10 @@ test("a Dashboard refund that then failed offers no booking and sends ops to the
   });
 });
 
-test("a checkout Stripe could not find says nothing was charged", () => {
+test("a checkout Stripe could not find says Stripe found no payment on it", () => {
   assert.deepEqual(explained(item({ stripeReference: "cs_1" })), {
     title: "Stripe could not find a checkout",
-    body: "Stripe said this checkout does not exist, so the package was let go. Nothing was charged on it.",
+    body: "Stripe said this checkout does not exist, so the package was let go. Stripe found no payment on it.",
     note: "The reconciliation keeps asking Stripe, and clears this if the checkout turns up unpaid. If it turns up paid, the payment is refunded and this stays open for you to resolve.",
     settle: null,
   });
@@ -115,8 +115,8 @@ test("a failed refund with no row of ours tells an unbooked payment from a Dashb
   assert.deepEqual(explained(item(failed)), {
     title: "A refund to the student failed",
     body,
-    note: "It returned a payment no package booked. Nothing sends this money again, so pay the student another way, then record it.",
-    settle: RECORD,
+    note: "It returned a payment no package booked. Nothing sends this money again, so pay the student another way, then resolve this with a note on how you paid.",
+    settle: null,
   });
   assert.deepEqual(explained(item({ ...failed, paymentBooked: true, refund: "holding", heldRefundMinor: 10_500 })), {
     title: "A refund to the student failed",
@@ -166,8 +166,8 @@ test("a dispute card says what lifting the pause pays out", () => {
 test("the held line counts what the sweeps hold back, and is gone when they hold nothing", () => {
   assert.equal(
     heldLine({ refunds: 1, transfers: 2 }),
-    "The sweeps are holding back 1 refund and 2 tutor transfers. This includes any held by a flag that was already resolved.",
+    "The sweeps are holding back 1 refund and tutor pay on 2 packages. This includes any held by a flag that was already resolved.",
   );
-  assert.equal(heldLine({ refunds: 0, transfers: 1 }), "The sweeps are holding back 1 tutor transfer. This includes any held by a flag that was already resolved.");
+  assert.equal(heldLine({ refunds: 0, transfers: 1 }), "The sweeps are holding back tutor pay on 1 package. This includes any held by a flag that was already resolved.");
   assert.equal(heldLine({ refunds: 0, transfers: 0 }), null);
 });

@@ -4,7 +4,7 @@ import { formatMinor } from "@/server/modules/billing/pricing";
 const KIND: Record<DiscrepancyItem["kind"], { title: string; body: string; note?: string }> = {
   checkout_amount: {
     title: "Checkout took the wrong amount",
-    body: "Stripe charged a different amount than the package costs, so the package was cancelled and the payment is refunded.",
+    body: "Stripe charged a different amount than the package costs, so the package was cancelled and the payment is sent back.",
   },
   ledger_vs_stripe_charge: {
     title: "A charge does not match the ledger",
@@ -57,7 +57,7 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     return {
       ...plain,
       title: "Stripe could not find a checkout",
-      body: "Stripe said this checkout does not exist, so the package was let go. Nothing was charged on it.",
+      body: "Stripe said this checkout does not exist, so the package was let go. Stripe found no payment on it.",
       note: "The reconciliation keeps asking Stripe, and clears this if the checkout turns up unpaid. If it turns up paid, the payment is refunded and this stays open for you to resolve.",
     };
   }
@@ -66,7 +66,7 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
       ...plain,
       ...(charge && {
         title: "Stripe took money no package booked",
-        body: "The student paid, but no package on the ledger booked the payment, so the payment is refunded.",
+        body: "The student paid, but no package on the ledger booked the payment, so the payment is sent back.",
       }),
       note: item.refund === "failed"
         ? "Its refund failed at Stripe. Answer it on the failed refund card for this payment."
@@ -81,7 +81,8 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     if (!item.paymentBooked) {
       return {
         ...plain,
-        note: "It returned a payment no package booked. Nothing sends this money again, so pay the student another way, then record it.",
+        note: "It returned a payment no package booked. Nothing sends this money again, so pay the student another way, then resolve this with a note on how you paid.",
+        settle: null,
       };
     }
     const waiting = item.heldRefundMinor === null ? null : formatMinor(item.heldRefundMinor, item.currency);
@@ -121,7 +122,7 @@ export function disputeBody(canLift: boolean): string {
 const count = (n: number, noun: string) => (n === 0 ? "" : `${n} ${noun}${n === 1 ? "" : "s"}`);
 
 export function heldLine({ refunds, transfers }: MoneyForOperator["held"]): string | null {
-  const holding = [count(refunds, "refund"), count(transfers, "tutor transfer")].filter(Boolean).join(" and ");
+  const holding = [count(refunds, "refund"), transfers && `tutor pay on ${count(transfers, "package")}`].filter(Boolean).join(" and ");
   return holding
     ? `The sweeps are holding back ${holding}. This includes any held by a flag that was already resolved.`
     : null;
