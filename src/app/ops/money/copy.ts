@@ -48,7 +48,7 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
         item.refund === "failed"
           ? "That Dashboard refund then failed at Stripe, so the student did not get it. Pay them another way and record it on the failed refund card for this payment, then resolve this."
           : item.canSettle
-            ? "Booking it records the Dashboard refund as the package refund. If the two amounts differ, the difference comes back as a flag on the payment."
+            ? "Booking it records the Dashboard refund as the package refund. If the Ledger and Stripe amounts on this card differ, settle the difference yourself."
             : null,
       settle: item.canSettle ? { label: "Book this Dashboard refund", pending: "Booking…" } : null,
     };

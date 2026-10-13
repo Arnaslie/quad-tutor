@@ -316,7 +316,7 @@ export async function resolveDiscrepancy(params: {
  * id>` in the same transaction, so it stays the engagement's one row of its kind and no sweep sees it again. A failed
  * Dashboard refund's flag names no row, so it stamps the package refund it holds, if one is written yet. A flag
  * on a refund made in the Dashboard stamps the row with that `re_…` instead: it is the refund that happened, and the
- * reconciliation then counts it. Any gap between its amount and the row's stays on the charge for ops. One that then
+ * reconciliation then counts it. Any gap between its amount and the row's is ops' to settle. One that then
  * failed at Stripe is never booked: the student is paid by hand on the payment's refund_failed flag.
  */
 export async function recordManualSettlement(params: {

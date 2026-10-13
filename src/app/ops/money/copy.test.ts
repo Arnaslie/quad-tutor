@@ -60,7 +60,7 @@ test("a Dashboard refund offers booking only while its refund row is unsent", ()
   assert.deepEqual(explained(item({ ...dashboard, canSettle: true, canResolve: false })), {
     title: "A refund was made in the Stripe Dashboard",
     body: "Someone refunded this payment in the Dashboard, so the package refund was stopped rather than sent a second time.",
-    note: "Booking it records the Dashboard refund as the package refund. If the two amounts differ, the difference comes back as a flag on the payment.",
+    note: "Booking it records the Dashboard refund as the package refund. If the Ledger and Stripe amounts on this card differ, settle the difference yourself.",
     settle: { label: "Book this Dashboard refund", pending: "Booking…" },
   });
   assert.deepEqual(explained(item(dashboard)), {
