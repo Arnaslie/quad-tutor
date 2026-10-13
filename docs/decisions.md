@@ -682,7 +682,13 @@ bounced one. Resolving the flag releases that refund to the card. Settling it by
 stamps the held refund row `manual:<discrepancy id>` in the same transaction, so it stays
 the engagement's one refund and no sweep sends it; settled before the package ends, there
 is no row yet and the flag only resolves. A row that fails on a `refund_failed` ops already
-resolved reopens it at that row's amount, because the money it names is new. Ops pays the
+resolved reopens it at that row's amount, because the money it names is new. So does a
+further Dashboard refund that fails on the same PaymentIntent, at its own amount, and it
+holds the package refund again. The flag records the id of every refund whose failure it
+carries in `failed_refund_ids`, and only a refund not in that list is news: the
+reconciliation replays every failed refund on the PaymentIntent each day, so an amount
+cannot tell a new failure from an old one, and two failures of different amounts would
+reopen the flag every day. Ops pays the
 student another way and records it with `recordManualSettlement` in `billing/ops.ts`
 (formerly `recordManualRefund`), which resolves the discrepancy and, when it names an
 unstamped refund or transfer row, stamps that row `manual:<discrepancy id>` in the same

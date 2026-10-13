@@ -585,6 +585,7 @@ export const moneyDiscrepancy = pgTable(
     resolutionNote: text("resolution_note"),
     resolvedByUserId: text("resolved_by_user_id").references(() => user.id),
     refundReference: text("refund_reference").unique(),
+    failedRefundIds: text("failed_refund_ids").array().notNull().default(sql`'{}'`),
   },
   (t) => [
     index("money_discrepancy_institution_idx").on(t.institutionId, t.resolvedAt),

@@ -1,0 +1,1 @@
+ALTER TABLE "money_discrepancy" ADD COLUMN "failed_refund_ids" text[] DEFAULT '{}' NOT NULL;

@@ -5,7 +5,7 @@ import { after, test } from "node:test";
 import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { ledgerEntry, moneyDiscrepancy, paymentDispute } from "@/server/db/schema";
+import { engagement, ledgerEntry, moneyDiscrepancy, paymentDispute } from "@/server/db/schema";
 import { endPackage } from "@/server/modules/engagements/termEnd";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
@@ -307,6 +307,26 @@ test("settling a failed Dashboard refund before the package ends only resolves i
   assert.deepEqual(await stripeRefunds(checkoutSessionId), [[2_000, "failed"], [10_500, "succeeded"]]);
   assert.match((await rows(engagementId, "refund"))[0].stripeReference!, /^re_fake_/);
   await assertMoneyInvariants(w.institutionId);
+});
+
+test("a second failed Dashboard refund after ops resolved the first reopens the flag at its amount and holds the package refund, and replaying both is not news", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const { actor, engagementId, paymentIntentId, flagId } = await bouncedDashboardRefund(w);
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: flagId, note: "card replaced" }), { ok: true });
+
+  const second = await fakeStripe.dashboardRefund(paymentIntentId, 3_000);
+  await fakeStripe.failRefund(second.id);
+  assert.deepEqual(await deliver(await fakeStripe.refundEvent(second.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: null });
+  assert.deepEqual(await flag(flagId), { resolved: false, note: null, by: null });
+  assert.deepEqual((await moneyForOperator(ops)).discrepancies.map((d) => [d.id, d.ledgerAmountMinor]), [[flagId, 3_000]]);
+  await endPackage({ actor, engagementId });
+  assert.equal(await refundThroughStripe({ engagementId, institutionId: w.institutionId }), "skipped");
+
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: flagId, note: "second card checked" }), { ok: true });
+  await db.update(engagement).set({ reconciledAt: null }).where(eq(engagement.id, engagementId));
+  await runReconciliation(w.institutionId, Date.now() + 10_000);
+  assert.deepEqual(await flag(flagId), { resolved: true, note: "second card checked", by: ops.userId }, "replaying both failures is not news");
 });
 
 test("a held package refund Stripe stamps while ops settles it refuses the settlement", async () => {

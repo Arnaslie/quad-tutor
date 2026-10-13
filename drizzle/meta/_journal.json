@@ -218,6 +218,13 @@
       "when": 1791839158789,
       "tag": "0030_easy_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791913985361,
+      "tag": "0031_tired_toro",
+      "breakpoints": true
     }
   ]
 }

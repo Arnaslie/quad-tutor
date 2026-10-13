@@ -64,7 +64,9 @@ export const FORFEITED_PREFIX = "forfeited:";
  * A refund Stripe could not deliver is never re-issued by code: the card that bounced it would bounce
  * the next one too. Keyed on the PaymentIntent; a repeat on it fills in the ledger row if the first had none.
  * One PaymentIntent never carries two refund rows: it is one engagement's purchase, with one refund.
- * A row failing on a flag ops already resolved reopens it at that row's amount: the money it names is new news.
+ * A row failing, or a refund the flag has not recorded failing, on a flag ops already resolved reopens it at that
+ * amount: the money it names is news. The reconciliation replays every failed refund on the PaymentIntent each
+ * day, so which refunds already failed is told apart by their ids, never by an amount.
  */
 export async function recordRefundFailure(
   ids: Ids,
@@ -90,24 +92,29 @@ export async function recordRefundFailure(
       ledgerAmountMinor: failed.amountMinor,
       stripeAmountMinor: 0,
       currency: failed.currency,
+      failedRefundIds: failed.refund ? [failed.refund.id] : [],
     })
     .onConflictDoUpdate({
       target: [moneyDiscrepancy.kind, moneyDiscrepancy.stripeReference],
       targetWhere: sql`${moneyDiscrepancy.stripeReference} is not null`,
       set: {
-        ledgerEntryId: onNewRow(sql`excluded.ledger_entry_id`, moneyDiscrepancy.ledgerEntryId),
-        ledgerAmountMinor: onNewRow(sql`excluded.ledger_amount_minor`, moneyDiscrepancy.ledgerAmountMinor),
-        detectedAt: onNewRow(sql`now()`, moneyDiscrepancy.detectedAt),
-        resolvedAt: onNewRow(sql`null`, moneyDiscrepancy.resolvedAt),
-        resolvedByUserId: onNewRow(sql`null`, moneyDiscrepancy.resolvedByUserId),
-        resolutionNote: onNewRow(sql`null`, moneyDiscrepancy.resolutionNote),
+        ledgerEntryId: sql`coalesce(${moneyDiscrepancy.ledgerEntryId}, excluded.ledger_entry_id)`,
+        ledgerAmountMinor: onNews(sql`excluded.ledger_amount_minor`, moneyDiscrepancy.ledgerAmountMinor),
+        detectedAt: onNews(sql`now()`, moneyDiscrepancy.detectedAt),
+        resolvedAt: onNews(sql`null`, moneyDiscrepancy.resolvedAt),
+        resolvedByUserId: onNews(sql`null`, moneyDiscrepancy.resolvedByUserId),
+        resolutionNote: onNews(sql`null`, moneyDiscrepancy.resolutionNote),
+        failedRefundIds: sql`case when ${moneyDiscrepancy.failedRefundIds} @> excluded.failed_refund_ids
+          then ${moneyDiscrepancy.failedRefundIds} else ${moneyDiscrepancy.failedRefundIds} || excluded.failed_refund_ids end`,
       },
       setWhere: sql`${moneyDiscrepancy.institutionId} = excluded.institution_id`,
     });
 }
 
-const onNewRow = (value: SQL, column: AnyColumn) =>
-  sql`case when ${moneyDiscrepancy.ledgerEntryId} is null and excluded.ledger_entry_id is not null then ${value} else ${column} end`;
+const onNews = (value: SQL, column: AnyColumn) =>
+  sql`case when (${moneyDiscrepancy.ledgerEntryId} is null and excluded.ledger_entry_id is not null)
+    or (${moneyDiscrepancy.resolvedAt} is not null and not ${moneyDiscrepancy.failedRefundIds} @> excluded.failed_refund_ids)
+    then ${value} else ${column} end`;
 
 const blocker = alias(moneyDiscrepancy, "refund_blocker");
 
