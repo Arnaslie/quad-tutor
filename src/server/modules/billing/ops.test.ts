@@ -49,6 +49,10 @@ async function reversed(w: World, amountMinor: number) {
   return { ...bought, sent, reversal };
 }
 
+async function answers(engagementId: string, reversalId: string) {
+  return (await rows(engagementId, "tutor_transfer")).filter((r) => r.correctsEntryId === reversalId).map((r) => [r.amountMinor, r.stripeReference]);
+}
+
 async function refusedTransfer(w: World) {
   const bought = await delivered(w);
   await patched("createTransfer", async () => { throw new GatewayError("Insufficient funds.", { status: 400, code: "balance_insufficient" }); }, async () => {
@@ -105,7 +109,7 @@ test("a reversal ops re-sends goes out as its own transfer, and a later accrual 
   assert.deepEqual(await creates(async () => {
     assert.equal(await sendTransferRow(resend), "transferred");
   }), [1_000]);
-  const [, again] = await rows(engagementId, "tutor_transfer");
+  const again = (await rows(engagementId, "tutor_transfer")).find((r) => r.correctsEntryId === reversal.id)!;
   assert.equal(again.id, resend.id);
   assert.match(again.stripeReference!, /^tr_fake_/);
   assert.notEqual(again.stripeReference, sent.stripeReference);
@@ -126,7 +130,7 @@ test("a forfeited reversal is neither owed nor transferred, and one paid by hand
   const forfeiting = await world();
   const { engagementId, reversal } = await reversed(forfeiting, 1_000);
   assert.deepEqual(await answerReversal({ operator: await operator(forfeiting.institutionId), reversalId: reversal.id, answer: "forfeited" }), { ok: true, resend: null });
-  assert.deepEqual((await rows(engagementId, "tutor_transfer")).map((r) => [r.amountMinor, r.stripeReference]).slice(1), [[1_000, `forfeited:${reversal.id}`]]);
+  assert.deepEqual(await answers(engagementId, reversal.id), [[1_000, `forfeited:${reversal.id}`]]);
   assert.deepEqual(await earningsForTutor(forfeiting.tutor), { earnedMinor: 3_150, owedMinor: 0, transferredMinor: 2_150, currency: "usd", sessionsDelivered: 1 });
   assert.deepEqual(await creates(async () => {
     assert.deepEqual(await sweep(forfeiting), nothing);
@@ -136,9 +140,18 @@ test("a forfeited reversal is neither owed nor transferred, and one paid by hand
   const byHand = await world();
   const paid = await reversed(byHand, 1_000);
   assert.deepEqual(await answerReversal({ operator: await operator(byHand.institutionId), reversalId: paid.reversal.id, answer: "manual" }), { ok: true, resend: null });
-  assert.deepEqual((await rows(paid.engagementId, "tutor_transfer")).map((r) => [r.amountMinor, r.stripeReference]).slice(1), [[1_000, `manual:${paid.reversal.id}`]]);
+  assert.deepEqual(await answers(paid.engagementId, paid.reversal.id), [[1_000, `manual:${paid.reversal.id}`]]);
   assert.deepEqual(await earningsForTutor(byHand.tutor), { earnedMinor: 3_150, owedMinor: 0, transferredMinor: 3_150, currency: "usd", sessionsDelivered: 1 });
   await assertMoneyInvariants(byHand.institutionId);
+});
+
+test("rows lists an engagement's ledger rows oldest first, whatever order they were written in", async () => {
+  const w = await world();
+  const { engagementId, sent, reversal } = await reversed(w, 1_000);
+  await answerReversal({ operator: await operator(w.institutionId), reversalId: reversal.id, answer: "forfeited" });
+  const [answer] = (await rows(engagementId, "tutor_transfer")).filter((r) => r.correctsEntryId === reversal.id);
+  await db.update(ledgerEntry).set({ occurredAt: new Date(Date.now() - 86_400_000) }).where(eq(ledgerEntry.id, answer.id));
+  assert.deepEqual((await rows(engagementId, "tutor_transfer")).map((r) => r.stripeReference), [`forfeited:${reversal.id}`, sent.stripeReference]);
 });
 
 test("a reversal is answered once, and a re-send waits while a dispute holds the engagement", async () => {

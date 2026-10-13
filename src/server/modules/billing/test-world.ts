@@ -151,9 +151,15 @@ type LedgerType = (typeof ledgerEntryType.enumValues)[number];
 
 export async function rows(engagementId: string, type: LedgerType) {
   return db
-    .select({ id: ledgerEntry.id, amountMinor: ledgerEntry.amountMinor, stripeReference: ledgerEntry.stripeReference })
+    .select({
+      id: ledgerEntry.id,
+      amountMinor: ledgerEntry.amountMinor,
+      stripeReference: ledgerEntry.stripeReference,
+      correctsEntryId: ledgerEntry.correctsEntryId,
+    })
     .from(ledgerEntry)
-    .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, type)));
+    .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, type)))
+    .orderBy(ledgerEntry.occurredAt, ledgerEntry.id);
 }
 
 /** Puts the rows back in time, as if the call after commit died that long ago. */
