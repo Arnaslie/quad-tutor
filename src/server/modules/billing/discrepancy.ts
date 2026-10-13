@@ -33,11 +33,13 @@ export async function recordDiscrepancy(
         resolutionNote: null,
       },
       // The reconciliation resolves an orphaned account's flag only once a tutor holds it, so flagged again it is news.
-      setWhere: sql`${moneyDiscrepancy.resolvedAt} is not null and (
-        ${moneyDiscrepancy.ledgerAmountMinor} - ${moneyDiscrepancy.stripeAmountMinor}
-          is distinct from excluded.ledger_amount_minor - excluded.stripe_amount_minor
-        or (${moneyDiscrepancy.kind} = 'orphaned_account' and ${moneyDiscrepancy.resolvedByUserId} is null)
-      )`,
+      setWhere: sql`${moneyDiscrepancy.institutionId} = excluded.institution_id
+        and ${moneyDiscrepancy.resolvedAt} is not null
+        and (
+          ${moneyDiscrepancy.ledgerAmountMinor} - ${moneyDiscrepancy.stripeAmountMinor}
+            is distinct from excluded.ledger_amount_minor - excluded.stripe_amount_minor
+          or (${moneyDiscrepancy.kind} = 'orphaned_account' and ${moneyDiscrepancy.resolvedByUserId} is null)
+        )`,
     })
     .returning({ id: moneyDiscrepancy.id });
   if (created || !values.stripeReference) return created?.id ?? null;
@@ -100,6 +102,7 @@ export async function recordRefundFailure(
         resolvedByUserId: onNewRow(sql`null`, moneyDiscrepancy.resolvedByUserId),
         resolutionNote: onNewRow(sql`null`, moneyDiscrepancy.resolutionNote),
       },
+      setWhere: sql`${moneyDiscrepancy.institutionId} = excluded.institution_id`,
     });
 }
 

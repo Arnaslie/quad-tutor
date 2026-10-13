@@ -12,11 +12,12 @@ import type { Actor } from "@/server/modules/identity/actor";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
 import { settleCheckout } from "./checkout-session";
+import { recordDiscrepancy, recordRefundFailure } from "./discrepancy";
 import { assertMoneyInvariants } from "./invariants";
 import { moneyForOperator, recordManualSettlement, resolveDiscrepancy } from "./ops";
 import { accountsThisRun, runReconciliation } from "./reconcile";
 import { blockedRefunds, refundThroughStripe } from "./refunds";
-import { fakeStripe, stripeGateway } from "./stripe";
+import { GatewayError, fakeStripe, stripeGateway } from "./stripe";
 import { accepted, anotherSessionDelivered, checkingOut, cleanup, deliver, delivered, noStripe, operator, patched, person, rows, world, type World } from "./test-world";
 import { runTransfers } from "./transfers";
 
@@ -506,4 +507,48 @@ test("one cron run lists Connect accounts once for every campus", async () => {
     await Promise.all(campuses.map(async (w) => (await flags(w.institutionId)).map((f) => f.stripeReference))),
     strays.map((stray) => [stray.id]),
   );
+});
+
+test("a Connect account listing that failed is asked for again by the next campus in the run", async () => {
+  const campuses = [await world(), await world()];
+  const stray = await stripeGateway().createAccount({ tutorProfileId: randomUUID(), institutionId: campuses[1].institutionId, email: "stray@example.test" });
+  let listed = 0;
+  const real = stripeGateway().listAccounts;
+  await patched("listAccounts", async () => {
+    listed += 1;
+    if (listed === 1) throw new GatewayError("Stripe is down.", { status: 503 });
+    return real();
+  }, async () => {
+    const accounts = accountsThisRun();
+    assert.deepEqual(await runReconciliation(campuses[0].institutionId, Date.now() + 10_000, accounts), { checked: 0, flagged: 0, resolved: 0, failed: 1 });
+    assert.deepEqual(await runReconciliation(campuses[1].institutionId, Date.now() + 10_000, accounts), counts(0, 1));
+  });
+  assert.equal(listed, 2);
+  assert.deepEqual((await flags(campuses[1].institutionId)).map((f) => [f.kind, f.stripeReference]), [["orphaned_account", stray.id]]);
+});
+
+test("a flag on another campus's key is never touched", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const other = await world();
+  const { engagementId, paymentIntentId } = await delivered(w);
+  await fakeStripe.dashboardRefund(paymentIntentId, 5_000);
+  assert.deepEqual(await reconcile(w), counts(1, 1));
+  const [item] = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: item.id, note: "support refunded part" }), { ok: true });
+  const theirs = await delivered(other);
+  const [theirRow] = await rows(theirs.engagementId, "package_purchase");
+
+  assert.equal(
+    await recordDiscrepancy(ids(other, theirs.engagementId), { kind: "ledger_vs_stripe_charge", stripeReference: paymentIntentId, ledgerAmountMinor: 1, stripeAmountMinor: 0 }),
+    null,
+  );
+  await recordRefundFailure(ids(w, engagementId), { refund: null, paymentIntentId, amountMinor: 2_000, currency: "usd" });
+  await recordRefundFailure(ids(other, theirs.engagementId), { refund: null, paymentIntentId, amountMinor: 1, currency: "usd", ledgerEntryId: theirRow.id });
+
+  assert.deepEqual(await flags(w.institutionId), [
+    { kind: "ledger_vs_stripe_charge", engagementId, ledgerEntryId: null, stripeReference: paymentIntentId, ledgerAmountMinor: 14_000, stripeAmountMinor: 9_000, resolutionNote: "support refunded part" },
+    { kind: "refund_failed", engagementId, ledgerEntryId: null, stripeReference: paymentIntentId, ledgerAmountMinor: 2_000, stripeAmountMinor: 0, resolutionNote: null },
+  ]);
+  assert.deepEqual(await flags(other.institutionId), []);
 });

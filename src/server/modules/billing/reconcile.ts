@@ -294,7 +294,13 @@ async function settleMissingSession(flag: { id: string; institutionId: string; s
 
 export function accountsThisRun(): () => Promise<ConnectAccount[]> {
   let listed: Promise<ConnectAccount[]> | undefined;
-  return () => (listed ??= stripeGateway().listAccounts());
+  return () =>
+    (listed ??= stripeGateway()
+      .listAccounts()
+      .catch((error: unknown) => {
+        listed = undefined;
+        throw error;
+      }));
 }
 
 async function resolveHeldAccounts(institutionId: string): Promise<number> {
