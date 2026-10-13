@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { and, eq } from "drizzle-orm";
 
@@ -264,6 +265,50 @@ test("a key that cannot see a charged payment stops the campus and flags nothing
   assert.equal(row.reconciledAt, null);
 
   assert.deepEqual(await reconcile(w), counts(1, 1), "once the key is right, the next run compares it");
+});
+
+test("a daily pass the key stopped runs again on the next cron run", async () => {
+  const w = await world();
+  const { paymentIntentId } = await delivered(w);
+  assert.deepEqual(await reconcile(w), counts(1));
+  await aDayLater(w);
+  const stray = await stripeGateway().createAccount({ tutorProfileId: randomUUID(), institutionId: w.institutionId, email: "stray@example.test" });
+  fakeStripe.hide(paymentIntentId);
+  try {
+    await assert.rejects(reconcile(w), /STRIPE_SECRET_KEY cannot see/);
+  } finally {
+    fakeStripe.show(paymentIntentId);
+  }
+  assert.deepEqual(await flags(w.institutionId), []);
+
+  assert.deepEqual(await reconcile(w), counts(0, 1));
+  assert.deepEqual((await flags(w.institutionId)).map((f) => [f.kind, f.stripeReference]), [["orphaned_account", stray.id]]);
+});
+
+test("a daily pass the deadline cut short runs again on the next cron run", async () => {
+  const w = await world();
+  const sessions = [(await checkingOut(w)).checkoutSessionId, (await checkingOut(w)).checkoutSessionId];
+  for (const id of sessions) fakeStripe.hide(id);
+  try {
+    for (const id of sessions) {
+      const [row] = await db.select({ id: engagement.id }).from(engagement).where(eq(engagement.stripeCheckoutSessionId, id));
+      assert.equal(await settleCheckout(ids(w, row.id)), "released");
+    }
+    const asked: string[] = [];
+    const real = stripeGateway().retrieveCheckout;
+    await patched("retrieveCheckout", async (id) => {
+      asked.push(id);
+      await sleep(400);
+      return real(id);
+    }, async () => {
+      assert.deepEqual(await runReconciliation(w.institutionId, Date.now() + 300), counts(0));
+      assert.equal(asked.length, 1, "the deadline stopped the pass after the first Session");
+      assert.deepEqual(await reconcile(w), counts(0));
+      assert.equal(asked.length, 3, "the next run asked about both again");
+    });
+  } finally {
+    for (const id of sessions) fakeStripe.show(id);
+  }
 });
 
 test("a row unstamped for a day is flagged without naming it, and the flag goes once the row is stamped", async () => {

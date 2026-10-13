@@ -9,7 +9,7 @@ import { engagement, ledgerEntry, moneyDiscrepancy, paymentDispute, tutorProfile
 import { syncCheckout } from "./checkout-session";
 import { ledgerRowBlocker, recordDiscrepancy, type Ids } from "./discrepancy";
 import { handleDisputeEvent } from "./disputes";
-import { claim, withLease } from "./lease";
+import { claim, release, withLease } from "./lease";
 import { neverCharged, reconcileRefund } from "./refunds";
 import { GatewayError, errorFacts, stripeGateway, type Payment, type Transfer } from "./stripe";
 import { applyTransfer } from "./transfers";
@@ -17,6 +17,7 @@ import { applyTransfer } from "./transfers";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_MS = 7 * DAY_MS;
 const LEASE_MS = 5 * 60 * 1000;
+const DAILY = "reconciliation-daily";
 const DAILY_MS = 23 * 60 * 60 * 1000;
 const LIMIT = 20;
 const IMPATIENT = { patient: false };
@@ -339,30 +340,8 @@ async function checkKey(institutionId: string): Promise<void> {
   if (charged) await paymentOf(charged);
 }
 
-async function reconcileCampus(institutionId: string, deadline: number): Promise<Omit<ReconcileCounts, "flagged">> {
-  const counts = { checked: 0, resolved: 0, failed: 0 };
-  const each = async <T>(items: T[], subject: (item: T) => string, work: (item: T) => Promise<Outcome>) => {
-    for (const [index, item] of items.entries()) {
-      if (index > 0 && Date.now() > deadline) return;
-      try {
-        if ((await work(item)) === "resolved") counts.resolved += 1;
-      } catch (error) {
-        if (error instanceof KeyMismatch) throw error;
-        counts.failed += 1;
-        console.error(`[reconcile] ${subject(item)} failed`, errorFacts(error));
-      }
-    }
-  };
-
-  await each(await dueEngagements(institutionId), (e) => e.engagementId, async (e) => {
-    await reconcileEngagement(e);
-    counts.checked += 1;
-    return null;
-  });
-
-  if (Date.now() > deadline || !(await claim(institutionId, "reconciliation-daily", DAILY_MS))) return counts;
-  await checkKey(institutionId);
-  const unstamped = await db
+const unstampedFlags = (institutionId: string) =>
+  db
     .select({
       id: moneyDiscrepancy.id,
       engagementId: engagement.id,
@@ -378,17 +357,17 @@ async function reconcileCampus(institutionId: string, deadline: number): Promise
     .where(openFlags(institutionId, "unstamped_reference"))
     .orderBy(moneyDiscrepancy.detectedAt)
     .limit(LIMIT);
-  await each(unstamped, (flag) => flag.id, settleUnstampedFlag);
 
-  const missingSessions = await db
+const missingSessions = (institutionId: string) =>
+  db
     .select({ id: moneyDiscrepancy.id, institutionId: moneyDiscrepancy.institutionId, sessionId: sql<string>`${moneyDiscrepancy.stripeReference}` })
     .from(moneyDiscrepancy)
     .where(and(openFlags(institutionId, "ledger_vs_stripe_charge"), like(moneyDiscrepancy.stripeReference, "cs\\_%")))
     .orderBy(moneyDiscrepancy.detectedAt)
     .limit(LIMIT);
-  await each(missingSessions, (flag) => flag.sessionId, settleMissingSession);
 
-  const disputes = await db
+const openDisputes = (institutionId: string) =>
+  db
     .select({ id: paymentDispute.stripeDisputeId })
     .from(paymentDispute)
     .where(
@@ -400,15 +379,56 @@ async function reconcileCampus(institutionId: string, deadline: number): Promise
     )
     .orderBy(paymentDispute.openedAt)
     .limit(LIMIT);
-  await each(disputes, (dispute) => dispute.id, async (dispute) => {
-    await handleDisputeEvent(dispute.id);
+
+async function reconcileCampus(institutionId: string, deadline: number): Promise<Omit<ReconcileCounts, "flagged">> {
+  const counts = { checked: 0, resolved: 0, failed: 0 };
+  /** False when the deadline stopped it before the last item. */
+  const each = async <T>(items: T[], subject: (item: T) => string, work: (item: T) => Promise<Outcome>) => {
+    for (const [index, item] of items.entries()) {
+      if (index > 0 && Date.now() > deadline) return false;
+      try {
+        if ((await work(item)) === "resolved") counts.resolved += 1;
+      } catch (error) {
+        if (error instanceof KeyMismatch) throw error;
+        counts.failed += 1;
+        console.error(`[reconcile] ${subject(item)} failed`, errorFacts(error));
+      }
+    }
+    return true;
+  };
+
+  await each(await dueEngagements(institutionId), (e) => e.engagementId, async (e) => {
+    await reconcileEngagement(e);
+    counts.checked += 1;
     return null;
   });
 
-  await flagOrphanedAccounts(institutionId).catch((error) => {
-    counts.failed += 1;
-    console.error(`[reconcile] orphaned account scan of ${institutionId} failed`, errorFacts(error));
-  });
+  const daily = async () => {
+    await checkKey(institutionId);
+    return (
+      (await each(await unstampedFlags(institutionId), (flag) => flag.id, settleUnstampedFlag)) &&
+      (await each(await missingSessions(institutionId), (flag) => flag.sessionId, settleMissingSession)) &&
+      (await each(await openDisputes(institutionId), (dispute) => dispute.id, async (dispute) => {
+        await handleDisputeEvent(dispute.id);
+        return null;
+      })) &&
+      (await each([institutionId], (id) => `orphaned account scan of ${id}`, async (id) => {
+        await flagOrphanedAccounts(id);
+        return null;
+      }))
+    );
+  };
+
+  if (Date.now() > deadline) return counts;
+  const heldUntil = await claim(institutionId, DAILY, DAILY_MS);
+  if (!heldUntil) return counts;
+  let finished = false;
+  try {
+    finished = await daily();
+  } finally {
+    // A pass the key or the deadline cut short runs again on the next cron run, not tomorrow.
+    if (!finished) await release(institutionId, DAILY, heldUntil);
+  }
   return counts;
 }
 

@@ -34,11 +34,14 @@ export async function withLease<T>(
   try {
     return await work();
   } finally {
-    await db
-      .update(sweepLease)
-      .set({ heldUntil: new Date(0) })
-      .where(
-        and(eq(sweepLease.institutionId, institutionId), eq(sweepLease.name, name), eq(sweepLease.heldUntil, heldUntil)),
-      );
+    await release(institutionId, name, heldUntil);
   }
+}
+
+/** Lets the lease go, unless it lapsed and someone else claimed it since. */
+export async function release(institutionId: string, name: string, heldUntil: Date): Promise<void> {
+  await db
+    .update(sweepLease)
+    .set({ heldUntil: new Date(0) })
+    .where(and(eq(sweepLease.institutionId, institutionId), eq(sweepLease.name, name), eq(sweepLease.heldUntil, heldUntil)));
 }
