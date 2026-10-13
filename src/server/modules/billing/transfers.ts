@@ -186,7 +186,7 @@ export async function blockedEngagements(institutionId: string, openOnly = false
             unstampedTransfer(
               engagement.id,
               engagement.institutionId,
-              exists(ledgerRowBlocker(owing.id, owing.institutionId, openOnly)),
+              exists(ledgerRowBlocker(owing.id, owing.institutionId, { openOnly })),
             ),
           ),
         ),

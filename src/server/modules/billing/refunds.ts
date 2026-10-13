@@ -74,7 +74,7 @@ const boughtThroughStripe = and(
   like(purchase.stripeReference, "pi\\_%"),
 );
 const unstampedRefund = and(eq(ledgerEntry.type, "refund"), isNull(ledgerEntry.stripeReference));
-const blocked = (openOnly = false) => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId, openOnly);
+const blocked = (openOnly = false) => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId, { openOnly });
 const held = () => failedDashboardRefund(purchase.stripeReference, purchase.institutionId);
 
 /** The unstamped refund row of the engagement a PaymentIntent bought: the one a failed refund on that PaymentIntent holds. */

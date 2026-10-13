@@ -230,7 +230,6 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
   const context = await contexts(campuses, [
     ...new Set([...flags, ...disputes, ...reversals].flatMap((row) => (row.engagementId ? [row.engagementId] : []))),
   ]);
-  // A money item whose engagement cannot be shown is still listed, without its context.
   const on = (engagementId: string) => context.get(engagementId) ?? null;
   const sum = (counts: number[]) => counts.reduce((total, n) => total + n, 0);
 
