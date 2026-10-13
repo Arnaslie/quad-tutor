@@ -751,7 +751,9 @@ checks the charge net of refunds, each refund's status, and the transfers net of
 and books a missed transfer or reversal event as the webhook would. There is one flag per
 kind and Stripe object: a repeat leaves an open flag alone, and reopens a resolved one only
 when its amounts have moved, so a second Dashboard refund a month later is news and the
-same divergence seen again is not. A claim held for 23 hours gates the daily pass, and is
+same divergence seen again is not. A transfers gap has no one Stripe object, so its flag is
+keyed on the transfer group, the engagement's id, in `stripe_reference`; without that key a
+gap ops resolved was raised again the next day and paused the tutor's pay again. A claim held for 23 hours gates the daily pass, and is
 let go only when the key check fails or the deadline cuts the pass short, so the next run
 tries again instead of the next day. The pass settles flags Stripe can now answer,
 re-reads open disputes, and flags Connect accounts carrying the campus's id that no tutor

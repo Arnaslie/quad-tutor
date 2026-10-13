@@ -212,11 +212,37 @@ test("a reversal the webhook missed is booked and the transfers agree; a Dashboa
   await aDayLater(w, engagementId);
   assert.deepEqual(await reconcile(w), counts(1, 1));
   assert.deepEqual(await flags(w.institutionId), [
-    { kind: "ledger_vs_stripe_transfers", engagementId, ledgerEntryId: null, stripeReference: null, ledgerAmountMinor: 2_150, stripeAmountMinor: 2_650, resolutionNote: null },
+    { kind: "ledger_vs_stripe_transfers", engagementId, ledgerEntryId: null, stripeReference: engagementId, ledgerAmountMinor: 2_150, stripeAmountMinor: 2_650, resolutionNote: null },
   ]);
   await aDayLater(w, engagementId);
   assert.deepEqual(await reconcile(w), counts(1), "an open transfer flag on the engagement is not raised again");
   await assertMoneyInvariants(w.institutionId);
+});
+
+test("a transfer gap ops resolved stays resolved while it holds, and the same flag reopens when it moves", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const { engagementId } = await delivered(w);
+  assert.equal((await runTransfers(w.institutionId, Date.now() + 10_000)).sent, 1);
+  await fakeStripe.dashboardTransfer({ engagementId, accountId: w.accountId, amountMinor: 500 });
+  assert.deepEqual(await reconcile(w), counts(1, 1));
+  const [item] = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: item.id, note: "bonus paid in the Dashboard" }), { ok: true });
+
+  await aDayLater(w, engagementId);
+  assert.deepEqual(await reconcile(w), counts(1), "the same gap stays resolved");
+  assert.deepEqual(await flags(w.institutionId), [
+    { kind: "ledger_vs_stripe_transfers", engagementId, ledgerEntryId: null, stripeReference: engagementId, ledgerAmountMinor: 3_150, stripeAmountMinor: 3_650, resolutionNote: "bonus paid in the Dashboard" },
+  ]);
+
+  await fakeStripe.dashboardTransfer({ engagementId, accountId: w.accountId, amountMinor: 200 });
+  await aDayLater(w, engagementId);
+  assert.deepEqual(await reconcile(w), counts(1, 1));
+  assert.deepEqual(await flags(w.institutionId), [
+    { kind: "ledger_vs_stripe_transfers", engagementId, ledgerEntryId: null, stripeReference: engagementId, ledgerAmountMinor: 3_150, stripeAmountMinor: 3_850, resolutionNote: null },
+  ]);
+  const [reopened] = await db.select({ id: moneyDiscrepancy.id, resolvedAt: moneyDiscrepancy.resolvedAt }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.institutionId, w.institutionId));
+  assert.deepEqual(reopened, { id: item.id, resolvedAt: null });
 });
 
 test("a refund and a transfer stamped between the Stripe reads and the ledger read are not flagged", async () => {

@@ -170,11 +170,16 @@ async function flagCharge(e: Reconciling, gap: Gap): Promise<void> {
   });
 }
 
+/**
+ * Keyed on the transfer group, the engagement's id, so a gap ops resolved is not raised again until it moves. An open
+ * transfer flag of another source on the engagement, such as one on a single `tr_…`, already covers the gap.
+ */
 async function flagTransfers(e: Reconciling, gap: Gap): Promise<void> {
   if (await openFlag(e, "ledger_vs_stripe_transfers")) return;
   console.error(`[reconcile] ${e.engagementId} transferred ${gap.stripeNetMinor} at Stripe, ${gap.ledgerNetMinor} on the ledger; flagged for ops`);
   await recordDiscrepancy(e, {
     kind: "ledger_vs_stripe_transfers",
+    stripeReference: e.engagementId,
     ledgerAmountMinor: gap.ledgerNetMinor,
     stripeAmountMinor: gap.stripeNetMinor,
     currency: e.currency,
