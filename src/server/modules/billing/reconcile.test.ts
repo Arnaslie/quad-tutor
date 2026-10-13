@@ -156,6 +156,28 @@ test("a reversal the webhook missed is booked and the transfers agree; a Dashboa
   await assertMoneyInvariants(w.institutionId);
 });
 
+test("a refund and a transfer stamped between the Stripe reads and the ledger read are not flagged", async () => {
+  const w = await world();
+  const { actor, engagementId } = await delivered(w);
+  const real = stripeGateway().listTransfers;
+  let raced = false;
+  await patched("listTransfers", async (group) => {
+    const listed = await real(group);
+    if (!raced) {
+      raced = true;
+      assert.equal((await runTransfers(w.institutionId, Date.now() + 10_000)).sent, 1);
+      await endPackage({ actor, engagementId });
+      assert.equal(await refundThroughStripe(ids(w, engagementId)), "refunded");
+    }
+    return listed;
+  }, async () => {
+    assert.deepEqual(await reconcile(w), counts(1));
+  });
+  assert.deepEqual(await flags(w.institutionId), []);
+  assert.deepEqual([(await rows(engagementId, "refund"))[0].amountMinor, (await rows(engagementId, "tutor_transfer"))[0].amountMinor], [10_500, 3_150]);
+  await assertMoneyInvariants(w.institutionId);
+});
+
 test("an engagement compared today is not asked about again until tomorrow", async () => {
   const w = await world();
   await delivered(w);

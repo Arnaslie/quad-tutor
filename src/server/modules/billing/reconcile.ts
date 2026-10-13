@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import { and, desc, eq, exists, gt, inArray, isNull, like, lt, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
@@ -111,20 +113,29 @@ async function ledgerOf(ids: Ids) {
 }
 
 type Ledger = Awaited<ReturnType<typeof ledgerOf>>;
+type Gap = { ledgerNetMinor: number; stripeNetMinor: number; currency: string };
 
-async function compareCharge(e: Reconciling, payment: Payment, ledger: Ledger): Promise<void> {
-  if (ledger.inFlightRefunds > 0) return;
-  const ledgerNet = e.purchaseMinor - ledger.refundedMinor;
-  const stripeNet = payment.amountMinor - payment.refundedMinor;
-  if (ledgerNet === stripeNet && payment.currency === e.currency) return;
-  console.error(`[reconcile] ${e.paymentIntentId} nets ${stripeNet} ${payment.currency} at Stripe, ${ledgerNet} ${e.currency} on the ledger; flagged for ops`);
-  await recordDiscrepancy(e, {
-    kind: "ledger_vs_stripe_charge",
-    stripeReference: e.paymentIntentId,
-    ledgerAmountMinor: ledgerNet,
-    stripeAmountMinor: stripeNet,
-    currency: e.currency,
-  });
+function chargeGap(e: Reconciling, payment: Payment, ledger: Ledger): Gap | null {
+  if (ledger.inFlightRefunds > 0) return null;
+  const ledgerNetMinor = e.purchaseMinor - ledger.refundedMinor;
+  const stripeNetMinor = payment.amountMinor - payment.refundedMinor;
+  if (ledgerNetMinor === stripeNetMinor && payment.currency === e.currency) return null;
+  return { ledgerNetMinor, stripeNetMinor, currency: payment.currency };
+}
+
+/** Stripe's side counts every transfer in the group and every reversal, ours or not. */
+function transfersGap(e: Reconciling, transfers: Transfer[], ledger: Ledger): Gap | null {
+  if (ledger.inFlightTransfers > 0) return null;
+  const stripeNetMinor = transfers.reduce(
+    (sum, t) => sum + t.amountMinor - t.reversals.reduce((reversed, r) => reversed + r.amountMinor, 0),
+    0,
+  );
+  return stripeNetMinor === ledger.transferredMinor ? null : { ledgerNetMinor: ledger.transferredMinor, stripeNetMinor, currency: e.currency };
+}
+
+async function gaps(e: Reconciling, payment: Payment, transfers: Transfer[]) {
+  const ledger = await ledgerOf(e);
+  return { charge: chargeGap(e, payment, ledger), transfers: transfersGap(e, transfers, ledger) };
 }
 
 async function openFlag(ids: Ids, kind: (typeof moneyDiscrepancy.$inferSelect)["kind"]): Promise<boolean> {
@@ -143,19 +154,24 @@ async function openFlag(ids: Ids, kind: (typeof moneyDiscrepancy.$inferSelect)["
   return rows.length > 0;
 }
 
-/** Stripe's side counts every transfer in the group and every reversal, ours or not. */
-async function compareTransfers(e: Reconciling, transfers: Transfer[], ledger: Ledger): Promise<void> {
-  if (ledger.inFlightTransfers > 0) return;
-  const stripeNet = transfers.reduce(
-    (sum, t) => sum + t.amountMinor - t.reversals.reduce((reversed, r) => reversed + r.amountMinor, 0),
-    0,
-  );
-  if (stripeNet === ledger.transferredMinor || (await openFlag(e, "ledger_vs_stripe_transfers"))) return;
-  console.error(`[reconcile] ${e.engagementId} transferred ${stripeNet} at Stripe, ${ledger.transferredMinor} on the ledger; flagged for ops`);
+async function flagCharge(e: Reconciling, gap: Gap): Promise<void> {
+  console.error(`[reconcile] ${e.paymentIntentId} nets ${gap.stripeNetMinor} ${gap.currency} at Stripe, ${gap.ledgerNetMinor} ${e.currency} on the ledger; flagged for ops`);
+  await recordDiscrepancy(e, {
+    kind: "ledger_vs_stripe_charge",
+    stripeReference: e.paymentIntentId,
+    ledgerAmountMinor: gap.ledgerNetMinor,
+    stripeAmountMinor: gap.stripeNetMinor,
+    currency: e.currency,
+  });
+}
+
+async function flagTransfers(e: Reconciling, gap: Gap): Promise<void> {
+  if (await openFlag(e, "ledger_vs_stripe_transfers")) return;
+  console.error(`[reconcile] ${e.engagementId} transferred ${gap.stripeNetMinor} at Stripe, ${gap.ledgerNetMinor} on the ledger; flagged for ops`);
   await recordDiscrepancy(e, {
     kind: "ledger_vs_stripe_transfers",
-    ledgerAmountMinor: ledger.transferredMinor,
-    stripeAmountMinor: stripeNet,
+    ledgerAmountMinor: gap.ledgerNetMinor,
+    stripeAmountMinor: gap.stripeNetMinor,
     currency: e.currency,
   });
 }
@@ -193,9 +209,13 @@ async function reconcileEngagement(e: Reconciling): Promise<void> {
     for (const refund of await gateway.listRefunds(e.paymentIntentId)) await reconcileRefund(refund);
     const transfers = await gateway.listTransfers(e.engagementId);
     for (const transfer of transfers) if (transfer.ledgerEntryId) await applyTransfer(transfer);
-    const ledger = await ledgerOf(e);
-    await compareCharge(e, payment, ledger);
-    await compareTransfers(e, transfers, ledger);
+    const seen = await gaps(e, payment, transfers);
+    if (seen.charge || seen.transfers) {
+      // Stripe is read before the ledger, so a refund or transfer stamped in between shows as a gap once; only a gap seen twice is real.
+      const again = await gaps(e, await gateway.retrievePayment(e.paymentIntentId), await gateway.listTransfers(e.engagementId));
+      if (seen.charge && isDeepStrictEqual(seen.charge, again.charge)) await flagCharge(e, seen.charge);
+      if (seen.transfers && isDeepStrictEqual(seen.transfers, again.transfers)) await flagTransfers(e, seen.transfers);
+    }
   }
   await flagStaleRows(e);
   await db
