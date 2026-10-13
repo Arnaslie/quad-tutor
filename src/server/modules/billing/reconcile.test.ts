@@ -221,6 +221,11 @@ test("a reversal the webhook missed is booked and the transfers agree; a Dashboa
   assert.deepEqual(await flags(w.institutionId), [
     { kind: "ledger_vs_stripe_transfers", engagementId, ledgerEntryId: null, stripeReference: engagementId, ledgerAmountMinor: 2_150, stripeAmountMinor: 2_650, resolutionNote: null },
   ]);
+  assert.deepEqual(
+    (await moneyForOperator(await operator(w.institutionId))).discrepancies.map((d) => [d.kind, d.stripeReference]),
+    [["ledger_vs_stripe_transfers", null]],
+    "the engagement id it is keyed on is not a Stripe id",
+  );
   await aDayLater(w, engagementId);
   assert.deepEqual(await reconcile(w), counts(1), "an open transfer flag on the engagement is not raised again");
   await assertMoneyInvariants(w.institutionId);

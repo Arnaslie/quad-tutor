@@ -8,12 +8,7 @@ import type { Refund } from "./stripe";
 
 export type Ids = { engagementId: string; institutionId: string };
 
-/**
- * One flag per kind and Stripe object. A repeat leaves an open flag alone; on a resolved one it reopens the flag
- * only when the gap between the amounts moved since, so a second divergence on the same object is news, and the
- * same one seen again is not, even when a refund or transfer since moved both sides by the same amount.
- * An orphaned Connect account belongs to no engagement, so its flag pauses nothing.
- */
+/** An orphaned Connect account belongs to no engagement, so its flag pauses nothing. */
 export async function recordDiscrepancy(
   ids: { engagementId: string | null; institutionId: string },
   values: Omit<typeof moneyDiscrepancy.$inferInsert, "institutionId" | "engagementId">,
@@ -119,11 +114,21 @@ const onNews = (value: SQL, column: AnyColumn) =>
 const blocker = alias(moneyDiscrepancy, "refund_blocker");
 
 /** Any discrepancy naming a ledger row stops that row for good; resolving one never re-arms it. */
-export const ledgerRowBlocker = (ledgerEntryId: AnyColumn, institutionId: AnyColumn | string) =>
+export const ledgerRowBlocker = (
+  ledgerEntryId: AnyColumn,
+  institutionId: AnyColumn | string,
+  { kind }: { kind?: (typeof moneyDiscrepancy.$inferSelect)["kind"] } = {},
+) =>
   db
     .select({ id: blocker.id })
     .from(blocker)
-    .where(and(eq(blocker.ledgerEntryId, ledgerEntryId), eq(blocker.institutionId, institutionId)));
+    .where(
+      and(
+        eq(blocker.ledgerEntryId, ledgerEntryId),
+        eq(blocker.institutionId, institutionId),
+        kind ? eq(blocker.kind, kind) : undefined,
+      ),
+    );
 
 /**
  * A refund of the purchase that failed with no ledger row of ours (one made in the Dashboard) holds the

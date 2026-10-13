@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 
-import { and, desc, eq, exists, gt, inArray, isNull, like, lt, notExists, or, sql, type AnyColumn } from "drizzle-orm";
+import { and, desc, eq, exists, gt, inArray, isNull, like, lt, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -37,7 +37,6 @@ type Outcome = "resolved" | null;
 const purchase = alias(ledgerEntry, "purchase");
 const activity = alias(ledgerEntry, "activity");
 const fee = alias(ledgerEntry, "fee");
-const failed = alias(moneyDiscrepancy, "failed");
 
 const boughtThroughStripe = and(
   eq(purchase.engagementId, engagement.id),
@@ -97,19 +96,13 @@ async function paymentOf(charged: Charged): Promise<Payment | null> {
   }
 }
 
-const refundFailed = (ledgerEntryId: AnyColumn, institutionId: AnyColumn) =>
-  db
-    .select({ id: failed.id })
-    .from(failed)
-    .where(and(eq(failed.kind, "refund_failed"), eq(failed.ledgerEntryId, ledgerEntryId), eq(failed.institutionId, institutionId)));
-
 /** Refunds that failed are left out of what was refunded: their own flag already carries that money. */
 async function ledgerOf(ids: Ids) {
   const [row] = await db
     .select({
       inFlightRefunds: sql<number>`count(*) filter (where ${ledgerEntry.type} = 'refund' and ${ledgerEntry.stripeReference} is null)::int`,
       inFlightTransfers: sql<number>`count(*) filter (where ${ledgerEntry.type} = 'tutor_transfer' and ${ledgerEntry.stripeReference} is null)::int`,
-      refundedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'refund' and ${ledgerEntry.stripeReference} like 're\\_%' and ${notExists(refundFailed(ledgerEntry.id, ledgerEntry.institutionId))}), 0)::int`,
+      refundedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'refund' and ${ledgerEntry.stripeReference} like 're\\_%' and ${notExists(ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId, { kind: "refund_failed" }))}), 0)::int`,
       transferredMinor: sql<number>`(
         coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'tutor_transfer' and ${ledgerEntry.stripeReference} like 'tr\\_%'), 0)
         - coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'transfer_reversal'), 0)
@@ -226,7 +219,6 @@ async function reconcileEngagement(e: Reconciling): Promise<void> {
     for (const transfer of transfers) if (transfer.ledgerEntryId) await applyTransfer(await withEveryReversal(transfer));
     const seen = await gaps(e, payment, transfers);
     if (seen.charge || seen.transfers) {
-      // Stripe is read before the ledger, so a refund or transfer stamped in between shows as a gap once; only a gap seen twice is real.
       const again = await gaps(e, await gateway.retrievePayment(e.paymentIntentId), await gateway.listTransfers(e.engagementId));
       if (seen.charge && isDeepStrictEqual(seen.charge, again.charge)) await flagCharge(e, seen.charge);
       if (seen.transfers && isDeepStrictEqual(seen.transfers, again.transfers)) await flagTransfers(e, seen.transfers);
@@ -423,7 +415,6 @@ async function reconcileCampus(
   accounts: () => Promise<ConnectAccount[]>,
 ): Promise<Omit<ReconcileCounts, "flagged">> {
   const counts = { checked: 0, resolved: 0, failed: 0 };
-  /** False when the deadline stopped it before the last item. */
   const each = async <T>(items: T[], subject: (item: T) => string, work: (item: T) => Promise<Outcome>) => {
     for (const [index, item] of items.entries()) {
       if (index > 0 && Date.now() > deadline) return false;

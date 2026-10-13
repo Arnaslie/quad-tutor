@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { and, eq, inArray, isNotNull, isNull, like, lt, notExists, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, isNotNull, isNull, like, lt, not, notExists, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
 import { engagement, ledgerEntry, moneyDiscrepancy } from "@/server/db/schema";
@@ -436,10 +437,37 @@ export async function settleCheckout(ids: Ids): Promise<SyncOutcome> {
   return act(session, PATIENT);
 }
 
+const bookedPurchase = alias(ledgerEntry, "booked_purchase");
+
+export const purchaseBooked = () =>
+  exists(
+    db
+      .select({ id: bookedPurchase.id })
+      .from(bookedPurchase)
+      .where(
+        and(
+          eq(bookedPurchase.institutionId, moneyDiscrepancy.institutionId),
+          eq(bookedPurchase.type, "package_purchase"),
+          eq(bookedPurchase.stripeReference, moneyDiscrepancy.stripeReference),
+        ),
+      ),
+  );
+
 /**
- * Money taken with nothing booked is recorded before its refund, so a refund that failed is retried here.
- * A PaymentIntent that is some engagement's purchase is legitimately booked and never refunded.
+ * Money taken with nothing booked is recorded before its refund, so a refund that failed is retried while its flag
+ * is open. A PaymentIntent that is some engagement's purchase is legitimately booked and never refunded.
  */
+export const retriesRefund = () =>
+  and(
+    inArray(moneyDiscrepancy.kind, ["checkout_amount", "ledger_vs_stripe_charge"]),
+    isNull(moneyDiscrepancy.refundReference),
+    isNull(moneyDiscrepancy.resolvedAt),
+    like(moneyDiscrepancy.stripeReference, "pi\\_%"),
+    isNotNull(moneyDiscrepancy.engagementId),
+    notExists(paymentRefundBlocker(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)),
+    not(purchaseBooked()),
+  );
+
 async function retryDiscrepancyRefunds(
   institutionId: string,
   deadline: number,
@@ -453,29 +481,7 @@ async function retryDiscrepancyRefunds(
       detectedAt: moneyDiscrepancy.detectedAt,
     })
     .from(moneyDiscrepancy)
-    .where(
-      and(
-        eq(moneyDiscrepancy.institutionId, institutionId),
-        inArray(moneyDiscrepancy.kind, ["checkout_amount", "ledger_vs_stripe_charge"]),
-        isNull(moneyDiscrepancy.refundReference),
-        isNull(moneyDiscrepancy.resolvedAt),
-        like(moneyDiscrepancy.stripeReference, "pi\\_%"),
-        isNotNull(moneyDiscrepancy.engagementId),
-        notExists(paymentRefundBlocker(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)),
-        notExists(
-          db
-            .select({ id: ledgerEntry.id })
-            .from(ledgerEntry)
-            .where(
-              and(
-                eq(ledgerEntry.institutionId, institutionId),
-                eq(ledgerEntry.type, "package_purchase"),
-                eq(ledgerEntry.stripeReference, moneyDiscrepancy.stripeReference),
-              ),
-            ),
-        ),
-      ),
-    )
+    .where(and(eq(moneyDiscrepancy.institutionId, institutionId), retriesRefund()))
     .orderBy(sql`random()`)
     .limit(SWEEP_LIMIT);
 
