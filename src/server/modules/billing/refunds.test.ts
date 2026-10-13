@@ -580,7 +580,14 @@ test("a refund held behind a failed one on its PaymentIntent goes out once ops r
   await recordRefundFailure(ids(engagementId), { refund: null, paymentIntentId: paid.pi!, amountMinor: null, currency: "usd" });
   const flag = async () =>
     db
-      .select({ id: moneyDiscrepancy.id, ledgerEntryId: moneyDiscrepancy.ledgerEntryId, resolvedAt: moneyDiscrepancy.resolvedAt, note: moneyDiscrepancy.resolutionNote })
+      .select({
+        id: moneyDiscrepancy.id,
+        ledgerEntryId: moneyDiscrepancy.ledgerEntryId,
+        ledgerAmountMinor: moneyDiscrepancy.ledgerAmountMinor,
+        detectedAt: moneyDiscrepancy.detectedAt,
+        resolvedAt: moneyDiscrepancy.resolvedAt,
+        note: moneyDiscrepancy.resolutionNote,
+      })
       .from(moneyDiscrepancy)
       .where(eq(moneyDiscrepancy.engagementId, engagementId));
 
@@ -593,13 +600,18 @@ test("a refund held behind a failed one on its PaymentIntent goes out once ops r
   }), 0);
 
   const [open] = await flag();
-  await db.update(moneyDiscrepancy).set({ resolvedAt: new Date(), resolutionNote: "card checked" }).where(eq(moneyDiscrepancy.id, open.id));
+  const firstSeen = new Date(Date.now() - 86_400_000);
+  await db.update(moneyDiscrepancy).set({ detectedAt: firstSeen, resolvedAt: new Date(), resolutionNote: "card checked" }).where(eq(moneyDiscrepancy.id, open.id));
   assert.equal(await blockedRefunds(home.institutionId), blocked - 1);
   await patched("refund", refused, async () => {
     assert.equal(await refundThroughStripe(ids(engagementId)), "refund_failed");
   });
   const row = await refundRow(engagementId);
-  assert.deepEqual(await flag(), [{ id: open.id, ledgerEntryId: row.id, resolvedAt: null, note: null }]);
+  const [reopened] = await flag();
+  assert.deepEqual(
+    { ...reopened, detectedAt: reopened.detectedAt > firstSeen },
+    { id: open.id, ledgerEntryId: row.id, ledgerAmountMinor: 14_000, detectedAt: true, resolvedAt: null, note: null },
+  );
 
   assert.equal(await creates(async () => {
     assert.equal(await refundThroughStripe(ids(engagementId)), "skipped");

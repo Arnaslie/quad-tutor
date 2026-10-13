@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql, type AnyColumn } from "drizzle-orm";
+import { and, eq, isNull, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -59,7 +59,7 @@ export const FORFEITED_PREFIX = "forfeited:";
  * A refund Stripe could not deliver is never re-issued by code: the card that bounced it would bounce
  * the next one too. Keyed on the PaymentIntent; a repeat on it fills in the ledger row if the first had none.
  * One PaymentIntent never carries two refund rows: it is one engagement's purchase, with one refund.
- * A row failing on a flag ops already resolved reopens it: the money it names is new news.
+ * A row failing on a flag ops already resolved reopens it at that row's amount: the money it names is new news.
  */
 export async function recordRefundFailure(
   ids: Ids,
@@ -90,16 +90,18 @@ export async function recordRefundFailure(
       target: [moneyDiscrepancy.kind, moneyDiscrepancy.stripeReference],
       targetWhere: sql`${moneyDiscrepancy.stripeReference} is not null`,
       set: {
-        ledgerEntryId: sql`coalesce(${moneyDiscrepancy.ledgerEntryId}, excluded.ledger_entry_id)`,
-        resolvedAt: unlessNewRow(moneyDiscrepancy.resolvedAt),
-        resolvedByUserId: unlessNewRow(moneyDiscrepancy.resolvedByUserId),
-        resolutionNote: unlessNewRow(moneyDiscrepancy.resolutionNote),
+        ledgerEntryId: onNewRow(sql`excluded.ledger_entry_id`, moneyDiscrepancy.ledgerEntryId),
+        ledgerAmountMinor: onNewRow(sql`excluded.ledger_amount_minor`, moneyDiscrepancy.ledgerAmountMinor),
+        detectedAt: onNewRow(sql`now()`, moneyDiscrepancy.detectedAt),
+        resolvedAt: onNewRow(sql`null`, moneyDiscrepancy.resolvedAt),
+        resolvedByUserId: onNewRow(sql`null`, moneyDiscrepancy.resolvedByUserId),
+        resolutionNote: onNewRow(sql`null`, moneyDiscrepancy.resolutionNote),
       },
     });
 }
 
-const unlessNewRow = (column: AnyColumn) =>
-  sql`case when ${moneyDiscrepancy.ledgerEntryId} is null and excluded.ledger_entry_id is not null then null else ${column} end`;
+const onNewRow = (value: SQL, column: AnyColumn) =>
+  sql`case when ${moneyDiscrepancy.ledgerEntryId} is null and excluded.ledger_entry_id is not null then ${value} else ${column} end`;
 
 const blocker = alias(moneyDiscrepancy, "refund_blocker");
 
