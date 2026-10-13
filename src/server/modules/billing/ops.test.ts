@@ -5,7 +5,7 @@ import { after, test } from "node:test";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { moneyDiscrepancy, paymentDispute, sessionBooking } from "@/server/db/schema";
+import { ledgerEntry, moneyDiscrepancy, paymentDispute, sessionBooking } from "@/server/db/schema";
 import { confirmAttendance } from "@/server/modules/engagements/confirmation";
 import { bookSession, slotsForEngagement } from "@/server/modules/engagements/scheduling";
 import { endPackage } from "@/server/modules/engagements/termEnd";
@@ -241,6 +241,20 @@ test("resolving a discrepancy records when, why and who, and a flag naming no ro
   assert.deepEqual((await moneyForOperator(ops)).discrepancies, []);
 });
 
+test("a dispute or reversal whose engagement cannot be shown is still listed, with no context", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const elsewhere = await world();
+  const { paymentIntentId, reversal } = await reversed(elsewhere, 1_000);
+  const dispute = await disputed(paymentIntentId);
+  await db.update(paymentDispute).set({ institutionId: w.institutionId }).where(eq(paymentDispute.id, dispute.id));
+  await db.update(ledgerEntry).set({ institutionId: w.institutionId }).where(eq(ledgerEntry.id, reversal.id));
+
+  const money = await moneyForOperator(ops);
+  assert.deepEqual(money.disputes.map((d) => [d.id, d.amountMinor, d.engagement]), [[dispute.id, 14_000, null]]);
+  assert.deepEqual(money.reversals.map((r) => [r.id, r.amountMinor, r.engagement]), [[reversal.id, 1_000, null]]);
+});
+
 test("an operator sees their own campus's money items and held counts, and nothing of another campus's", async () => {
   const w = await world();
   const ops = await operator(w.institutionId);
@@ -266,7 +280,7 @@ test("an operator sees their own campus's money items and held counts, and nothi
     ],
   );
   assert.deepEqual(undated(money.orphanedAccounts).map(({ id, ...rest }) => [typeof id, rest]), [["string", { accountId: stray.id, detectedAt: "date" }]]);
-  assert.deepEqual(money.disputes.map((d) => [d.id, d.engagement.studentName, d.canLift]), [[dispute.id, held.actor.name, false]]);
+  assert.deepEqual(money.disputes.map((d) => [d.id, d.engagement?.studentName, d.canLift]), [[dispute.id, held.actor.name, false]]);
   assert.deepEqual(money.reversals.map((r) => [r.id, r.amountMinor, r.paused]), [[sentBack.reversal.id, 1_000, false]]);
   assert.deepEqual(money.held, { refunds: 1, transfers: 3 });
 

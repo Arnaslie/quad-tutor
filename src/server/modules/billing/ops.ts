@@ -55,7 +55,7 @@ export type DisputeItem = {
   status: string;
   openedAt: Date;
   closedAt: Date | null;
-  engagement: EngagementContext;
+  engagement: EngagementContext | null;
   canLift: boolean;
 };
 
@@ -65,7 +65,7 @@ export type ReversalItem = {
   currency: string;
   reference: string;
   bookedAt: Date;
-  engagement: EngagementContext;
+  engagement: EngagementContext | null;
   paused: boolean;
 };
 
@@ -211,7 +211,8 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
   const context = await contexts(campuses, [
     ...new Set([...flags, ...disputes, ...reversals].flatMap((row) => (row.engagementId ? [row.engagementId] : []))),
   ]);
-  const on = (engagementId: string) => context.get(engagementId)!;
+  // A money item whose engagement cannot be shown is still listed, without its context.
+  const on = (engagementId: string) => context.get(engagementId) ?? null;
   const sum = (counts: number[]) => counts.reduce((total, n) => total + n, 0);
 
   return {
