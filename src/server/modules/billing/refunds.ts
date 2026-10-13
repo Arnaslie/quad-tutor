@@ -77,9 +77,12 @@ const unstampedRefund = and(eq(ledgerEntry.type, "refund"), isNull(ledgerEntry.s
 const blocked = () => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId);
 const held = () => failedDashboardRefund(purchase.stripeReference, purchase.institutionId);
 
+/** A flag names the row, so it stays unsent even once nothing else holds it. */
+export const stoppedForGood = () => sql<boolean>`exists(${blocked()})`;
+
 /** The unstamped refund row of the engagement a PaymentIntent bought: the one a failed refund on that PaymentIntent holds. */
 export const refundHeldBy = (
-  column: typeof ledgerEntry.id | typeof ledgerEntry.amountMinor,
+  column: typeof ledgerEntry.id | typeof ledgerEntry.amountMinor | SQL<boolean>,
   paymentIntentId: AnyColumn,
   institutionId: AnyColumn,
 ) =>

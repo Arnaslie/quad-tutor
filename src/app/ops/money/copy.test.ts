@@ -71,6 +71,15 @@ test("a Dashboard refund offers booking only while its refund row is unsent", ()
   });
 });
 
+test("a Dashboard refund that then failed offers no booking and sends ops to the failed refund card", () => {
+  assert.deepEqual(explained(item({ stripeReference: "re_1", ledgerEntryType: "refund", canResolve: false, refund: "failed" })), {
+    title: "A refund was made in the Stripe Dashboard",
+    body: "Someone refunded this payment in the Dashboard, so the package refund was stopped rather than sent a second time.",
+    note: "That Dashboard refund then failed at Stripe, so the student did not get it. Pay them another way and record it on the failed refund card for this payment, then resolve this.",
+    settle: null,
+  });
+});
+
 test("a checkout Stripe could not find says nothing was charged", () => {
   assert.deepEqual(explained(item({ stripeReference: "cs_1" })), {
     title: "Stripe could not find a checkout",
@@ -109,10 +118,16 @@ test("a failed refund with no row of ours tells an unbooked payment from a Dashb
     note: "It returned a payment no package booked. Nothing sends this money again, so pay the student another way, then record it.",
     settle: RECORD,
   });
-  assert.deepEqual(explained(item({ ...failed, paymentBooked: true, refund: "holding" })), {
+  assert.deepEqual(explained(item({ ...failed, paymentBooked: true, refund: "holding", heldRefundMinor: 10_500 })), {
     title: "A refund to the student failed",
     body,
-    note: "It was made in the Stripe Dashboard, so no refund row names it. It holds the package's refund so it is not sent to the same card. If you paid the student another way, record it, and the package refund waiting is marked paid and never sent. Resolving instead sends the package refund to the same card.",
+    note: "It was made in the Stripe Dashboard, so no refund row names it. It holds the package's $105.00 refund so it is not sent to the same card. If you paid the student that $105.00 another way, record it, and the refund is marked paid and never sent. Resolving instead sends it to the same card.",
+    settle: RECORD,
+  });
+  assert.deepEqual(explained(item({ ...failed, paymentBooked: true, refund: "holding_stopped", heldRefundMinor: 10_500, canResolve: false })), {
+    title: "A refund to the student failed",
+    body,
+    note: "It was made in the Stripe Dashboard, so no refund row names it. Another flag on this package has also stopped its $105.00 refund for good, so nothing sends it. Pay the student that $105.00 another way, then record it here and the refund is marked paid.",
     settle: RECORD,
   });
   assert.deepEqual(

@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, inArray, isNotNull, isNull, ne, not, notExists, sql, type AnyColumn } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, isNotNull, isNull, ne, not, notExists, or, sql, type AnyColumn } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -23,7 +23,7 @@ import { courseLabel } from "@/server/modules/messaging/threads";
 
 import { purchaseBooked, retriesRefund, uniqueViolation } from "./checkout-session";
 import { FORFEITED_PREFIX, MANUAL_PREFIX, paymentRefundBlocker, type Ids } from "./discrepancy";
-import { blockedRefunds, refundHeldBy } from "./refunds";
+import { blockedRefunds, refundHeldBy, stoppedForGood } from "./refunds";
 import { blockedEngagements, paused } from "./transfers";
 
 type DiscrepancyKind = (typeof moneyDiscrepancyKind.enumValues)[number];
@@ -48,8 +48,11 @@ export type DiscrepancyItem = {
   canSettle: boolean;
   canResolve: boolean;
   paymentBooked: boolean;
-  /** What the flag does to a refund: its own keeps retrying while it is open or failed at Stripe, or it holds the package's refund row. */
-  refund: "retrying" | "failed" | "holding" | null;
+  /**
+   * What the flag does to a refund: its own keeps retrying while it is open or failed at Stripe, or it holds the
+   * package's refund row, which another flag naming it may also stop for good.
+   */
+  refund: "retrying" | "failed" | "holding" | "holding_stopped" | null;
 };
 
 export type OrphanedAccountItem = { id: string; accountId: string; detectedAt: Date };
@@ -99,6 +102,7 @@ export type AnswerResult = { ok: true; resend: (Ids & { id: string }) | null } |
 const LIMIT = 100;
 const namedRow = alias(ledgerEntry, "named_row");
 const answer = alias(ledgerEntry, "answer");
+const failedFlag = alias(moneyDiscrepancy, "failed_flag");
 
 /** A refund or transfer row a discrepancy stopped before Stripe stamped it. */
 const namesUnstampedRow = () =>
@@ -120,15 +124,37 @@ const heldRefund = <T>(column: Parameters<typeof refundHeldBy>[0]) =>
   sql<T | null>`case when ${moneyDiscrepancy.kind} = 'refund_failed' and ${moneyDiscrepancy.ledgerEntryId} is null
     then (${refundHeldBy(column, moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)}) end`;
 
-/** Money taken with nothing booked whose refund Stripe could not deliver, so it is answered on that refund's own flag. */
+/**
+ * The refund this flag is about failed at Stripe, and is answered on the payment's refund_failed flag: the refund of
+ * money taken with nothing booked, or a Dashboard refund the flag names, which must never be booked as the package's.
+ */
 const refundFailed = () =>
-  and(
-    inArray(moneyDiscrepancy.kind, ["checkout_amount", "ledger_vs_stripe_charge"]),
-    exists(paymentRefundBlocker(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)),
-    not(purchaseBooked()),
+  or(
+    and(
+      inArray(moneyDiscrepancy.kind, ["checkout_amount", "ledger_vs_stripe_charge"]),
+      exists(paymentRefundBlocker(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)),
+      not(purchaseBooked()),
+    ),
+    exists(
+      db
+        .select({ id: failedFlag.id })
+        .from(failedFlag)
+        .where(
+          and(
+            eq(failedFlag.kind, "refund_failed"),
+            eq(failedFlag.institutionId, moneyDiscrepancy.institutionId),
+            eq(failedFlag.engagementId, moneyDiscrepancy.engagementId),
+            sql`${moneyDiscrepancy.stripeReference} = any(${failedFlag.failedRefundIds})`,
+          ),
+        ),
+    ),
   );
 
-const settleable = () => sql<boolean>`(${moneyDiscrepancy.kind} = 'refund_failed' or ${namesUnstampedRow()})`;
+const settleable = () =>
+  sql<boolean>`(${moneyDiscrepancy.kind} = 'refund_failed' or (${namesUnstampedRow()} and not ${refundFailed()}))`;
+
+/** Resolved, a row would stay unsent and unsettled for good: one the flag stopped, or a held one another flag stopped. */
+const strandsRow = () => sql<boolean>`(${namesUnstampedRow()} or coalesce(${heldRefund<boolean>(stoppedForGood())}, false))`;
 
 const answerTo = (reversalId: AnyColumn) => db.select({ id: answer.id }).from(answer).where(eq(answer.correctsEntryId, reversalId));
 
@@ -171,10 +197,11 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         ledgerEntryType: ledgerEntry.type,
         heldRefundMinor: heldRefund<number>(ledgerEntry.amountMinor),
         canSettle: settleable(),
-        canResolve: sql<boolean>`not ${namesUnstampedRow()}`,
+        canResolve: sql<boolean>`not ${strandsRow()}`,
         paymentBooked: sql<boolean>`${purchaseBooked()}`,
         refund: sql<DiscrepancyItem["refund"]>`case when ${retriesRefund()} then 'retrying'
           when ${refundFailed()} then 'failed'
+          when ${heldRefund<boolean>(stoppedForGood())} then 'holding_stopped'
           when ${heldRefund<string>(ledgerEntry.id)} is not null then 'holding' end`,
       })
       .from(moneyDiscrepancy)
@@ -265,7 +292,8 @@ const openOnCampus = (operator: OperatorActor, discrepancyId: string) =>
 
 /**
  * Resolving lifts the engagement's pause but never re-arms a ledger row the discrepancy stopped. A flag naming a row
- * Stripe never stamped is refused: resolved, that row would stay unsent and unsettled for good, so ops settles it.
+ * Stripe never stamped, or holding one another flag stopped, is refused: resolved, that row would stay unsent and
+ * unsettled for good, so ops settles it.
  */
 export async function resolveDiscrepancy(params: {
   operator: OperatorActor;
@@ -276,7 +304,7 @@ export async function resolveDiscrepancy(params: {
   const resolved = await db
     .update(moneyDiscrepancy)
     .set({ resolvedAt: new Date(), resolutionNote: params.note, resolvedByUserId: params.operator.userId })
-    .where(and(scope, not(namesUnstampedRow())))
+    .where(and(scope, not(strandsRow())))
     .returning({ id: moneyDiscrepancy.id });
   if (resolved.length > 0) return DONE;
   const open = await db.select({ id: moneyDiscrepancy.id }).from(moneyDiscrepancy).where(scope);
@@ -288,7 +316,8 @@ export async function resolveDiscrepancy(params: {
  * id>` in the same transaction, so it stays the engagement's one row of its kind and no sweep sees it again. A failed
  * Dashboard refund's flag names no row, so it stamps the package refund it holds, if one is written yet. A flag
  * on a refund made in the Dashboard stamps the row with that `re_…` instead: it is the refund that happened, and the
- * reconciliation then counts it. Any gap between its amount and the row's stays on the charge for ops.
+ * reconciliation then counts it. Any gap between its amount and the row's stays on the charge for ops. One that then
+ * failed at Stripe is never booked: the student is paid by hand on the payment's refund_failed flag.
  */
 export async function recordManualSettlement(params: {
   operator: OperatorActor;

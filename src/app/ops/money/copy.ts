@@ -1,4 +1,5 @@
 import type { DiscrepancyItem, MoneyForOperator } from "@/server/modules/billing/ops";
+import { formatMinor } from "@/server/modules/billing/pricing";
 
 const KIND: Record<DiscrepancyItem["kind"], { title: string; body: string; note?: string }> = {
   checkout_amount: {
@@ -43,9 +44,12 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     return {
       title: "A refund was made in the Stripe Dashboard",
       body: "Someone refunded this payment in the Dashboard, so the package refund was stopped rather than sent a second time.",
-      note: item.canSettle
-        ? "Booking it records the Dashboard refund as the package refund. If the two amounts differ, the difference comes back as a flag on the payment."
-        : null,
+      note:
+        item.refund === "failed"
+          ? "That Dashboard refund then failed at Stripe, so the student did not get it. Pay them another way and record it on the failed refund card for this payment, then resolve this."
+          : item.canSettle
+            ? "Booking it records the Dashboard refund as the package refund. If the two amounts differ, the difference comes back as a flag on the payment."
+            : null,
       settle: item.canSettle ? { label: "Book this Dashboard refund", pending: "Booking…" } : null,
     };
   }
@@ -80,13 +84,16 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
         note: "It returned a payment no package booked. Nothing sends this money again, so pay the student another way, then record it.",
       };
     }
+    const waiting = item.heldRefundMinor === null ? null : formatMinor(item.heldRefundMinor, item.currency);
     return {
       ...plain,
       note:
         "It was made in the Stripe Dashboard, so no refund row names it. " +
-        (item.refund === "holding"
-          ? "It holds the package's refund so it is not sent to the same card. If you paid the student another way, record it, and the package refund waiting is marked paid and never sent. Resolving instead sends the package refund to the same card."
-          : "The package has no refund waiting yet. Resolving or recording a manual payment both close this, and a refund the package owes later goes to the same card."),
+        (!waiting
+          ? "The package has no refund waiting yet. Resolving or recording a manual payment both close this, and a refund the package owes later goes to the same card."
+          : item.refund === "holding_stopped"
+            ? `Another flag on this package has also stopped its ${waiting} refund for good, so nothing sends it. Pay the student that ${waiting} another way, then record it here and the refund is marked paid.`
+            : `It holds the package's ${waiting} refund so it is not sent to the same card. If you paid the student that ${waiting} another way, record it, and the refund is marked paid and never sent. Resolving instead sends it to the same card.`),
     };
   }
   if (item.kind === "refund_failed" && item.ledgerEntryType === "refund" && item.canResolve) {

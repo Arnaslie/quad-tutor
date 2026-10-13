@@ -220,6 +220,10 @@ function amounts(item: DiscrepancyItem): Fact[] {
 
 function Discrepancy({ item }: { item: DiscrepancyItem }) {
   const { title, body, note, settle } = explained(item);
+  const choices = [
+    ...(settle ? [{ action: recordManualPaymentAction, ...settle }] : []),
+    ...(item.canResolve ? [RESOLVE] : []),
+  ];
 
   return (
     <ItemCard
@@ -231,16 +235,7 @@ function Discrepancy({ item }: { item: DiscrepancyItem }) {
         item.stripeReference !== null && ["Stripe id", <StripeId key="ref" id={item.stripeReference} />],
         item.refundReference !== null && ["Refund", <StripeId key="refund" id={item.refundReference} />],
       ]}
-      action={
-        <NoteForm
-          id={item.id}
-          hint={NOTE_HINT}
-          choices={[
-            ...(settle ? [{ action: recordManualPaymentAction, ...settle }] : []),
-            ...(item.canResolve ? [RESOLVE] : []),
-          ]}
-        />
-      }
+      action={choices.length > 0 ? <NoteForm id={item.id} hint={NOTE_HINT} choices={choices} /> : null}
     >
       <p>{body}</p>
       {note ? <p className="text-muted">{note}</p> : null}
