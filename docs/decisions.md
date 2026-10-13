@@ -736,7 +736,10 @@ compares up to 20 engagements bought through Stripe, with ledger activity in the
 and not compared in the last day, then stamps `reconciled_at`. Each is asked about once a
 day, spread over the runs, and one that fails is asked again on the next run. The comparison
 checks the charge net of refunds, each refund's status, and the transfers net of reversals,
-and books a missed transfer or reversal event as the webhook would. A claim that is never
+and books a missed transfer or reversal event as the webhook would. There is one flag per
+kind and Stripe object: a repeat leaves an open flag alone, and reopens a resolved one only
+when its amounts have moved, so a second Dashboard refund a month later is news and the
+same divergence seen again is not. A claim that is never
 released, held for 23 hours, gates the daily pass: it settles flags Stripe can now answer,
 re-reads open disputes, and flags Connect accounts carrying the campus's id that no tutor
 holds (`orphaned_account`, which names no engagement and pauses nothing).

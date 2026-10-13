@@ -11,10 +11,11 @@ import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
 import { settleCheckout } from "./checkout-session";
 import { assertMoneyInvariants } from "./invariants";
+import { moneyForOperator, resolveDiscrepancy } from "./ops";
 import { runReconciliation } from "./reconcile";
 import { blockedRefunds, refundThroughStripe } from "./refunds";
 import { fakeStripe, stripeGateway } from "./stripe";
-import { accepted, checkingOut, cleanup, deliver, delivered, noStripe, patched, rows, world, type World } from "./test-world";
+import { accepted, checkingOut, cleanup, deliver, delivered, noStripe, operator, patched, rows, world, type World } from "./test-world";
 import { runTransfers } from "./transfers";
 
 const reconcile = (w: World) => runReconciliation(w.institutionId, Date.now() + 10_000);
@@ -106,6 +107,30 @@ test("a live Dashboard refund is flagged against the charge with both nets, and 
   await aDayLater(w, engagementId);
   assert.deepEqual(await reconcile(w), counts(1), "the same PaymentIntent is never flagged twice");
   assert.equal((await flags(w.institutionId)).length, 1);
+});
+
+test("a charge flag ops resolved reopens when the PaymentIntent diverges again, and stays resolved when it has not", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const { engagementId, paymentIntentId } = await delivered(w);
+  await fakeStripe.dashboardRefund(paymentIntentId, 5_000);
+  assert.deepEqual(await reconcile(w), counts(1, 1));
+  const [item] = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: item.id, note: "support refunded part" }), { ok: true });
+
+  await aDayLater(w, engagementId);
+  assert.deepEqual(await reconcile(w), counts(1), "the same divergence stays resolved");
+  assert.deepEqual((await flags(w.institutionId)).map((f) => f.resolutionNote), ["support refunded part"]);
+
+  await fakeStripe.dashboardRefund(paymentIntentId, 2_000);
+  await aDayLater(w, engagementId);
+  assert.deepEqual(await reconcile(w), counts(1, 1));
+  assert.deepEqual(await flags(w.institutionId), [
+    { kind: "ledger_vs_stripe_charge", engagementId, ledgerEntryId: null, stripeReference: paymentIntentId, ledgerAmountMinor: 14_000, stripeAmountMinor: 7_000, resolutionNote: null },
+  ]);
+  const [reopened] = await db.select({ resolvedAt: moneyDiscrepancy.resolvedAt, by: moneyDiscrepancy.resolvedByUserId }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.id, item.id));
+  assert.deepEqual(reopened, { resolvedAt: null, by: null });
+  assert.deepEqual(await runTransfers(w.institutionId, Date.now() + 10_000), { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 1, failed: 0 });
 });
 
 test("a reversal the webhook missed is booked and the transfers agree; a Dashboard transfer into the group is flagged", async () => {

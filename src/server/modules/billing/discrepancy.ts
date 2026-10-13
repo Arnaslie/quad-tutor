@@ -8,7 +8,11 @@ import type { Refund } from "./stripe";
 
 export type Ids = { engagementId: string; institutionId: string };
 
-/** An orphaned Connect account belongs to no engagement, so its flag pauses nothing. */
+/**
+ * One flag per kind and Stripe object. A repeat leaves an open flag alone; on a resolved one it reopens the flag
+ * only when the amounts moved since, so a second divergence on the same object is news and the same one is not.
+ * An orphaned Connect account belongs to no engagement, so its flag pauses nothing.
+ */
 export async function recordDiscrepancy(
   ids: { engagementId: string | null; institutionId: string },
   values: Omit<typeof moneyDiscrepancy.$inferInsert, "institutionId" | "engagementId">,
@@ -16,7 +20,22 @@ export async function recordDiscrepancy(
   const [created] = await db
     .insert(moneyDiscrepancy)
     .values({ ...values, institutionId: ids.institutionId, engagementId: ids.engagementId })
-    .onConflictDoNothing()
+    .onConflictDoUpdate({
+      target: [moneyDiscrepancy.kind, moneyDiscrepancy.stripeReference],
+      targetWhere: sql`${moneyDiscrepancy.stripeReference} is not null`,
+      set: {
+        ledgerAmountMinor: sql`excluded.ledger_amount_minor`,
+        stripeAmountMinor: sql`excluded.stripe_amount_minor`,
+        detectedAt: sql`now()`,
+        resolvedAt: null,
+        resolvedByUserId: null,
+        resolutionNote: null,
+      },
+      setWhere: sql`${moneyDiscrepancy.resolvedAt} is not null and (
+        ${moneyDiscrepancy.ledgerAmountMinor} is distinct from excluded.ledger_amount_minor
+        or ${moneyDiscrepancy.stripeAmountMinor} is distinct from excluded.stripe_amount_minor
+      )`,
+    })
     .returning({ id: moneyDiscrepancy.id });
   if (created || !values.stripeReference) return created?.id ?? null;
 
