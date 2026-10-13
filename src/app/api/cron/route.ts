@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { db } from "@/server/db";
 import { institution } from "@/server/db/schema";
 import { syncPendingCheckouts } from "@/server/modules/billing/checkout-session";
-import { runReconciliation, type ReconcileCounts } from "@/server/modules/billing/reconcile";
+import { accountsThisRun, runReconciliation, type ReconcileCounts } from "@/server/modules/billing/reconcile";
 import { SWEEP_BUDGET_MS, retryUnstampedRefunds } from "@/server/modules/billing/refunds";
 import { errorFacts } from "@/server/modules/billing/stripe";
 import { runTransfers, type TransferCounts } from "@/server/modules/billing/transfers";
@@ -60,6 +60,7 @@ export async function GET(request: Request) {
     let cardRefundsFailed = 0;
     const transfers: TransferCounts = { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 0, failed: 0 };
     const reconciled: ReconcileCounts = { checked: 0, flagged: 0, resolved: 0, failed: 0 };
+    const connectAccounts = accountsThisRun();
 
     for (const campus of campuses) {
       releasedRatings += await releaseRatings(campus.id).catch((error) => {
@@ -97,7 +98,7 @@ export async function GET(request: Request) {
         return { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 0, failed: 1 };
       });
       for (const key of Object.keys(transfers) as (keyof TransferCounts)[]) transfers[key] += campusTransfers[key];
-      const campusReconciled = await runReconciliation(campus.id, startedAt + SWEEP_BUDGET_MS).catch((error) => {
+      const campusReconciled = await runReconciliation(campus.id, startedAt + SWEEP_BUDGET_MS, connectAccounts).catch((error) => {
         console.error(`[cron] reconciliation for ${campus.slug} failed`, errorFacts(error));
         return { checked: 0, flagged: 0, resolved: 0, failed: 1 };
       });

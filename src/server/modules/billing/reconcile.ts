@@ -11,7 +11,7 @@ import { ledgerRowBlocker, recordDiscrepancy, type Ids } from "./discrepancy";
 import { handleDisputeEvent } from "./disputes";
 import { claim, release, withLease } from "./lease";
 import { neverCharged, reconcileRefund } from "./refunds";
-import { GatewayError, errorFacts, stripeGateway, type Payment, type Transfer } from "./stripe";
+import { GatewayError, errorFacts, stripeGateway, type ConnectAccount, type Payment, type Transfer } from "./stripe";
 import { applyTransfer } from "./transfers";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -287,9 +287,35 @@ async function settleMissingSession(flag: { id: string; institutionId: string; s
   return null;
 }
 
-async function flagOrphanedAccounts(institutionId: string): Promise<void> {
-  const accounts = (await stripeGateway().listAccounts()).filter((account) => account.institutionId === institutionId);
-  if (accounts.length === 0) return;
+/** Lists Connect accounts at most once per cron run, however many campuses ask. */
+export function accountsThisRun(): () => Promise<ConnectAccount[]> {
+  let listed: Promise<ConnectAccount[]> | undefined;
+  return () => (listed ??= stripeGateway().listAccounts());
+}
+
+/** An account a tutor on the campus now holds is no longer orphaned. */
+async function resolveHeldAccounts(institutionId: string): Promise<number> {
+  const resolved = await db
+    .update(moneyDiscrepancy)
+    .set({ resolvedAt: new Date(), resolutionNote: "Reconciliation: a tutor on this campus now holds this account.", resolvedByUserId: null })
+    .where(
+      and(
+        openFlags(institutionId, "orphaned_account"),
+        exists(
+          db
+            .select({ id: tutorProfile.id })
+            .from(tutorProfile)
+            .where(and(eq(tutorProfile.institutionId, institutionId), eq(tutorProfile.stripeAccountId, moneyDiscrepancy.stripeReference))),
+        ),
+      ),
+    )
+    .returning({ id: moneyDiscrepancy.id });
+  return resolved.length;
+}
+
+async function flagOrphanedAccounts(institutionId: string, accounts: ConnectAccount[]): Promise<void> {
+  const ours = accounts.filter((account) => account.institutionId === institutionId);
+  if (ours.length === 0) return;
   const held = await db
     .select({ id: tutorProfile.stripeAccountId })
     .from(tutorProfile)
@@ -298,12 +324,12 @@ async function flagOrphanedAccounts(institutionId: string): Promise<void> {
         eq(tutorProfile.institutionId, institutionId),
         inArray(
           tutorProfile.stripeAccountId,
-          accounts.map((account) => account.id),
+          ours.map((account) => account.id),
         ),
       ),
     );
   const heldIds = new Set(held.map((row) => row.id));
-  for (const account of accounts) {
+  for (const account of ours) {
     if (heldIds.has(account.id)) continue;
     await recordDiscrepancy({ engagementId: null, institutionId }, { kind: "orphaned_account", stripeReference: account.id });
   }
@@ -382,7 +408,11 @@ const openDisputes = (institutionId: string) =>
     .orderBy(paymentDispute.openedAt)
     .limit(LIMIT);
 
-async function reconcileCampus(institutionId: string, deadline: number): Promise<Omit<ReconcileCounts, "flagged">> {
+async function reconcileCampus(
+  institutionId: string,
+  deadline: number,
+  accounts: () => Promise<ConnectAccount[]>,
+): Promise<Omit<ReconcileCounts, "flagged">> {
   const counts = { checked: 0, resolved: 0, failed: 0 };
   /** False when the deadline stopped it before the last item. */
   const each = async <T>(items: T[], subject: (item: T) => string, work: (item: T) => Promise<Outcome>) => {
@@ -415,7 +445,8 @@ async function reconcileCampus(institutionId: string, deadline: number): Promise
         return null;
       })) &&
       (await each([institutionId], (id) => `orphaned account scan of ${id}`, async (id) => {
-        await flagOrphanedAccounts(id);
+        counts.resolved += await resolveHeldAccounts(id);
+        await flagOrphanedAccounts(id, await accounts());
         return null;
       }))
     );
@@ -439,9 +470,13 @@ async function reconcileCampus(institutionId: string, deadline: number): Promise
  * day settles the flags Stripe can now answer, refreshes open disputes and looks for Connect accounts no tutor holds.
  * It never corrects the ledger: a divergence becomes a discrepancy, which pauses the engagement's transfers.
  */
-export async function runReconciliation(institutionId: string, deadline: number): Promise<ReconcileCounts> {
+export async function runReconciliation(
+  institutionId: string,
+  deadline: number,
+  accounts = accountsThisRun(),
+): Promise<ReconcileCounts> {
   const started = Date.now();
-  const counts = await withLease(institutionId, "reconciliation", LEASE_MS, () => reconcileCampus(institutionId, deadline));
+  const counts = await withLease(institutionId, "reconciliation", LEASE_MS, () => reconcileCampus(institutionId, deadline, accounts));
   if (!counts) return NONE;
   const [raised] = await db
     .select({ n: sql<number>`count(*)::int` })

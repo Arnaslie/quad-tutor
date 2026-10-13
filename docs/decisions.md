@@ -750,7 +750,9 @@ same divergence seen again is not. A claim held for 23 hours gates the daily pas
 let go only when the key check fails or the deadline cuts the pass short, so the next run
 tries again instead of the next day. The pass settles flags Stripe can now answer,
 re-reads open disputes, and flags Connect accounts carrying the campus's id that no tutor
-holds (`orphaned_account`, which names no engagement and pauses nothing).
+holds (`orphaned_account`, which names no engagement and pauses nothing). The accounts are
+listed once per cron run, for every campus, and the flag resolves itself once a tutor on
+the campus holds the account.
 
 A PaymentIntent Stripe does not know, on a purchase it charged (one with a `processor_fee`),
 means the key is for another account. The campus run stops with nothing flagged and counts

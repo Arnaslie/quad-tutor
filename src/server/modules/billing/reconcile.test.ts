@@ -6,17 +6,17 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { engagement, ledgerEntry, moneyDiscrepancy, sweepLease } from "@/server/db/schema";
+import { engagement, ledgerEntry, moneyDiscrepancy, sweepLease, tutorProfile } from "@/server/db/schema";
 import { endPackage } from "@/server/modules/engagements/termEnd";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
 import { settleCheckout } from "./checkout-session";
 import { assertMoneyInvariants } from "./invariants";
 import { moneyForOperator, recordManualSettlement, resolveDiscrepancy } from "./ops";
-import { runReconciliation } from "./reconcile";
+import { accountsThisRun, runReconciliation } from "./reconcile";
 import { blockedRefunds, refundThroughStripe } from "./refunds";
 import { fakeStripe, stripeGateway } from "./stripe";
-import { accepted, checkingOut, cleanup, deliver, delivered, noStripe, operator, patched, rows, world, type World } from "./test-world";
+import { accepted, checkingOut, cleanup, deliver, delivered, noStripe, operator, patched, person, rows, world, type World } from "./test-world";
 import { runTransfers } from "./transfers";
 
 const reconcile = (w: World) => runReconciliation(w.institutionId, Date.now() + 10_000);
@@ -400,4 +400,32 @@ test("a Connect account no tutor holds is flagged once, and the scan runs once a
   await aDayLater(w);
   assert.deepEqual(await reconcile(w), counts(0));
   assert.equal((await flags(w.institutionId)).length, 1);
+
+  const late = await person(w.institutionId);
+  await db.insert(tutorProfile).values({ userId: late.userId, institutionId: w.institutionId, stripeAccountId: stray.id });
+  await aDayLater(w);
+  assert.deepEqual(await reconcile(w), counts(0, 0, 1));
+  const [resolved] = await db.select({ note: moneyDiscrepancy.resolutionNote, by: moneyDiscrepancy.resolvedByUserId }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.institutionId, w.institutionId));
+  assert.deepEqual(resolved, { note: "Reconciliation: a tutor on this campus now holds this account.", by: null });
+});
+
+test("one cron run lists Connect accounts once for every campus", async () => {
+  const campuses = [await world(), await world()];
+  const strays = await Promise.all(
+    campuses.map((w) => stripeGateway().createAccount({ tutorProfileId: randomUUID(), institutionId: w.institutionId, email: "stray@example.test" })),
+  );
+  let listed = 0;
+  const real = stripeGateway().listAccounts;
+  await patched("listAccounts", async () => {
+    listed += 1;
+    return real();
+  }, async () => {
+    const accounts = accountsThisRun();
+    for (const w of campuses) assert.deepEqual(await runReconciliation(w.institutionId, Date.now() + 10_000, accounts), counts(0, 1));
+  });
+  assert.equal(listed, 1);
+  assert.deepEqual(
+    await Promise.all(campuses.map(async (w) => (await flags(w.institutionId)).map((f) => f.stripeReference))),
+    strays.map((stray) => [stray.id]),
+  );
 });
