@@ -1,4 +1,4 @@
-import { and, eq, exists, isNull, like, lt, notExists, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, exists, isNull, like, lt, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -76,6 +76,15 @@ const boughtThroughStripe = and(
 const unstampedRefund = and(eq(ledgerEntry.type, "refund"), isNull(ledgerEntry.stripeReference));
 const blocked = () => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId);
 const held = () => failedDashboardRefund(purchase.stripeReference, purchase.institutionId);
+
+/** The unstamped refund row of the engagement a PaymentIntent bought: the one a failed refund on that PaymentIntent holds. */
+export const refundHeldBy = (paymentIntentId: AnyColumn, institutionId: AnyColumn) =>
+  db
+    .select({ id: ledgerEntry.id })
+    .from(ledgerEntry)
+    .innerJoin(purchase, boughtThroughStripe)
+    .where(and(unstampedRefund, eq(purchase.stripeReference, paymentIntentId), eq(purchase.institutionId, institutionId)))
+    .limit(1);
 
 /** Unstamped refund rows of engagements bought through Stripe; one bought before Stripe has no `pi_` and never appears. */
 async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[]> {

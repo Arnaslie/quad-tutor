@@ -677,21 +677,26 @@ hold up the engagement's own term-end or end-early refund. The retry sweep repor
 skips as `blocked`, so a halted row stays visible in the cron response. A Dashboard refund
 that fails has no row of ours, so its `refund_failed` names only the PaymentIntent. It holds
 the engagement's own refund rather than stopping it: the term-end or end-early refund waits,
-counted as `blocked`, until ops resolves the flag, so it is not sent to a card that just
-bounced one. A row that fails on a `refund_failed` ops already resolved reopens it, because
-the money it names is new. Ops pays the student another way and records it with
-`recordManualSettlement` in `billing/ops.ts` (formerly `recordManualRefund`), which resolves
-the discrepancy and, when it names an unstamped refund or transfer row, stamps that row
-`manual:<discrepancy id>` in the same transaction. A flag on a refund made in the Dashboard
-instead stamps the row with that refund's `re_…`, since it is the refund that happened, so
-the reconciliation counts it and the row references the Stripe object. The row keeps its
-amount, as a stamp is the only update a row takes: a Dashboard refund smaller or larger
-than the row leaves the difference on the PaymentIntent's charge flag, which ops clears by
-refunding the rest in the Dashboard or resolves. The row stays the engagement's one row of
-its kind, no sweep sees a stamped row, and `db:check-money` accepts only `re_…` or
-`manual:…` on a refund row. A flag naming an unstamped refund or transfer row can only be
-settled, never just resolved: resolved, the row would stay stopped, unsent and unstamped for
-good, and the transfer sweep would count it as sent.
+counted as `blocked`, until ops answers the flag, so it is not sent to a card that just
+bounced one. Resolving the flag releases that refund to the card. Settling it by hand
+stamps the held refund row `manual:<discrepancy id>` in the same transaction, so it stays
+the engagement's one refund and no sweep sends it; settled before the package ends, there
+is no row yet and the flag only resolves. A row that fails on a `refund_failed` ops already
+resolved reopens it at that row's amount, because the money it names is new. Ops pays the
+student another way and records it with `recordManualSettlement` in `billing/ops.ts`
+(formerly `recordManualRefund`), which resolves the discrepancy and, when it names an
+unstamped refund or transfer row, stamps that row `manual:<discrepancy id>` in the same
+transaction. A row Stripe stamped in the meantime refuses the settlement, since the money
+moved there. A flag on a refund made in the Dashboard instead stamps the row with that
+refund's `re_…`, since it is the refund that happened, so the reconciliation counts it and
+the row references the Stripe object. The row keeps its amount, as a stamp is the only
+update a row takes: a Dashboard refund smaller or larger than the row leaves the
+difference on the PaymentIntent's charge flag, which ops clears by refunding the rest in
+the Dashboard or resolves. The row stays the engagement's one row of its kind, no sweep
+sees a stamped row, and `db:check-money` accepts only `re_…` or `manual:…` on a refund
+row. A flag naming an unstamped refund or transfer row can only be settled, never just
+resolved: resolved, the row would stay stopped, unsent and unstamped for good, and the
+transfer sweep would count it as sent.
 
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 Transfers go per engagement once the tutor is verified and the engagement has no open

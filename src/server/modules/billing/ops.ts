@@ -23,7 +23,7 @@ import { courseLabel } from "@/server/modules/messaging/threads";
 
 import { uniqueViolation } from "./checkout-session";
 import { FORFEITED_PREFIX, MANUAL_PREFIX, type Ids } from "./discrepancy";
-import { blockedRefunds } from "./refunds";
+import { blockedRefunds, refundHeldBy } from "./refunds";
 import { blockedEngagements, paused } from "./transfers";
 
 type DiscrepancyKind = (typeof moneyDiscrepancyKind.enumValues)[number];
@@ -107,6 +107,10 @@ const namesUnstampedRow = () =>
         ),
       ),
   );
+
+const heldRefund = () =>
+  sql<string | null>`case when ${moneyDiscrepancy.kind} = 'refund_failed' and ${moneyDiscrepancy.ledgerEntryId} is null
+    then (${refundHeldBy(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)}) end`;
 
 const settleable = () => sql<boolean>`(${moneyDiscrepancy.kind} = 'refund_failed' or ${namesUnstampedRow()})`;
 
@@ -259,7 +263,8 @@ export async function resolveDiscrepancy(params: {
 
 /**
  * Ops paid the student or the tutor another way. The named refund or transfer row is stamped `manual:<discrepancy
- * id>` in the same transaction, so it stays the engagement's one row of its kind and no sweep sees it again. A flag
+ * id>` in the same transaction, so it stays the engagement's one row of its kind and no sweep sees it again. A failed
+ * Dashboard refund's flag names no row, so it stamps the package refund it holds, if one is written yet. A flag
  * on a refund made in the Dashboard stamps the row with that `re_…` instead: it is the refund that happened, and the
  * reconciliation then counts it. Any gap between its amount and the row's stays on the charge for ops.
  */
@@ -277,6 +282,7 @@ export async function recordManualSettlement(params: {
         stripeReference: moneyDiscrepancy.stripeReference,
         settleable: settleable(),
         namesUnstampedRow: sql<boolean>`${namesUnstampedRow()}`,
+        heldRefundId: heldRefund(),
       })
       .from(moneyDiscrepancy)
       .where(scope)
@@ -284,7 +290,8 @@ export async function recordManualSettlement(params: {
     if (!found) return refused("gone");
     if (!found.settleable) return refused("not_settleable");
 
-    if (found.ledgerEntryId) {
+    const unstampedRowId = found.namesUnstampedRow ? found.ledgerEntryId : found.heldRefundId;
+    if (unstampedRowId) {
       const stamped = await tx
         .update(ledgerEntry)
         .set({
@@ -292,7 +299,7 @@ export async function recordManualSettlement(params: {
         })
         .where(
           and(
-            eq(ledgerEntry.id, found.ledgerEntryId),
+            eq(ledgerEntry.id, unstampedRowId),
             eq(ledgerEntry.institutionId, found.institutionId),
             inArray(ledgerEntry.type, ["refund", "tutor_transfer"]),
             isNull(ledgerEntry.stripeReference),
@@ -300,7 +307,7 @@ export async function recordManualSettlement(params: {
         )
         .returning({ id: ledgerEntry.id });
       // Stripe stamped the row since it was read: the money moved there, so settling by hand would pay twice.
-      if (found.namesUnstampedRow && stamped.length === 0) return refused("not_settleable");
+      if (stamped.length === 0) return refused("not_settleable");
     }
     await tx
       .update(moneyDiscrepancy)
