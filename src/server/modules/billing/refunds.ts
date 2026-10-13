@@ -78,9 +78,13 @@ const blocked = () => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId
 const held = () => failedDashboardRefund(purchase.stripeReference, purchase.institutionId);
 
 /** The unstamped refund row of the engagement a PaymentIntent bought: the one a failed refund on that PaymentIntent holds. */
-export const refundHeldBy = (paymentIntentId: AnyColumn, institutionId: AnyColumn) =>
+export const refundHeldBy = (
+  column: typeof ledgerEntry.id | typeof ledgerEntry.amountMinor,
+  paymentIntentId: AnyColumn,
+  institutionId: AnyColumn,
+) =>
   db
-    .select({ id: ledgerEntry.id })
+    .select({ value: column })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
     .where(and(unstampedRefund, eq(purchase.stripeReference, paymentIntentId), eq(purchase.institutionId, institutionId)))

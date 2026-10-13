@@ -40,6 +40,8 @@ export type DiscrepancyItem = {
   currency: string;
   detectedAt: Date;
   ledgerEntryType: LedgerType | null;
+  /** What settling marks paid by hand: the package refund a failed Dashboard refund holds, once it is written. */
+  heldRefundMinor: number | null;
   engagement: EngagementContext | null;
   canSettle: boolean;
   canResolve: boolean;
@@ -108,9 +110,9 @@ const namesUnstampedRow = () =>
       ),
   );
 
-const heldRefund = () =>
-  sql<string | null>`case when ${moneyDiscrepancy.kind} = 'refund_failed' and ${moneyDiscrepancy.ledgerEntryId} is null
-    then (${refundHeldBy(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)}) end`;
+const heldRefund = <T>(column: Parameters<typeof refundHeldBy>[0]) =>
+  sql<T | null>`case when ${moneyDiscrepancy.kind} = 'refund_failed' and ${moneyDiscrepancy.ledgerEntryId} is null
+    then (${refundHeldBy(column, moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)}) end`;
 
 const settleable = () => sql<boolean>`(${moneyDiscrepancy.kind} = 'refund_failed' or ${namesUnstampedRow()})`;
 
@@ -152,6 +154,7 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         currency: moneyDiscrepancy.currency,
         detectedAt: moneyDiscrepancy.detectedAt,
         ledgerEntryType: ledgerEntry.type,
+        heldRefundMinor: heldRefund<number>(ledgerEntry.amountMinor),
         canSettle: settleable(),
         canResolve: sql<boolean>`not ${namesUnstampedRow()}`,
       })
@@ -282,7 +285,7 @@ export async function recordManualSettlement(params: {
         stripeReference: moneyDiscrepancy.stripeReference,
         settleable: settleable(),
         namesUnstampedRow: sql<boolean>`${namesUnstampedRow()}`,
-        heldRefundId: heldRefund(),
+        heldRefundId: heldRefund<string>(ledgerEntry.id),
       })
       .from(moneyDiscrepancy)
       .where(scope)

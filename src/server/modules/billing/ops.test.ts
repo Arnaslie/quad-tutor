@@ -247,6 +247,7 @@ test("settling a refused transfer by hand stamps its row manual:<discrepancy> an
       currency: "usd",
       detectedAt: "date",
       ledgerEntryType: "tutor_transfer",
+      heldRefundMinor: null,
       engagement: { courseLabel: w.courseCode, tutorName: w.tutor.name, studentName: actor.name },
       canSettle: true,
       canResolve: false,
@@ -269,11 +270,29 @@ test("settling a refused transfer by hand stamps its row manual:<discrepancy> an
 test("settling a failed Dashboard refund by hand stamps the package refund it holds manual:<discrepancy>, and nothing reaches the card", async () => {
   const w = await world();
   const ops = await operator(w.institutionId);
-  const { actor, engagementId, checkoutSessionId, flagId } = await bouncedDashboardRefund(w);
+  const { actor, engagementId, checkoutSessionId, paymentIntentId, flagId } = await bouncedDashboardRefund(w);
   const ids = { engagementId, institutionId: w.institutionId };
+  assert.deepEqual((await moneyForOperator(ops)).discrepancies.map((d) => d.heldRefundMinor), [null], "no package refund is written yet");
   await endPackage({ actor, engagementId });
   assert.equal(await refundThroughStripe(ids), "skipped");
-  assert.deepEqual((await moneyForOperator(ops)).held, { refunds: 1, transfers: 1 });
+  const money = await moneyForOperator(ops);
+  assert.deepEqual(undated(money.discrepancies), [
+    {
+      id: flagId,
+      kind: "refund_failed",
+      stripeReference: paymentIntentId,
+      ledgerAmountMinor: 2_000,
+      stripeAmountMinor: 0,
+      currency: "usd",
+      detectedAt: "date",
+      ledgerEntryType: null,
+      heldRefundMinor: 10_500,
+      engagement: { courseLabel: w.courseCode, tutorName: w.tutor.name, studentName: actor.name },
+      canSettle: true,
+      canResolve: true,
+    },
+  ]);
+  assert.deepEqual(money.held, { refunds: 1, transfers: 1 });
 
   assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: flagId, note: "paid back by Zelle" }), { ok: true });
   assert.deepEqual((await rows(engagementId, "refund")).map((r) => [r.amountMinor, r.stripeReference]), [[10_500, `manual:${flagId}`]]);
