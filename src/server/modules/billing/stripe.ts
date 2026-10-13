@@ -126,7 +126,9 @@ export type Transfer = {
   ledgerEntryId: string | null;
   engagementId: string | null;
   institutionId: string | null;
+  /** A listed transfer carries only its first 10 reversals; `reversedMinor` is all of them. */
   reversals: { id: string; amountMinor: number }[];
+  reversedMinor: number;
 };
 
 export type NewTransfer = {
@@ -269,6 +271,7 @@ function transferView(transfer: Stripe.Transfer, reversals: Stripe.TransferRever
     engagementId: transfer.metadata?.engagement_id ?? null,
     institutionId: transfer.metadata?.institution_id ?? null,
     reversals: reversals.map((r) => ({ id: r.id, amountMinor: r.amount })),
+    reversedMinor: transfer.amount_reversed,
   };
 }
 
@@ -707,7 +710,8 @@ const fakeGateway: Gateway = {
   },
   async listTransfers(transferGroup) {
     const ids = (await fakeRead<string[]>(`transfer-group-${transferGroup}`)) ?? [];
-    return Promise.all(ids.map(fakeTransfer));
+    const transfers = await Promise.all(ids.map(fakeTransfer));
+    return transfers.map((transfer) => ({ ...transfer, reversals: transfer.reversals.slice(0, 10) }));
   },
   retrieveTransfer: (id) => fakeTransfer(id),
   async retrieveDispute(id) {
@@ -720,7 +724,7 @@ const fakeGateway: Gateway = {
 async function fakeTransfer(id: string): Promise<Transfer> {
   const transfer = await fakeRead<Transfer>(id);
   if (!transfer) throw missing("transfer", id);
-  return transfer;
+  return { ...transfer, reversedMinor: transfer.reversals.reduce((sum, r) => sum + r.amountMinor, 0) };
 }
 
 type FakeTransferReplay = {
@@ -795,6 +799,7 @@ function fakeCreateTransfer(params: NewTransfer): Promise<Transfer> {
         engagementId: params.engagementId,
         institutionId: params.institutionId,
         reversals: [],
+        reversedMinor: 0,
       };
       const group = (await fakeRead<string[]>(`transfer-group-${params.engagementId}`)) ?? [];
       await fakeWrite(transfer.id, transfer);
@@ -1099,12 +1104,12 @@ export const fakeStripe = {
     assertNotProduction();
     return locked(id, async () => {
       const transfer = await fakeTransfer(id);
-      const left = transfer.amountMinor - transfer.reversals.reduce((sum, r) => sum + r.amountMinor, 0);
+      const left = transfer.amountMinor - transfer.reversedMinor;
       const reversal = { id: `trr_fake_${randomUUID().replaceAll("-", "")}`, amountMinor: amountMinor ?? left };
       if (reversal.amountMinor <= 0 || reversal.amountMinor > left) {
         throw new GatewayError(`Reversal amount (${reversal.amountMinor}) exceeds what is left (${left}).`, { status: 400 });
       }
-      const reversed = { ...transfer, reversals: [...transfer.reversals, reversal] };
+      const reversed = { ...transfer, reversals: [...transfer.reversals, reversal], reversedMinor: transfer.reversedMinor + reversal.amountMinor };
       await fakeWrite(id, reversed);
       return reversed;
     });
@@ -1123,6 +1128,7 @@ export const fakeStripe = {
       engagementId: null,
       institutionId: null,
       reversals: [],
+      reversedMinor: 0,
     };
     const group = `transfer-group-${params.engagementId}`;
     return locked(group, async () => {
@@ -1138,7 +1144,7 @@ export const fakeStripe = {
       id,
       object: "transfer",
       amount: transfer.amountMinor,
-      amount_reversed: transfer.reversals.reduce((sum, r) => sum + r.amountMinor, 0),
+      amount_reversed: transfer.reversedMinor,
       currency: transfer.currency,
       destination: transfer.destination,
       source_transaction: transfer.sourceTransaction,

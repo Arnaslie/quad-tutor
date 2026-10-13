@@ -61,6 +61,7 @@ test("a confirmed session's pay is transferred once, from the student's charge, 
     engagementId,
     institutionId: w.institutionId,
     reversals: [],
+    reversedMinor: 0,
   });
   assert.deepEqual(await earningsForTutor(w.tutor), { earnedMinor: 3_150, owedMinor: 0, transferredMinor: 3_150, currency: "usd", sessionsDelivered: 1 });
 

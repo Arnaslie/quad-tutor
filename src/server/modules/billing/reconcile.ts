@@ -134,10 +134,7 @@ function chargeGap(e: Reconciling, payment: Payment, ledger: Ledger): Gap | null
 /** Stripe's side counts every transfer in the group and every reversal, ours or not. */
 function transfersGap(e: Reconciling, transfers: Transfer[], ledger: Ledger): Gap | null {
   if (ledger.inFlightTransfers > 0) return null;
-  const stripeNetMinor = transfers.reduce(
-    (sum, t) => sum + t.amountMinor - t.reversals.reduce((reversed, r) => reversed + r.amountMinor, 0),
-    0,
-  );
+  const stripeNetMinor = transfers.reduce((sum, t) => sum + t.amountMinor - t.reversedMinor, 0);
   return stripeNetMinor === ledger.transferredMinor ? null : { ledgerNetMinor: ledger.transferredMinor, stripeNetMinor, currency: e.currency };
 }
 
@@ -210,13 +207,18 @@ async function flagStaleRows(ids: Ids): Promise<void> {
   await recordDiscrepancy(ids, { kind: "unstamped_reference", ledgerAmountMinor: stale.amountMinor, currency: stale.currency });
 }
 
+const withEveryReversal = async (transfer: Transfer) =>
+  transfer.reversals.reduce((sum, r) => sum + r.amountMinor, 0) < transfer.reversedMinor
+    ? stripeGateway().retrieveTransfer(transfer.id)
+    : transfer;
+
 async function reconcileEngagement(e: Reconciling): Promise<void> {
   const gateway = stripeGateway();
   const payment = await paymentOf(e);
   if (payment) {
     for (const refund of await gateway.listRefunds(e.paymentIntentId)) await reconcileRefund(refund);
     const transfers = await gateway.listTransfers(e.engagementId);
-    for (const transfer of transfers) if (transfer.ledgerEntryId) await applyTransfer(transfer);
+    for (const transfer of transfers) if (transfer.ledgerEntryId) await applyTransfer(await withEveryReversal(transfer));
     const seen = await gaps(e, payment, transfers);
     if (seen.charge || seen.transfers) {
       // Stripe is read before the ledger, so a refund or transfer stamped in between shows as a gap once; only a gap seen twice is real.

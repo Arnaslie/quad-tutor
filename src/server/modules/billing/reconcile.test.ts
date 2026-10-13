@@ -241,6 +241,21 @@ test("a refund and a transfer stamped between the Stripe reads and the ledger re
   await assertMoneyInvariants(w.institutionId);
 });
 
+test("a transfer reversed more than ten times has every reversal booked, and the transfers agree", async () => {
+  const w = await world();
+  const { engagementId } = await delivered(w);
+  await runTransfers(w.institutionId, Date.now() + 10_000);
+  const [sent] = await rows(engagementId, "tutor_transfer");
+  for (let i = 0; i < 11; i += 1) await fakeStripe.reverseTransfer(sent.stripeReference!, 100);
+
+  assert.deepEqual(await reconcile(w), counts(1));
+  const booked = await rows(engagementId, "transfer_reversal");
+  assert.deepEqual([booked.length, booked.reduce((sum, r) => sum + r.amountMinor, 0)], [11, 1_100]);
+  assert.deepEqual(await flags(w.institutionId), []);
+  assert.deepEqual(await earningsForTutor(w.tutor), { earnedMinor: 3_150, owedMinor: 1_100, transferredMinor: 2_050, currency: "usd", sessionsDelivered: 1 });
+  await assertMoneyInvariants(w.institutionId);
+});
+
 test("an engagement compared today is not asked about again until tomorrow", async () => {
   const w = await world();
   await delivered(w);
