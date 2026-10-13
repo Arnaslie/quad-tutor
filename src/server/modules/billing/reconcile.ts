@@ -287,13 +287,11 @@ async function settleMissingSession(flag: { id: string; institutionId: string; s
   return null;
 }
 
-/** Lists Connect accounts at most once per cron run, however many campuses ask. */
 export function accountsThisRun(): () => Promise<ConnectAccount[]> {
   let listed: Promise<ConnectAccount[]> | undefined;
   return () => (listed ??= stripeGateway().listAccounts());
 }
 
-/** An account a tutor on the campus now holds is no longer orphaned. */
 async function resolveHeldAccounts(institutionId: string): Promise<number> {
   const resolved = await db
     .update(moneyDiscrepancy)
