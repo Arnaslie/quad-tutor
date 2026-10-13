@@ -10,7 +10,7 @@ import { answerReversalAction, type MoneyFormState } from "./actions";
 const ANSWERS: Record<ReversalAnswer, { title: string; body: string; submit: string; pending: string; variant: ButtonVariant }> = {
   resend: {
     title: "Send it again",
-    body: "A new transfer of this amount goes to the tutor's Stripe account now.",
+    body: "A new transfer of this amount goes to the tutor's Stripe account now, or as soon as their account can take it.",
     submit: "Send it again",
     pending: "Sending…",
     variant: "primary",

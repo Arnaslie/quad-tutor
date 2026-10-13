@@ -15,7 +15,6 @@ export type NoteChoice = {
   variant?: ButtonVariant;
 };
 
-/** One note, one submit per write; the pressed button picks which action runs. */
 export function NoteForm({ id, hint, choices }: { id: string; hint: string; choices: NoteChoice[] }) {
   const [state, submit] = useActionState(
     (previous: MoneyFormState, formData: FormData) => choices[Number(formData.get("choice"))].action(previous, formData),

@@ -21,6 +21,7 @@ import {
   recordManualPaymentAction,
   resolveDiscrepancyAction,
 } from "./actions";
+import { disputeBody, explained, heldLine } from "./copy";
 import { NoteForm, type NoteChoice } from "./note-form";
 import { ReversalForm } from "./reversal-form";
 
@@ -29,41 +30,13 @@ export const metadata: Metadata = { title: "Money" };
 const RESOLVE: NoteChoice = { action: resolveDiscrepancyAction, label: "Resolve", pending: "Resolving…", variant: "secondary" };
 const NOTE_HINT = "What you checked or did. It is saved with your name.";
 
-const KIND: Record<DiscrepancyItem["kind"], { title: string; body: string }> = {
-  checkout_amount: {
-    title: "Checkout took the wrong amount",
-    body: "Stripe charged a different amount than the package costs, so the package was cancelled and the payment goes back to the student on its own.",
-  },
-  ledger_vs_stripe_charge: {
-    title: "A charge does not match the ledger",
-    body: "What Stripe kept for this payment, after refunds, is not what the ledger booked. Check the payment in the Dashboard.",
-  },
-  ledger_vs_stripe_transfers: {
-    title: "Tutor pay does not match the ledger",
-    body: "What Stripe sent the tutor for this package, after reversals, is not what the ledger booked, or Stripe refused a transfer.",
-  },
-  unstamped_reference: {
-    title: "Stripe has not confirmed a payment",
-    body: "A refund, tutor transfer or checkout from over a day ago still has no Stripe id. This flag does not stop its retries or pause the tutor's transfers, and it clears itself once Stripe answers.",
-  },
-  refund_failed: {
-    title: "A refund to the student failed",
-    body: "Stripe could not return this money to the student's card, usually because the card is closed or lost. Nothing sends it to that card again.",
-  },
-};
-
-const STOPPED_ROW: Partial<Record<NonNullable<DiscrepancyItem["ledgerEntryType"]>, string>> = {
-  refund: "the refund to the student",
-  tutor_transfer: "the transfer to the tutor",
-};
-
 type Fact = [label: string, value: ReactNode] | false;
 
 export default async function MoneyPage() {
   const operator = await requireOperator();
   const { disputes, reversals, discrepancies, orphanedAccounts, held } = await moneyForOperator(operator);
   const clear = disputes.length + reversals.length + discrepancies.length + orphanedAccounts.length === 0;
-  const holding = [count(held.refunds, "refund"), count(held.transfers, "tutor transfer")].filter(Boolean).join(" and ");
+  const holding = heldLine(held);
 
   return (
     <div className="flex flex-col gap-8">
@@ -73,7 +46,7 @@ export default async function MoneyPage() {
       />
 
       {holding ? (
-        <p className="rounded-2xl bg-surface-sunken px-4 py-3 text-sm">The sweeps are holding {holding} for you.</p>
+        <p className="rounded-2xl bg-surface-sunken px-4 py-3 text-sm">{holding}</p>
       ) : null}
 
       {clear ? (
@@ -106,10 +79,6 @@ export default async function MoneyPage() {
       />
     </div>
   );
-}
-
-function count(n: number, noun: string) {
-  return n === 0 ? "" : `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
 const humanize = (value: string) => value.replaceAll("_", " ");
@@ -209,17 +178,13 @@ function Dispute({ dispute }: { dispute: DisputeItem }) {
         dispute.canLift ? (
           <NoteForm
             id={dispute.id}
-            hint="What it means for the tutor's pay. It is saved with your name."
+            hint={NOTE_HINT}
             choices={[{ action: liftDisputePauseAction, label: "Lift the pause", pending: "Lifting…" }]}
           />
         ) : null
       }
     >
-      <p>
-        {dispute.canLift
-          ? "Stripe has closed it. Decide what the outcome means for the tutor's pay, then lift the pause."
-          : "Stripe has not closed it, so the bank is still deciding. Transfers to the tutor on this package stay paused, and you can lift the pause once it closes."}
-      </p>
+      <p>{disputeBody(dispute.canLift)}</p>
     </ItemCard>
   );
 }
@@ -242,54 +207,6 @@ function Reversal({ reversal }: { reversal: ReversalItem }) {
       ) : null}
     </ItemCard>
   );
-}
-
-const SETTLE = { label: "Record manual payment", pending: "Recording…" };
-
-function explained(item: DiscrepancyItem): { title: string; body: string; note: string | null; settle: typeof SETTLE } {
-  const { title, body } = KIND[item.kind];
-  const plain = { title, body, note: null, settle: SETTLE };
-
-  if (item.kind === "ledger_vs_stripe_charge" && item.ledgerEntryType === "refund" && item.stripeReference?.startsWith("re_")) {
-    return {
-      title: "A refund was made in the Stripe Dashboard",
-      body: "Someone refunded this payment in the Dashboard, so the package refund was stopped rather than sent a second time.",
-      note: "Booking it records the Dashboard refund as the package refund. If the two amounts differ, the difference comes back as a flag on the payment.",
-      settle: { label: "Book this Dashboard refund", pending: "Booking…" },
-    };
-  }
-  if (item.kind === "checkout_amount" || (item.kind === "ledger_vs_stripe_charge" && item.stripeReference?.startsWith("pi_") && !item.paymentBooked)) {
-    return {
-      ...plain,
-      ...(item.kind === "ledger_vs_stripe_charge" && {
-        title: "Stripe took money no package booked",
-        body: "The student paid, but no package on the ledger booked the payment, so it goes back to them on its own.",
-      }),
-      note: item.refundReference
-        ? "Stripe has refunded it. Resolve this once you have checked."
-        : item.refund === "retrying"
-          ? "The refund has not gone out yet and keeps retrying. Resolving now stops it."
-          : "Its refund failed and is not retried. The failed refund has its own card here.",
-    };
-  }
-  if (item.kind === "refund_failed" && !item.ledgerEntryType) {
-    return {
-      ...plain,
-      note:
-        "No refund row names it: it was made in the Stripe Dashboard, or it returned a payment the ledger never booked. " +
-        (item.refund === "holding"
-          ? "It holds the package's refund so it is not sent to the same card. If you paid the student another way, record it, and the package refund waiting is marked paid and never sent. Resolving instead sends the package refund to the same card."
-          : "The package has no refund waiting yet. Resolving or recording a manual payment both close this, and a refund the package owes later goes to the same card."),
-    };
-  }
-  const stopped = item.canSettle && item.ledgerEntryType ? STOPPED_ROW[item.ledgerEntryType] : undefined;
-  if (!stopped) return plain;
-  return {
-    ...plain,
-    note: item.canResolve
-      ? `It stopped ${stopped}. Resolving does not send it again, so if you paid another way, record a manual payment instead.`
-      : `It stopped ${stopped}, which was never sent. Resolving would leave it unsent for good, so pay another way and record it here.`,
-  };
 }
 
 function amounts(item: DiscrepancyItem): Fact[] {
@@ -319,7 +236,7 @@ function Discrepancy({ item }: { item: DiscrepancyItem }) {
           id={item.id}
           hint={NOTE_HINT}
           choices={[
-            ...(item.canSettle ? [{ action: recordManualPaymentAction, ...settle }] : []),
+            ...(settle ? [{ action: recordManualPaymentAction, ...settle }] : []),
             ...(item.canResolve ? [RESOLVE] : []),
           ]}
         />
