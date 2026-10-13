@@ -761,7 +761,9 @@ tries again instead of the next day. The pass settles flags Stripe can now answe
 re-reads open disputes, and flags Connect accounts carrying the campus's id that no tutor
 holds (`orphaned_account`, which names no engagement and pauses nothing). The accounts are
 listed once per cron run, for every campus, and the flag resolves itself once a tutor on
-the campus holds the account.
+the campus holds the account. That flag reopens if the account is later held by no tutor
+again, since it has no amounts to move. One ops resolved stays resolved: ops answered it
+while no tutor held the account, so seeing it unheld again is not news.
 
 A PaymentIntent Stripe does not know, on a purchase it charged (one with a `processor_fee`),
 means the key is for another account. The campus run stops with nothing flagged and counts

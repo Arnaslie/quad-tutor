@@ -32,9 +32,12 @@ export async function recordDiscrepancy(
         resolvedByUserId: null,
         resolutionNote: null,
       },
-      setWhere: sql`${moneyDiscrepancy.resolvedAt} is not null
-        and ${moneyDiscrepancy.ledgerAmountMinor} - ${moneyDiscrepancy.stripeAmountMinor}
-          is distinct from excluded.ledger_amount_minor - excluded.stripe_amount_minor`,
+      // The reconciliation resolves an orphaned account's flag only once a tutor holds it, so flagged again it is news.
+      setWhere: sql`${moneyDiscrepancy.resolvedAt} is not null and (
+        ${moneyDiscrepancy.ledgerAmountMinor} - ${moneyDiscrepancy.stripeAmountMinor}
+          is distinct from excluded.ledger_amount_minor - excluded.stripe_amount_minor
+        or (${moneyDiscrepancy.kind} = 'orphaned_account' and ${moneyDiscrepancy.resolvedByUserId} is null)
+      )`,
     })
     .returning({ id: moneyDiscrepancy.id });
   if (created || !values.stripeReference) return created?.id ?? null;

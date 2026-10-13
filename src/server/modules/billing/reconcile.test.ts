@@ -464,6 +464,29 @@ test("a Connect account no tutor holds is flagged once, and the scan runs once a
   assert.deepEqual(resolved, { note: "Reconciliation: a tutor on this campus now holds this account.", by: null });
 });
 
+test("an orphaned account's flag that resolved itself reopens once no tutor holds the account again, and one ops resolved stays resolved", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const stray = await stripeGateway().createAccount({ tutorProfileId: randomUUID(), institutionId: w.institutionId, email: "stray@example.test" });
+  assert.deepEqual(await reconcile(w), counts(0, 1));
+  const [{ id }] = (await moneyForOperator(ops)).orphanedAccounts;
+
+  const late = await person(w.institutionId);
+  await db.insert(tutorProfile).values({ userId: late.userId, institutionId: w.institutionId, stripeAccountId: stray.id });
+  await aDayLater(w);
+  assert.deepEqual(await reconcile(w), counts(0, 0, 1));
+
+  await db.update(tutorProfile).set({ stripeAccountId: null }).where(eq(tutorProfile.userId, late.userId));
+  await aDayLater(w);
+  assert.deepEqual(await reconcile(w), counts(0, 1));
+  assert.deepEqual((await moneyForOperator(ops)).orphanedAccounts.map((a) => [a.id, a.accountId]), [[id, stray.id]], "the same flag, open again");
+
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: id, note: "test account, deleting at Stripe" }), { ok: true });
+  await aDayLater(w);
+  assert.deepEqual(await reconcile(w), counts(0));
+  assert.deepEqual((await flags(w.institutionId)).map((f) => [f.stripeReference, f.resolutionNote]), [[stray.id, "test account, deleting at Stripe"]]);
+});
+
 test("one cron run lists Connect accounts once for every campus", async () => {
   const campuses = [await world(), await world()];
   const strays = await Promise.all(
