@@ -230,7 +230,7 @@ async function refundPayment(ids: Ids, paymentIntentId: string, refunding: Refun
   return true;
 }
 
-function uniqueViolation(error: unknown, constraint: string): boolean {
+export function uniqueViolation(error: unknown, constraint: string): boolean {
   for (let cause = error; cause instanceof Error; cause = cause.cause) {
     const pg = cause as Error & { code?: string; constraint_name?: string };
     if (pg.code === "23505" && pg.constraint_name === constraint) return true;

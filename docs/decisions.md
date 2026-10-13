@@ -674,19 +674,49 @@ that was never booked has no row; a `refund_failed` on its PaymentIntent stops t
 PaymentIntent's refunds the same way. The halt is per row or per PaymentIntent, never per
 engagement: a failed refund of a stray payment on a superseded Checkout Session does not
 hold up the engagement's own term-end or end-early refund. The retry sweep reports rows it
-skips as `blocked`, so a halted row stays visible in the cron response. Ops pays the student
-another way and records it with `recordManualRefund`, which resolves the discrepancy and,
-when it names a ledger row, stamps that row `manual:<discrepancy id>` in the same
-transaction. The row stays the engagement's one refund, the sweep never sees a stamped row,
-and `db:check-money` accepts only `re_…` or `manual:…` on a refund row.
+skips as `blocked`, so a halted row stays visible in the cron response. A Dashboard refund
+that fails has no row of ours, so its `refund_failed` names only the PaymentIntent. It holds
+the engagement's own refund rather than stopping it: the term-end or end-early refund waits,
+counted as `blocked`, until ops answers the flag, so it is not sent to a card that just
+bounced one. Resolving the flag releases that refund to the card. Settling it by hand
+stamps the held refund row `manual:<discrepancy id>` in the same transaction, so it stays
+the engagement's one refund and no sweep sends it; settled before the package ends, there
+is no row yet and the flag only resolves. A row that fails on a `refund_failed` ops already
+resolved reopens it at that row's amount, because the money it names is new. So does a
+further Dashboard refund that fails on the same PaymentIntent, at its own amount, and it
+holds the package refund again. The flag records the id of every refund whose failure it
+carries in `failed_refund_ids`, and only a refund not in that list is news: the
+reconciliation replays every failed refund on the PaymentIntent each day, so an amount
+cannot tell a new failure from an old one, and two failures of different amounts would
+reopen the flag every day. Ops pays the
+student another way and records it with `recordManualSettlement` in `billing/ops.ts`
+(formerly `recordManualRefund`), which resolves the discrepancy and, when it names an
+unstamped refund or transfer row, stamps that row `manual:<discrepancy id>` in the same
+transaction. A row Stripe stamped in the meantime refuses the settlement, since the money
+moved there. A flag on a refund made in the Dashboard instead stamps the row with that
+refund's `re_…`, since it is the refund that happened, so the reconciliation counts it and
+the row references the Stripe object. The row keeps its amount, as a stamp is the only
+update a row takes: a Dashboard refund smaller or larger than the row leaves the
+difference on the PaymentIntent's charge flag, which ops clears by refunding the rest in
+the Dashboard or resolves. The row stays the engagement's one row of its kind, no sweep
+sees a stamped row, and `db:check-money` accepts only `re_…` or `manual:…` on a refund
+row. A flag naming an unstamped refund or transfer row can only be settled, never just
+resolved: resolved, the row would stay stopped, unsent and unstamped for good, and the
+transfer sweep would count it as sent.
 
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 Transfers go per engagement once the tutor is verified and the engagement has no open
 discrepancy or dispute. Refunds return only undelivered sessions, so none needs a
 reversal. Bank payouts are daily. Reversals are an ops tool. A reversal books a
 `transfer_reversal` row and leaves that money owed to the tutor until ops acts; the sweep
-never re-sends it. Ops either sends it again or appends a corrective `tutor_transfer` row
-marked forfeited or manual, and item 8's `/ops` page gets that write path.
+never re-sends it. Ops answers each reversal once, on `/ops/money`, with a `tutor_transfer`
+row of its amount whose `corrects_entry_id` names it; a unique index on that column makes a
+second answer a refusal. Re-send leaves the row unstamped and sends it after commit, with
+the sweep as backstop, and is refused while the engagement is paused. Paid by hand stamps
+it `manual:<reversal id>`; written off stamps it `forfeited:<reversal id>`. The sweep's
+owed amount leaves out both the reversal and its answer, so the two cancel and a later
+accrual goes out at its own amount. Earnings count `tr_…` and `manual:…` as transferred,
+less reversals, and `forfeited:…` as neither transferred nor owed.
 
 **KYC never blocks an accept.** An unverified tutor's pay accrues and
 waits, and the student's sessions proceed. Hiding unverified tutors from decks was
@@ -704,8 +734,10 @@ reason or past-due field is `restricted`.
 **A chargeback is recorded, not judged.** It pauses that engagement's
 transfers and goes to ops; it writes no reliability fact on its own. Each dispute event
 re-reads the dispute and upserts one `payment_dispute` row for the engagement its
-PaymentIntent bought. Stripe closing it (won, lost) sets `closed_at`; only ops setting
-`resolved_at` lifts the pause, since what a lost dispute means for the tutor's pay is ops' call. A
+PaymentIntent bought. Stripe closing it (won, lost) sets `closed_at`, and the daily
+reconciliation re-reads open disputes so a missed close event still lands. Only ops lifts
+the pause, by setting `resolved_at`, and only once Stripe has closed the dispute, since what
+a lost dispute means for the tutor's pay is ops' call. A
 transfer Stripe refuses for an account it still verifies is flagged as a discrepancy
 too, which pauses the engagement the same way; one refused because the account lost
 verification waits, and goes out once Stripe verifies it again.
@@ -715,9 +747,41 @@ importer of `stripe`. Its fake signs real webhook events with the configured sec
 verification and idempotency are tested with no Stripe secret in CI. It is refused in
 production, like the email and proof-store fallbacks.
 
-**Ledger and Stripe are reconciled daily and never auto-corrected.** A divergence pauses
-transfers for that engagement and goes to `/ops`. It is fixed by appending a row that
-references the Stripe object.
+**Ledger and Stripe are reconciled daily and never auto-corrected.** A divergence becomes a
+discrepancy, which pauses that engagement's transfers and goes to `/ops/money`. The
+reconciliation runs in the cron under its own lease, in two loops per campus. Every run
+compares up to 20 engagements bought through Stripe, with ledger activity in the last week
+and not compared in the last day, then stamps `reconciled_at`. Each is asked about once a
+day, spread over the runs, and one that fails is asked again on the next run. The comparison
+checks the charge net of refunds, each refund's status, and the transfers net of reversals,
+and books a missed transfer or reversal event as the webhook would. There is one flag per
+kind and Stripe object: a repeat leaves an open flag alone, and reopens a resolved one only
+when the gap between its two amounts has moved, so a second Dashboard refund a month later is
+news and the same divergence seen again is not. The gap decides, not the two amounts: a
+500 transfer gap ops resolved as a bonus stays resolved when the next session's transfer
+moves both sides by the same amount, and does not pause the tutor's pay again. A transfers gap has no one Stripe object, so its flag is
+keyed on the transfer group, the engagement's id, in `stripe_reference`; without that key a
+gap ops resolved was raised again the next day and paused the tutor's pay again. A claim held for 23 hours gates the daily pass, and is
+let go only when the key check fails or the deadline cuts the pass short, so the next run
+tries again instead of the next day. The pass settles flags Stripe can now answer,
+re-reads open disputes, and flags Connect accounts carrying the campus's id that no tutor
+holds (`orphaned_account`, which names no engagement and pauses nothing). The accounts are
+listed once per cron run, for every campus, and the flag resolves itself once a tutor on
+the campus holds the account. That flag reopens if the account is later held by no tutor
+again, since it has no amounts to move. One ops resolved stays resolved: ops answered it
+while no tutor held the account, so seeing it unheld again is not news.
+
+A PaymentIntent Stripe does not know, on a purchase it charged (one with a `processor_fee`),
+means the key is for another account. The campus run stops with nothing flagged and counts
+as failed, since mass flags from a key mistake would bury real ones. A refund or transfer
+row unstamped for over a day is flagged `unstamped_reference` without naming the row: a
+discrepancy on a row stops its retries for good, and this one should only be seen. For the
+same reason that kind does not pause transfers (`paused()` leaves it out), so the retry that
+clears it keeps running. The daily pass resolves it once every row carries its Stripe
+reference, and resolves a released checkout's flag once a day has passed and Stripe holds
+no payment for it. A resolution by the reconciliation leaves `resolved_by_user_id` null.
+Every ops write records the acting operator, in `resolved_by_user_id` on the flag or dispute
+it resolves and in `recorded_by_user_id` on a row it appends.
 
 **Data from before Stripe is test data, and it is cleared before launch.** Every
 production account is a test account today, and no purchase before Stripe was charged.

@@ -1,4 +1,4 @@
-import { and, eq, exists, isNotNull, isNull, like, lt, not, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, exists, isNotNull, isNull, like, lt, ne, not, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias, type SelectedFields } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
@@ -50,13 +50,16 @@ const boughtThroughStripe = (engagementId: AnyColumn, institutionId: AnyColumn) 
     like(purchase.stripeReference, "pi\\_%"),
   );
 
-/** Accrued less every transfer row, stamped or not, so a row still in flight is never sent twice. */
+/**
+ * Accrued less every transfer row, stamped or not, so a row still in flight is never sent twice. A reversal
+ * is left out, so the sweep never re-sends it; so is the row ops wrote to answer one, and the two cancel.
+ */
 const owedMinor = (engagementId: AnyColumn | string, institutionId: AnyColumn | string) =>
   sql<number>`(${db
     .select({
-      owed: sql`coalesce(sum(case ${owing.type}
-        when 'tutor_accrued' then ${owing.amountMinor}
-        when 'tutor_transfer' then -${owing.amountMinor}
+      owed: sql`coalesce(sum(case
+        when ${owing.type} = 'tutor_accrued' then ${owing.amountMinor}
+        when ${owing.type} = 'tutor_transfer' and ${owing.correctsEntryId} is null then -${owing.amountMinor}
         else 0 end), 0)::int`,
     })
     .from(owing)
@@ -76,7 +79,8 @@ const unstampedTransfer = (engagementId: AnyColumn, institutionId: AnyColumn, ..
       ),
     );
 
-const paused = (engagementId: AnyColumn | string, institutionId: AnyColumn | string) => sql<boolean>`(${exists(
+/** A stale-row flag only makes the row visible; pausing on it would stop the retry that clears it. */
+export const paused = (engagementId: AnyColumn | string, institutionId: AnyColumn | string) => sql<boolean>`(${exists(
       db
         .select({ id: paymentDispute.id })
         .from(paymentDispute)
@@ -96,6 +100,7 @@ const paused = (engagementId: AnyColumn | string, institutionId: AnyColumn | str
             eq(moneyDiscrepancy.engagementId, engagementId),
             eq(moneyDiscrepancy.institutionId, institutionId),
             isNull(moneyDiscrepancy.resolvedAt),
+            ne(moneyDiscrepancy.kind, "unstamped_reference"),
           ),
         ),
   )})`;
@@ -119,8 +124,7 @@ function payees<T extends SelectedFields>(fields: T) {
     );
 }
 
-/** Unstamped rows past the grace, so the sweep stays off a call still in flight. */
-function unstampedRows(institutionId: string) {
+function unstampedRows(institutionId: string, ...more: SQL[]) {
   return payees({
     id: ledgerEntry.id,
     amountMinor: ledgerEntry.amountMinor,
@@ -134,8 +138,8 @@ function unstampedRows(institutionId: string) {
         eq(ledgerEntry.institutionId, institutionId),
         eq(ledgerEntry.type, "tutor_transfer"),
         isNull(ledgerEntry.stripeReference),
-        lt(ledgerEntry.occurredAt, new Date(Date.now() - RETRY_GRACE_MS)),
         notExists(ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId)),
+        ...more,
       ),
     )
     .orderBy(sql`random()`)
@@ -159,7 +163,7 @@ function owedEngagements(institutionId: string) {
 }
 
 /** Money held for ops: a paused engagement still owing or mid-transfer, or a transfer row a discrepancy stopped. */
-async function blockedEngagements(institutionId: string): Promise<number> {
+export async function blockedEngagements(institutionId: string): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(engagement)
@@ -340,7 +344,8 @@ async function sweepCampus(institutionId: string, deadline: number): Promise<Omi
   let done = 0;
   const due = () => done++ > 0 && Date.now() > deadline;
 
-  for (const row of await unstampedRows(institutionId)) {
+  // The grace keeps the sweep off a call still in flight.
+  for (const row of await unstampedRows(institutionId, lt(ledgerEntry.occurredAt, new Date(Date.now() - RETRY_GRACE_MS)))) {
     if (due()) return counts;
     tally(await attempt(row.id, () => retry(row, kyc)), "settled");
   }
@@ -363,6 +368,12 @@ export async function runTransfers(institutionId: string, deadline: number): Pro
   };
 }
 
+/** Sends one unstamped row now, as the retry would, for a row ops just wrote; the sweep is the backstop. */
+export async function sendTransferRow(row: Ids & { id: string }): Promise<Outcome | null> {
+  const [found] = await unstampedRows(row.institutionId, eq(ledgerEntry.id, row.id), eq(ledgerEntry.engagementId, row.engagementId));
+  return found ? retry(found, kycThisRun()) : null;
+}
+
 export const TRANSFER_EVENTS = new Set(["transfer.created", "transfer.reversed"]);
 
 export type TransferEventOutcome = "transfer_synced" | "flagged" | "foreign";
@@ -373,7 +384,13 @@ const transferIds = z.object({ ledgerEntryId: z.uuid(), engagementId: z.uuid(), 
 export async function handleTransferEvent(
   transferId: string,
 ): Promise<{ outcome: TransferEventOutcome; institutionId: string | null }> {
-  const transfer = await stripeGateway().retrieveTransfer(transferId);
+  return applyTransfer(await stripeGateway().retrieveTransfer(transferId));
+}
+
+/** Stamps the row a transfer carrying our metadata was made for, and books its reversals once. */
+export async function applyTransfer(
+  transfer: Transfer,
+): Promise<{ outcome: TransferEventOutcome; institutionId: string | null }> {
   const parsed = transferIds.safeParse(transfer);
   if (!parsed.success) return { outcome: "foreign", institutionId: null };
   const { ledgerEntryId, ...ids } = parsed.data;

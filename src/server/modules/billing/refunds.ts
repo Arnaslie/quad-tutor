@@ -1,12 +1,12 @@
-import { and, eq, exists, isNull, like, lt, notExists, sql, type SQL } from "drizzle-orm";
+import { and, eq, exists, isNull, like, lt, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
-import { ledgerEntry, moneyDiscrepancy } from "@/server/db/schema";
+import { ledgerEntry } from "@/server/db/schema";
 
 import { withLease } from "./lease";
 import {
-  MANUAL_REFUND_PREFIX,
+  failedDashboardRefund,
   ledgerRowBlocker,
   recordDiscrepancy,
   recordRefundFailure,
@@ -75,6 +75,20 @@ const boughtThroughStripe = and(
 );
 const unstampedRefund = and(eq(ledgerEntry.type, "refund"), isNull(ledgerEntry.stripeReference));
 const blocked = () => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId);
+const held = () => failedDashboardRefund(purchase.stripeReference, purchase.institutionId);
+
+/** The unstamped refund row of the engagement a PaymentIntent bought: the one a failed refund on that PaymentIntent holds. */
+export const refundHeldBy = (
+  column: typeof ledgerEntry.id | typeof ledgerEntry.amountMinor,
+  paymentIntentId: AnyColumn,
+  institutionId: AnyColumn,
+) =>
+  db
+    .select({ value: column })
+    .from(ledgerEntry)
+    .innerJoin(purchase, boughtThroughStripe)
+    .where(and(unstampedRefund, eq(purchase.stripeReference, paymentIntentId), eq(purchase.institutionId, institutionId)))
+    .limit(1);
 
 /** Unstamped refund rows of engagements bought through Stripe; one bought before Stripe has no `pi_` and never appears. */
 async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[]> {
@@ -90,19 +104,19 @@ async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[
     })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
-    .where(and(unstampedRefund, notExists(blocked()), ...where))
+    .where(and(unstampedRefund, notExists(blocked()), notExists(held()), ...where))
     .orderBy(sql`random()`)
     .limit(limit);
   return rows.map((row) => ({ ...row, paymentIntentId: row.paymentIntentId! }));
 }
 
 /** Rows waiting on ops, counted so the sweep reports them rather than passing over them in silence. */
-async function blockedRefunds(institutionId: string): Promise<number> {
+export async function blockedRefunds(institutionId: string): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
-    .where(and(unstampedRefund, exists(blocked()), eq(ledgerEntry.institutionId, institutionId)));
+    .where(and(unstampedRefund, or(exists(blocked()), exists(held())), eq(ledgerEntry.institutionId, institutionId)));
   return row?.n ?? 0;
 }
 
@@ -164,7 +178,7 @@ async function settleFound(row: Settling, found: { mine?: Refund; foreign?: Refu
 }
 
 /** No fee row means no charge was ever recorded at Stripe: a PaymentIntent fulfil wrote itself, never a real one. */
-async function neverCharged(row: Settling): Promise<boolean> {
+export async function neverCharged(row: Ids): Promise<boolean> {
   const fees = await db
     .select({ id: ledgerEntry.id })
     .from(ledgerEntry)
@@ -260,54 +274,30 @@ async function retryCampus(institutionId: string, deadline: number) {
   return counts;
 }
 
-/**
- * Ops settled the discrepancy by hand. On a ledger refund it also stamps that row `manual:<discrepancy id>`
- * in the same transaction, so the row stays the engagement's one refund and no sweep sees it again.
- */
-export async function recordManualRefund(params: {
-  discrepancyId: string;
-  institutionId: string;
-  note: string;
-}): Promise<boolean> {
-  return db.transaction(async (tx) => {
-    const scope = and(
-      eq(moneyDiscrepancy.id, params.discrepancyId),
-      eq(moneyDiscrepancy.institutionId, params.institutionId),
-      isNull(moneyDiscrepancy.resolvedAt),
-    );
-    const [found] = await tx
-      .select({ ledgerEntryId: moneyDiscrepancy.ledgerEntryId })
-      .from(moneyDiscrepancy)
-      .where(scope)
-      .for("update");
-    if (!found) return false;
-
-    if (found.ledgerEntryId) {
-      await tx
-        .update(ledgerEntry)
-        .set({ stripeReference: `${MANUAL_REFUND_PREFIX}${params.discrepancyId}` })
-        .where(
-          and(
-            eq(ledgerEntry.id, found.ledgerEntryId),
-            eq(ledgerEntry.institutionId, params.institutionId),
-            eq(ledgerEntry.type, "refund"),
-            isNull(ledgerEntry.stripeReference),
-          ),
-        );
-    }
-    await tx.update(moneyDiscrepancy).set({ resolvedAt: new Date(), resolutionNote: params.note }).where(scope);
-    return true;
-  });
+/** The engagement a refund's PaymentIntent bought, for a refund with no metadata such as one made in the Dashboard. */
+async function boughtWith(paymentIntentId: string): Promise<Ids | undefined> {
+  const [bought] = await db
+    .select({ engagementId: ledgerEntry.engagementId, institutionId: ledgerEntry.institutionId })
+    .from(ledgerEntry)
+    .where(and(eq(ledgerEntry.type, "package_purchase"), eq(ledgerEntry.stripeReference, paymentIntentId)));
+  return bought;
 }
 
-async function reconcile(refund: Refund): Promise<RefundOutcome> {
-  const { engagementId, institutionId, paymentIntentId } = refund;
-  if (!engagementId || !institutionId || !paymentIntentId) return "foreign";
-  const ids = { engagementId, institutionId };
+/** Applies what Stripe says of one refund now: stamps our row, or flags a failure. */
+export async function reconcileRefund(refund: Refund): Promise<RefundOutcome> {
+  const { paymentIntentId } = refund;
+  if (!paymentIntentId) return "foreign";
 
   if (refund.ledgerEntryId) {
+    const { engagementId, institutionId } = refund;
+    if (!engagementId || !institutionId) return "foreign";
     const [row] = await db
-      .select({ id: ledgerEntry.id, amountMinor: ledgerEntry.amountMinor, currency: ledgerEntry.currency })
+      .select({
+        id: ledgerEntry.id,
+        amountMinor: ledgerEntry.amountMinor,
+        currency: ledgerEntry.currency,
+        reference: ledgerEntry.stripeReference,
+      })
       .from(ledgerEntry)
       .where(
         and(
@@ -317,8 +307,16 @@ async function reconcile(refund: Refund): Promise<RefundOutcome> {
           eq(ledgerEntry.type, "refund"),
         ),
       );
-    return row ? settle({ ...ids, ...row, paymentIntentId }, refund) : "foreign";
+    if (!row) return "foreign";
+    if (row.reference !== null && row.reference !== refund.id) return "skipped";
+    return settle({ engagementId, institutionId, ...row, paymentIntentId }, refund);
   }
+
+  const ids =
+    refund.engagementId && refund.institutionId
+      ? { engagementId: refund.engagementId, institutionId: refund.institutionId }
+      : await boughtWith(paymentIntentId);
+  if (!ids) return "foreign";
   if (isLiveRefund(refund)) return "skipped";
   await recordRefundFailure(ids, { refund, paymentIntentId, amountMinor: refund.amountMinor, currency: refund.currency });
   return "refund_failed";
@@ -334,7 +332,7 @@ export async function handleRefundEvent(
   const gateway = stripeGateway();
   const refunds = type === "charge.refunded" ? await gateway.chargeRefunds(objectId) : [await gateway.retrieveRefund(objectId)];
   const outcomes: RefundOutcome[] = [];
-  for (const refund of refunds) outcomes.push(await reconcile(refund));
+  for (const refund of refunds) outcomes.push(await reconcileRefund(refund));
   const outcome = (["refund_failed", "refunded", "skipped"] as const).find((o) => outcomes.includes(o)) ?? "foreign";
   return { outcome, institutionId: refunds.find((r) => r.institutionId)?.institutionId ?? null };
 }

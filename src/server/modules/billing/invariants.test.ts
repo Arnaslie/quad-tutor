@@ -109,7 +109,7 @@ test("a refund row may carry only a Stripe refund or a manual settlement", () =>
   assert.deepEqual(invariants({ ...healthy, engagements: [e("pi_123")] }), ["refund reference is re_ or manual:"]);
 });
 
-test("transfer rows carry tr_ or nothing yet, reversals carry trr_, and reversals never exceed transfers", () => {
+test("transfer rows carry tr_, manual:, forfeited: or nothing yet, reversals carry trr_, and reversals never exceed transfers", () => {
   const e = (references: Record<string, (string | null)[]>, totals: Totals = {}) => ({
     id: "e",
     status: "active" as const,
@@ -117,8 +117,10 @@ test("transfer rows carry tr_ or nothing yet, reversals carry trr_, and reversal
     totals: { package_purchase: t(14_000), session_earned: t(3_500), tutor_accrued: t(3_150), platform_fee: t(350), tutor_transfer: t(3_150), ...totals },
     references: { package_purchase: ["pi_123"], ...references },
   });
-  for (const ok of [null, "tr_123"]) assert.deepEqual(invariants({ ...healthy, engagements: [e({ tutor_transfer: [ok] })] }), []);
-  assert.deepEqual(invariants({ ...healthy, engagements: [e({ tutor_transfer: ["re_123"] })] }), ["transfer reference is tr_"]);
+  for (const ok of [null, "tr_123", "manual:abc", "forfeited:abc"]) {
+    assert.deepEqual(invariants({ ...healthy, engagements: [e({ tutor_transfer: [ok] })] }), []);
+  }
+  assert.deepEqual(invariants({ ...healthy, engagements: [e({ tutor_transfer: ["re_123"] })] }), ["transfer reference is tr_, manual: or forfeited:"]);
   assert.deepEqual(
     invariants({ ...healthy, engagements: [e({ tutor_transfer: ["tr_1"], transfer_reversal: ["trr_1"] }, { transfer_reversal: t(1_000) })] }),
     [],

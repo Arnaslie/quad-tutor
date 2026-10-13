@@ -1,137 +1,20 @@
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { isLocalHost } from "@/server/db/local-host.mjs";
-import {
-  course,
-  courseCodeAlias,
-  courseOffering,
-  engagement,
-  institution,
-  ledgerEntry,
-  matchRequest,
-  messageThread,
-  moneyDiscrepancy,
-  paymentDispute,
-  reliabilityEvent,
-  sessionBooking,
-  studentProfile,
-  sweepLease,
-  term,
-  tutorAvailability,
-  tutorCourse,
-  tutorProfile,
-  user,
-} from "@/server/db/schema";
-import { confirmAttendance } from "@/server/modules/engagements/confirmation";
-import { purchasePackage, slotsForRequest } from "@/server/modules/engagements/purchase";
-import type { Actor, TutorActor } from "@/server/modules/identity/actor";
-import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
+import { engagement, ledgerEntry, moneyDiscrepancy, paymentDispute, reliabilityEvent, tutorProfile } from "@/server/db/schema";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
-import { checkoutRedirect, syncCheckout } from "./checkout-session";
-import { ensureConnectAccount, syncConnectAccount } from "./connect";
+import { syncConnectAccount } from "./connect";
 import { assertMoneyInvariants } from "./invariants";
-import { GatewayError, fakeStripe, stripeGateway, type Gateway } from "./stripe";
+import { GatewayError, fakeStripe, stripeGateway } from "./stripe";
+import { age as ageRows, allCampuses, cleanup, deliver, delivered, noStripe, patched, person, rows, run, world, type World } from "./test-world";
 import { runTransfers } from "./transfers";
-import { handleStripeWebhook } from "./webhook";
 
-process.env.STRIPE_FAKE = "1";
-process.env.STRIPE_WEBHOOK_SECRET = `whsec_${randomBytes(16).toString("hex")}`;
-delete process.env.STRIPE_CONNECT_WEBHOOK_SECRET;
-
-const databaseHost = new URL(process.env.DATABASE_URL ?? "postgres://unset").hostname;
-if (!isLocalHost(databaseHost)) {
-  throw new Error(`Refusing to run tests against ${databaseHost}: point DATABASE_URL at a local database.`);
-}
-
-const run = randomUUID().slice(0, 8);
-const users: string[] = [];
-const campuses: string[] = [];
-
-const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 const nothing = { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 0, failed: 0 };
-
-type World = { institutionId: string; offeringId: string; termId: string; tutor: TutorActor; tutorCourseId: string; accountId: string };
-
-let people = 0;
-async function person(institutionId: string): Promise<Actor> {
-  const id = `test_transfer_${run}_${(people += 1)}`;
-  await db.insert(user).values({ id, name: id, email: `${id}@example.test`, emailVerified: true });
-  users.push(id);
-  const [profile] = await db.insert(studentProfile).values({ userId: id, institutionId }).returning({ id: studentProfile.id });
-  return { userId: id, name: id, email: `${id}@example.test`, institutionId, studentProfileId: profile.id, tutorProfileId: null };
-}
-
-/** A campus of its own per test, so counts and the lease never mix, with a tutor Stripe has verified. */
-async function world(): Promise<World> {
-  const slug = `transfers-${run}-${campuses.length}`;
-  const [inst] = await db
-    .insert(institution)
-    .values({ name: "Test transfers", slug, emailDomain: `${slug}.test`, timezone: "America/Chicago" })
-    .returning({ id: institution.id });
-  campuses.push(inst.id);
-  const [now] = await db.insert(term).values({ institutionId: inst.id, name: "Now", startsOn: inDays(-30), endsOn: inDays(60) }).returning({ id: term.id });
-  const [courseRow] = await db.insert(course).values({ institutionId: inst.id, title: "Transfers 101", department: "TEST" }).returning({ id: course.id });
-  await db.insert(courseCodeAlias).values({ institutionId: inst.id, courseId: courseRow.id, code: `TRF ${slug}` });
-  const [offering] = await db.insert(courseOffering).values({ institutionId: inst.id, courseId: courseRow.id, termId: now.id, section: "001" }).returning({ id: courseOffering.id });
-
-  const base = await person(inst.id);
-  const [profile] = await db.insert(tutorProfile).values({ userId: base.userId, institutionId: inst.id }).returning({ id: tutorProfile.id });
-  await db.insert(tutorAvailability).values(
-    [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ tutorProfileId: profile.id, institutionId: inst.id, weekday, startMinute: 8 * 60, endMinute: 20 * 60 })),
-  );
-  const [claim] = await db
-    .insert(tutorCourse)
-    .values({ tutorProfileId: profile.id, institutionId: inst.id, courseId: courseRow.id, takenTermId: now.id, gradeEarned: "A", status: "active" })
-    .returning({ id: tutorCourse.id });
-  const tutor = { ...base, tutorProfileId: profile.id };
-  const accountId = await ensureConnectAccount(tutor);
-  await fakeStripe.setAccount(accountId, "verified");
-  assert.equal((await syncConnectAccount(accountId)).outcome, "kyc_synced");
-  return { institutionId: inst.id, offeringId: offering.id, termId: now.id, tutor, tutorCourseId: claim.id, accountId };
-}
-
-/** A four-pack paid through the fake, its first session confirmed by both sides so `recognise()` accrues it. */
-async function delivered(w: World) {
-  const actor = await person(w.institutionId);
-  await requestTutors({ actor, courseOfferingId: w.offeringId, tutorCourseIds: [w.tutorCourseId], kind: "exam_anchored" });
-  const [request] = await db
-    .select({ id: matchRequest.id })
-    .from(matchRequest)
-    .where(and(eq(matchRequest.studentProfileId, actor.studentProfileId), eq(matchRequest.status, "pending")));
-  await acceptRequest({ tutor: w.tutor, requestId: request.id });
-  const [slot] = await slotsForRequest({ actor, requestId: request.id });
-  await checkoutRedirect(w.institutionId, () => purchasePackage({ actor, requestId: request.id, anchorExamId: null, slotStartsAt: slot }));
-  const [row] = await db
-    .select({ id: engagement.id, sessionId: engagement.stripeCheckoutSessionId })
-    .from(engagement)
-    .where(and(eq(engagement.studentProfileId, actor.studentProfileId), eq(engagement.status, "pending_payment")));
-  await fakeStripe.pay(row.sessionId!);
-  assert.equal((await syncCheckout(row.sessionId!)).outcome, "fulfilled");
-
-  const [session] = await db.select({ id: sessionBooking.id }).from(sessionBooking).where(eq(sessionBooking.engagementId, row.id));
-  await db.update(sessionBooking).set({ scheduledAt: new Date(Date.now() - 3 * 3_600_000) }).where(eq(sessionBooking.id, session.id));
-  await confirmAttendance({ actor, sessionId: session.id });
-  assert.equal((await confirmAttendance({ actor: w.tutor, sessionId: session.id })).status, "completed");
-
-  const [paid] = await db
-    .select({ pi: ledgerEntry.stripeReference })
-    .from(ledgerEntry)
-    .where(and(eq(ledgerEntry.engagementId, row.id), eq(ledgerEntry.type, "package_purchase")));
-  return { actor, engagementId: row.id, paymentIntentId: paid.pi! };
-}
-
-async function rows(engagementId: string, type: "tutor_transfer" | "transfer_reversal" | "tutor_accrued") {
-  return db
-    .select({ id: ledgerEntry.id, amountMinor: ledgerEntry.amountMinor, stripeReference: ledgerEntry.stripeReference })
-    .from(ledgerEntry)
-    .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, type)));
-}
 
 async function discrepancies(engagementId: string) {
   return db
@@ -141,25 +24,9 @@ async function discrepancies(engagementId: string) {
 }
 
 /** Puts the transfer rows past the sweep's grace, as if the after-commit call died a while ago. */
-async function age(engagementId: string) {
-  await db
-    .update(ledgerEntry)
-    .set({ occurredAt: new Date(Date.now() - 10 * 60 * 1000) })
-    .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, "tutor_transfer")));
-}
+const age = (engagementId: string) => ageRows(engagementId, "tutor_transfer", 10 * 60 * 1000);
 
 const sweep = (w: World) => runTransfers(w.institutionId, Date.now() + 10_000);
-
-async function patched<K extends keyof Gateway>(name: K, replacement: Gateway[K], work: () => Promise<void>) {
-  const gateway = stripeGateway();
-  const original = gateway[name];
-  gateway[name] = replacement;
-  try {
-    await work();
-  } finally {
-    gateway[name] = original;
-  }
-}
 
 /** The idempotency key of every transfer create while the work runs. */
 async function creates(work: () => Promise<void>): Promise<string[]> {
@@ -172,35 +39,7 @@ async function creates(work: () => Promise<void>): Promise<string[]> {
   return keys;
 }
 
-async function deliver(event: { payload: string; signature: string }) {
-  return handleStripeWebhook(event.payload, event.signature);
-}
-
-after(async () => {
-  const engagements = (await db.select({ id: engagement.id }).from(engagement).where(inArray(engagement.institutionId, campuses))).map((row) => row.id);
-  if (engagements.length) {
-    await db.delete(paymentDispute).where(inArray(paymentDispute.engagementId, engagements));
-    await db.delete(moneyDiscrepancy).where(inArray(moneyDiscrepancy.engagementId, engagements));
-    await db.delete(ledgerEntry).where(inArray(ledgerEntry.engagementId, engagements));
-    await db.delete(reliabilityEvent).where(inArray(reliabilityEvent.institutionId, campuses));
-    await db.delete(sessionBooking).where(inArray(sessionBooking.engagementId, engagements));
-    await db.delete(engagement).where(inArray(engagement.id, engagements));
-  }
-  await db.delete(matchRequest).where(inArray(matchRequest.institutionId, campuses));
-  await db.delete(messageThread).where(inArray(messageThread.institutionId, campuses));
-  await db.delete(tutorAvailability).where(inArray(tutorAvailability.institutionId, campuses));
-  await db.delete(tutorCourse).where(inArray(tutorCourse.institutionId, campuses));
-  await db.delete(tutorProfile).where(inArray(tutorProfile.userId, users));
-  await db.delete(studentProfile).where(inArray(studentProfile.userId, users));
-  await db.delete(user).where(inArray(user.id, users));
-  await db.delete(courseOffering).where(inArray(courseOffering.institutionId, campuses));
-  await db.delete(courseCodeAlias).where(inArray(courseCodeAlias.institutionId, campuses));
-  await db.delete(course).where(inArray(course.institutionId, campuses));
-  await db.delete(term).where(inArray(term.institutionId, campuses));
-  await db.delete(sweepLease).where(inArray(sweepLease.institutionId, campuses));
-  await db.delete(institution).where(inArray(institution.id, campuses));
-  await db.$client.end();
-});
+after(cleanup);
 
 test("a confirmed session's pay is transferred once, from the student's charge, and earnings show it sent", async () => {
   const w = await world();
@@ -222,6 +61,7 @@ test("a confirmed session's pay is transferred once, from the student's charge, 
     engagementId,
     institutionId: w.institutionId,
     reversals: [],
+    reversedMinor: 0,
   });
   assert.deepEqual(await earningsForTutor(w.tutor), { earnedMinor: 3_150, owedMinor: 0, transferredMinor: 3_150, currency: "usd", sessionsDelivered: 1 });
 
@@ -576,15 +416,9 @@ test("an engagement bought before Stripe is never sent, and the sweep makes no S
     { ...row, type: "platform_fee", amountMinor: 350 },
   ]);
 
-  const gateway = stripeGateway();
-  const methods = Object.keys(gateway).filter((key) => typeof gateway[key as keyof Gateway] === "function") as (keyof Gateway)[];
-  const originals = new Map(methods.map((name) => [name, gateway[name]]));
-  for (const name of methods) Object.assign(gateway, { [name]: async () => { throw new Error(`no Stripe call: ${name}`); } });
-  try {
+  await noStripe(async () => {
     assert.deepEqual(await sweep(w), nothing);
-  } finally {
-    for (const [name, original] of originals) Object.assign(gateway, { [name]: original });
-  }
+  });
   assert.deepEqual(await rows(legacy.id, "tutor_transfer"), []);
 });
 
@@ -592,5 +426,5 @@ test("money invariants hold on every campus after every transfer path", async ()
   const w = await world();
   await delivered(w);
   assert.deepEqual(await sweep(w), { ...nothing, sent: 1 });
-  for (const institutionId of campuses) await assertMoneyInvariants(institutionId);
+  for (const institutionId of allCampuses()) await assertMoneyInvariants(institutionId);
 });
