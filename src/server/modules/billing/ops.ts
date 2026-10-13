@@ -258,7 +258,9 @@ export async function resolveDiscrepancy(params: {
 
 /**
  * Ops paid the student or the tutor another way. The named refund or transfer row is stamped `manual:<discrepancy
- * id>` in the same transaction, so it stays the engagement's one row of its kind and no sweep sees it again.
+ * id>` in the same transaction, so it stays the engagement's one row of its kind and no sweep sees it again. A flag
+ * on a refund made in the Dashboard stamps the row with that `re_…` instead: it is the refund that happened, and the
+ * reconciliation then counts it. Any gap between its amount and the row's stays on the charge for ops.
  */
 export async function recordManualSettlement(params: {
   operator: OperatorActor;
@@ -271,6 +273,7 @@ export async function recordManualSettlement(params: {
       .select({
         institutionId: moneyDiscrepancy.institutionId,
         ledgerEntryId: moneyDiscrepancy.ledgerEntryId,
+        stripeReference: moneyDiscrepancy.stripeReference,
         settleable: settleable(),
         namesUnstampedRow: sql<boolean>`${namesUnstampedRow()}`,
       })
@@ -283,7 +286,9 @@ export async function recordManualSettlement(params: {
     if (found.ledgerEntryId) {
       const stamped = await tx
         .update(ledgerEntry)
-        .set({ stripeReference: `${MANUAL_PREFIX}${params.discrepancyId}` })
+        .set({
+          stripeReference: found.stripeReference?.startsWith("re_") ? found.stripeReference : `${MANUAL_PREFIX}${params.discrepancyId}`,
+        })
         .where(
           and(
             eq(ledgerEntry.id, found.ledgerEntryId),

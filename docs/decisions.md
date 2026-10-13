@@ -682,7 +682,12 @@ bounced one. A row that fails on a `refund_failed` ops already resolved reopens 
 the money it names is new. Ops pays the student another way and records it with
 `recordManualSettlement` in `billing/ops.ts` (formerly `recordManualRefund`), which resolves
 the discrepancy and, when it names an unstamped refund or transfer row, stamps that row
-`manual:<discrepancy id>` in the same transaction. The row stays the engagement's one row of
+`manual:<discrepancy id>` in the same transaction. A flag on a refund made in the Dashboard
+instead stamps the row with that refund's `re_…`, since it is the refund that happened, so
+the reconciliation counts it and the row references the Stripe object. The row keeps its
+amount, as a stamp is the only update a row takes: a Dashboard refund smaller or larger
+than the row leaves the difference on the PaymentIntent's charge flag, which ops clears by
+refunding the rest in the Dashboard or resolves. The row stays the engagement's one row of
 its kind, no sweep sees a stamped row, and `db:check-money` accepts only `re_…` or
 `manual:…` on a refund row. A flag naming an unstamped refund or transfer row can only be
 settled, never just resolved: resolved, the row would stay stopped, unsent and unstamped for
