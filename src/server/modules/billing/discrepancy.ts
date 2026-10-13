@@ -10,7 +10,8 @@ export type Ids = { engagementId: string; institutionId: string };
 
 /**
  * One flag per kind and Stripe object. A repeat leaves an open flag alone; on a resolved one it reopens the flag
- * only when the amounts moved since, so a second divergence on the same object is news and the same one is not.
+ * only when the gap between the amounts moved since, so a second divergence on the same object is news, and the
+ * same one seen again is not, even when a refund or transfer since moved both sides by the same amount.
  * An orphaned Connect account belongs to no engagement, so its flag pauses nothing.
  */
 export async function recordDiscrepancy(
@@ -31,10 +32,9 @@ export async function recordDiscrepancy(
         resolvedByUserId: null,
         resolutionNote: null,
       },
-      setWhere: sql`${moneyDiscrepancy.resolvedAt} is not null and (
-        ${moneyDiscrepancy.ledgerAmountMinor} is distinct from excluded.ledger_amount_minor
-        or ${moneyDiscrepancy.stripeAmountMinor} is distinct from excluded.stripe_amount_minor
-      )`,
+      setWhere: sql`${moneyDiscrepancy.resolvedAt} is not null
+        and ${moneyDiscrepancy.ledgerAmountMinor} - ${moneyDiscrepancy.stripeAmountMinor}
+          is distinct from excluded.ledger_amount_minor - excluded.stripe_amount_minor`,
     })
     .returning({ id: moneyDiscrepancy.id });
   if (created || !values.stripeReference) return created?.id ?? null;

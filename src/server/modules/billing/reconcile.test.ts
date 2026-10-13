@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/server/db";
 import { engagement, ledgerEntry, moneyDiscrepancy, sweepLease, tutorProfile } from "@/server/db/schema";
 import { endPackage } from "@/server/modules/engagements/termEnd";
+import type { Actor } from "@/server/modules/identity/actor";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
 import { settleCheckout } from "./checkout-session";
@@ -16,7 +17,7 @@ import { moneyForOperator, recordManualSettlement, resolveDiscrepancy } from "./
 import { accountsThisRun, runReconciliation } from "./reconcile";
 import { blockedRefunds, refundThroughStripe } from "./refunds";
 import { fakeStripe, stripeGateway } from "./stripe";
-import { accepted, checkingOut, cleanup, deliver, delivered, noStripe, operator, patched, person, rows, world, type World } from "./test-world";
+import { accepted, anotherSessionDelivered, checkingOut, cleanup, deliver, delivered, noStripe, operator, patched, person, rows, world, type World } from "./test-world";
 import { runTransfers } from "./transfers";
 
 const reconcile = (w: World) => runReconciliation(w.institutionId, Date.now() + 10_000);
@@ -50,6 +51,11 @@ async function aDayLater(w: World, engagementId?: string) {
 }
 
 const ids = (w: World, engagementId: string) => ({ engagementId, institutionId: w.institutionId });
+
+async function sendsAfterAnotherSession(w: World, actor: Actor, engagementId: string) {
+  await anotherSessionDelivered(w, actor, engagementId);
+  return (await runTransfers(w.institutionId, Date.now() + 10_000)).sent;
+}
 
 after(cleanup);
 
@@ -243,6 +249,29 @@ test("a transfer gap ops resolved stays resolved while it holds, and the same fl
   ]);
   const [reopened] = await db.select({ id: moneyDiscrepancy.id, resolvedAt: moneyDiscrepancy.resolvedAt }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.institutionId, w.institutionId));
   assert.deepEqual(reopened, { id: item.id, resolvedAt: null });
+});
+
+test("a transfer gap ops resolved stays resolved when a later transfer moves both sides, and reopens when the gap itself moves", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const { actor, engagementId } = await delivered(w);
+  assert.equal((await runTransfers(w.institutionId, Date.now() + 10_000)).sent, 1);
+  await fakeStripe.dashboardTransfer({ engagementId, accountId: w.accountId, amountMinor: 500 });
+  assert.deepEqual(await reconcile(w), counts(1, 1));
+  const [item] = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: item.id, note: "goodwill bonus" }), { ok: true });
+
+  assert.equal(await sendsAfterAnotherSession(w, actor, engagementId), 1);
+  await aDayLater(w, engagementId);
+  assert.deepEqual(await reconcile(w), counts(1), "6,300 against 6,800 is the same 500 ops answered");
+  assert.deepEqual((await flags(w.institutionId)).map((f) => [f.ledgerAmountMinor, f.stripeAmountMinor, f.resolutionNote]), [[3_150, 3_650, "goodwill bonus"]]);
+  assert.equal(await sendsAfterAnotherSession(w, actor, engagementId), 1, "the tutor's pay is not paused");
+
+  await fakeStripe.dashboardTransfer({ engagementId, accountId: w.accountId, amountMinor: 200 });
+  await aDayLater(w, engagementId);
+  assert.deepEqual(await reconcile(w), counts(1, 1));
+  assert.deepEqual((await flags(w.institutionId)).map((f) => [f.ledgerAmountMinor, f.stripeAmountMinor, f.resolutionNote]), [[9_450, 10_150, null]]);
+  assert.equal(await sendsAfterAnotherSession(w, actor, engagementId), 0, "a moved gap pauses the tutor's pay again");
 });
 
 test("a refund and a transfer stamped between the Stripe reads and the ledger read are not flagged", async () => {

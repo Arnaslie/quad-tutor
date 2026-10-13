@@ -29,6 +29,7 @@ import {
 } from "@/server/db/schema";
 import { confirmAttendance } from "@/server/modules/engagements/confirmation";
 import { purchasePackage, slotsForRequest } from "@/server/modules/engagements/purchase";
+import { bookSession, slotsForEngagement } from "@/server/modules/engagements/scheduling";
 import type { Actor, OperatorActor, TutorActor } from "@/server/modules/identity/actor";
 import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
 
@@ -145,6 +146,14 @@ export async function delivered(w: World) {
     .from(ledgerEntry)
     .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, "package_purchase")));
   return { actor, engagementId, checkoutSessionId, paymentIntentId: paid.pi! };
+}
+
+export async function anotherSessionDelivered(w: World, actor: Actor, engagementId: string) {
+  const [slot] = await slotsForEngagement({ actor, engagementId });
+  const { sessionId } = await bookSession({ actor, engagementId, slotStartsAt: slot });
+  await db.update(sessionBooking).set({ scheduledAt: new Date(Date.now() - 3 * 3_600_000) }).where(eq(sessionBooking.id, sessionId));
+  await confirmAttendance({ actor, sessionId });
+  assert.equal((await confirmAttendance({ actor: w.tutor, sessionId })).status, "completed");
 }
 
 type LedgerType = (typeof ledgerEntryType.enumValues)[number];

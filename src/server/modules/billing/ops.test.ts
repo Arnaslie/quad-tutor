@@ -5,11 +5,8 @@ import { after, test } from "node:test";
 import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { ledgerEntry, moneyDiscrepancy, paymentDispute, sessionBooking } from "@/server/db/schema";
-import { confirmAttendance } from "@/server/modules/engagements/confirmation";
-import { bookSession, slotsForEngagement } from "@/server/modules/engagements/scheduling";
+import { ledgerEntry, moneyDiscrepancy, paymentDispute } from "@/server/db/schema";
 import { endPackage } from "@/server/modules/engagements/termEnd";
-import type { Actor } from "@/server/modules/identity/actor";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
 import { assertMoneyInvariants } from "./invariants";
@@ -17,7 +14,7 @@ import { answerReversal, liftDisputePause, moneyForOperator, recordManualSettlem
 import { runReconciliation } from "./reconcile";
 import { refundThroughStripe, retryUnstampedRefunds } from "./refunds";
 import { GatewayError, fakeStripe, stripeGateway } from "./stripe";
-import { age, cleanup, deliver, delivered, operator, patched, rows, world, type World } from "./test-world";
+import { age, anotherSessionDelivered, cleanup, deliver, delivered, operator, patched, rows, world, type World } from "./test-world";
 import { runTransfers, sendTransferRow } from "./transfers";
 
 const nothing = { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 0, failed: 0 };
@@ -94,14 +91,6 @@ async function blocking(tx: Parameters<Parameters<typeof db.transaction>[0]>[0])
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error("nothing waited on the lock");
-}
-
-async function anotherSessionDelivered(w: World, actor: Actor, engagementId: string) {
-  const [slot] = await slotsForEngagement({ actor, engagementId });
-  const { sessionId } = await bookSession({ actor, engagementId, slotStartsAt: slot });
-  await db.update(sessionBooking).set({ scheduledAt: new Date(Date.now() - 3 * 3_600_000) }).where(eq(sessionBooking.id, sessionId));
-  await confirmAttendance({ actor, sessionId });
-  assert.equal((await confirmAttendance({ actor: w.tutor, sessionId })).status, "completed");
 }
 
 async function flag(id: string) {
