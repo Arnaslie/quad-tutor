@@ -74,7 +74,7 @@ const boughtThroughStripe = and(
   like(purchase.stripeReference, "pi\\_%"),
 );
 const unstampedRefund = and(eq(ledgerEntry.type, "refund"), isNull(ledgerEntry.stripeReference));
-const blocked = (openOnly = false) => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId, { openOnly });
+const blocked = () => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId);
 const held = () => failedDashboardRefund(purchase.stripeReference, purchase.institutionId);
 
 /** The unstamped refund row of the engagement a PaymentIntent bought: the one a failed refund on that PaymentIntent holds. */
@@ -110,16 +110,13 @@ async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[
   return rows.map((row) => ({ ...row, paymentIntentId: row.paymentIntentId! }));
 }
 
-/**
- * Rows waiting on ops, counted so the sweep reports them rather than passing over them in silence. `openOnly` leaves
- * out a row stopped only by a flag already resolved, which ops has nothing left to answer on.
- */
-export async function blockedRefunds(institutionId: string, openOnly = false): Promise<number> {
+/** Rows waiting on ops, counted so the sweep reports them rather than passing over them in silence. */
+export async function blockedRefunds(institutionId: string): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
-    .where(and(unstampedRefund, or(exists(blocked(openOnly)), exists(held())), eq(ledgerEntry.institutionId, institutionId)));
+    .where(and(unstampedRefund, or(exists(blocked()), exists(held())), eq(ledgerEntry.institutionId, institutionId)));
   return row?.n ?? 0;
 }
 

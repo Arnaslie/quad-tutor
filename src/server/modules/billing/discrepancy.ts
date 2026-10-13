@@ -113,14 +113,11 @@ const onNews = (value: SQL, column: AnyColumn) =>
 
 const blocker = alias(moneyDiscrepancy, "refund_blocker");
 
-/**
- * Any discrepancy naming a ledger row stops that row for good; resolving one never re-arms it. `openOnly` narrows
- * it to the flags ops can still answer.
- */
+/** Any discrepancy naming a ledger row stops that row for good; resolving one never re-arms it. */
 export const ledgerRowBlocker = (
   ledgerEntryId: AnyColumn,
   institutionId: AnyColumn | string,
-  { openOnly = false, kind }: { openOnly?: boolean; kind?: (typeof moneyDiscrepancy.$inferSelect)["kind"] } = {},
+  { kind }: { kind?: (typeof moneyDiscrepancy.$inferSelect)["kind"] } = {},
 ) =>
   db
     .select({ id: blocker.id })
@@ -129,7 +126,6 @@ export const ledgerRowBlocker = (
       and(
         eq(blocker.ledgerEntryId, ledgerEntryId),
         eq(blocker.institutionId, institutionId),
-        openOnly ? isNull(blocker.resolvedAt) : undefined,
         kind ? eq(blocker.kind, kind) : undefined,
       ),
     );

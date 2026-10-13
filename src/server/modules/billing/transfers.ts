@@ -162,11 +162,8 @@ function owedEngagements(institutionId: string) {
     .limit(DECIDE_LIMIT);
 }
 
-/**
- * Money held for ops: a paused engagement still owing or mid-transfer, or a transfer row a discrepancy stopped.
- * `openOnly` leaves out a row stopped only by a flag already resolved, which ops has nothing left to answer on.
- */
-export async function blockedEngagements(institutionId: string, openOnly = false): Promise<number> {
+/** Money held for ops: a paused engagement still owing or mid-transfer, or a transfer row a discrepancy stopped. */
+export async function blockedEngagements(institutionId: string): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(engagement)
@@ -183,11 +180,7 @@ export async function blockedEngagements(institutionId: string, openOnly = false
             ),
           ),
           exists(
-            unstampedTransfer(
-              engagement.id,
-              engagement.institutionId,
-              exists(ledgerRowBlocker(owing.id, owing.institutionId, { openOnly })),
-            ),
+            unstampedTransfer(engagement.id, engagement.institutionId, exists(ledgerRowBlocker(owing.id, owing.institutionId))),
           ),
         ),
       ),

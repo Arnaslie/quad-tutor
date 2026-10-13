@@ -47,7 +47,6 @@ export type DiscrepancyItem = {
   engagement: EngagementContext | null;
   canSettle: boolean;
   canResolve: boolean;
-  /** The flag's Stripe id is the PaymentIntent of a purchase the ledger booked. */
   paymentBooked: boolean;
   /** What the flag does to a refund: its own keeps retrying while it is open, or it holds the package's refund row. */
   refund: "retrying" | "holding" | null;
@@ -223,8 +222,8 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
       )
       .orderBy(desc(ledgerEntry.occurredAt))
       .limit(LIMIT),
-    Promise.all(campuses.map((campus) => blockedRefunds(campus, true))),
-    Promise.all(campuses.map((campus) => blockedEngagements(campus, true))),
+    Promise.all(campuses.map(blockedRefunds)),
+    Promise.all(campuses.map(blockedEngagements)),
   ]);
 
   const context = await contexts(campuses, [

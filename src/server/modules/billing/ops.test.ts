@@ -410,7 +410,7 @@ test("a failed Dashboard refund holds the package refund once there is one", asy
   assert.deepEqual(await flagged(ops, actor.name), [["refund_failed", "pi_", null, true, true, true, "holding"]]);
 });
 
-test("the held line counts only what an open flag or dispute holds, while the sweeps still count every stopped row", async () => {
+test("the held line counts every row the sweeps hold, including one whose flag ops already resolved", async () => {
   const w = await world();
   const ops = await operator(w.institutionId);
   const refused = await refusedTransfer(w);
@@ -420,9 +420,8 @@ test("the held line counts only what an open flag or dispute holds, while the sw
   assert.equal(await refundThroughStripe({ engagementId: dashboard.engagementId, institutionId: w.institutionId }), "flagged");
   assert.deepEqual((await moneyForOperator(ops)).held, { refunds: 1, transfers: 2 });
 
-  // Resolved before ops could only settle such a flag: the rows stay stopped, with no card left to answer them on.
   await db.update(moneyDiscrepancy).set({ resolvedAt: new Date() }).where(eq(moneyDiscrepancy.institutionId, w.institutionId));
-  assert.deepEqual((await moneyForOperator(ops)).held, { refunds: 0, transfers: 0 });
+  assert.deepEqual((await moneyForOperator(ops)).held, { refunds: 1, transfers: 1 });
   assert.equal((await sweep(w)).blocked, 1);
   assert.equal((await retryUnstampedRefunds(w.institutionId, Date.now() + 10_000)).blocked, 1);
   assert.deepEqual((await rows(refused.engagementId, "tutor_transfer")).map((r) => r.stripeReference), [null]);
