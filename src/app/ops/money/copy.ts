@@ -64,11 +64,13 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
         title: "Stripe took money no package booked",
         body: "The student paid, but no package on the ledger booked the payment, so the payment is refunded.",
       }),
-      note: item.refundReference
-        ? "Stripe has refunded it. Resolve this once you have checked."
-        : item.refund === "retrying"
-          ? "The refund has not gone out yet and keeps retrying. Resolving stops the retries."
-          : "Its refund failed and is not retried.",
+      note: item.refund === "failed"
+        ? "Its refund failed at Stripe. Answer it on the failed refund card for this payment."
+        : item.refundReference
+          ? "Stripe has refunded it. Resolve this once you have checked."
+          : item.refund === "retrying"
+            ? "The refund has not gone out yet and keeps retrying. Resolving stops the retries."
+            : "Its refund failed and is not retried.",
     };
   }
   if (item.kind === "refund_failed" && !item.ledgerEntryType) {

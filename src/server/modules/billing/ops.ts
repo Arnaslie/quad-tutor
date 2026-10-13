@@ -22,7 +22,7 @@ import { DELETED_USER } from "@/server/modules/messaging/rules";
 import { courseLabel } from "@/server/modules/messaging/threads";
 
 import { purchaseBooked, retriesRefund, uniqueViolation } from "./checkout-session";
-import { FORFEITED_PREFIX, MANUAL_PREFIX, type Ids } from "./discrepancy";
+import { FORFEITED_PREFIX, MANUAL_PREFIX, paymentRefundBlocker, type Ids } from "./discrepancy";
 import { blockedRefunds, refundHeldBy } from "./refunds";
 import { blockedEngagements, paused } from "./transfers";
 
@@ -48,8 +48,8 @@ export type DiscrepancyItem = {
   canSettle: boolean;
   canResolve: boolean;
   paymentBooked: boolean;
-  /** What the flag does to a refund: its own keeps retrying while it is open, or it holds the package's refund row. */
-  refund: "retrying" | "holding" | null;
+  /** What the flag does to a refund: its own keeps retrying while it is open or failed at Stripe, or it holds the package's refund row. */
+  refund: "retrying" | "failed" | "holding" | null;
 };
 
 export type OrphanedAccountItem = { id: string; accountId: string; detectedAt: Date };
@@ -120,6 +120,14 @@ const heldRefund = <T>(column: Parameters<typeof refundHeldBy>[0]) =>
   sql<T | null>`case when ${moneyDiscrepancy.kind} = 'refund_failed' and ${moneyDiscrepancy.ledgerEntryId} is null
     then (${refundHeldBy(column, moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)}) end`;
 
+/** Money taken with nothing booked whose refund Stripe could not deliver, so it is answered on that refund's own flag. */
+const refundFailed = () =>
+  and(
+    inArray(moneyDiscrepancy.kind, ["checkout_amount", "ledger_vs_stripe_charge"]),
+    exists(paymentRefundBlocker(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)),
+    not(purchaseBooked()),
+  );
+
 const settleable = () => sql<boolean>`(${moneyDiscrepancy.kind} = 'refund_failed' or ${namesUnstampedRow()})`;
 
 const answerTo = (reversalId: AnyColumn) => db.select({ id: answer.id }).from(answer).where(eq(answer.correctsEntryId, reversalId));
@@ -166,6 +174,7 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         canResolve: sql<boolean>`not ${namesUnstampedRow()}`,
         paymentBooked: sql<boolean>`${purchaseBooked()}`,
         refund: sql<DiscrepancyItem["refund"]>`case when ${retriesRefund()} then 'retrying'
+          when ${refundFailed()} then 'failed'
           when ${heldRefund<string>(ledgerEntry.id)} is not null then 'holding' end`,
       })
       .from(moneyDiscrepancy)

@@ -35,6 +35,9 @@ test("money taken with nothing booked says whether its refund went out, retries 
     settle: null,
   });
   assert.deepEqual(explained(item({ ...retrying, refund: null, refundReference: "re_1" })).note, "Stripe has refunded it. Resolve this once you have checked.");
+  const bounced = "Its refund failed at Stripe. Answer it on the failed refund card for this payment.";
+  assert.deepEqual(explained(item({ ...retrying, refund: "failed", refundReference: "re_1" })).note, bounced);
+  assert.deepEqual(explained(item({ stripeReference: "pi_1", refund: "failed", refundReference: "re_1" })).note, bounced);
   assert.deepEqual(explained(item({ stripeReference: "pi_1" })), {
     title: "Stripe took money no package booked",
     body: "The student paid, but no package on the ledger booked the payment, so the payment is refunded.",

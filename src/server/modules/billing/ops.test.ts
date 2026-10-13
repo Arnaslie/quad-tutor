@@ -401,6 +401,31 @@ test("a charge flag tells money taken with nothing booked, whose refund retries 
   assert.deepEqual((await moneyForOperator(ops)).held, { refunds: 1, transfers: 1 });
 });
 
+test("money taken with nothing booked whose refund then bounced says its refund failed, not that Stripe refunded it", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const wrongAmount = await checkingOut(w);
+  await fakeStripe.pay(wrongAmount.checkoutSessionId, { amountTotal: 100 });
+  const unbooked = await checkingOut(w);
+  await fakeStripe.pay(unbooked.checkoutSessionId);
+  await releaseCheckout({ engagementId: unbooked.engagementId, institutionId: w.institutionId, checkoutSessionId: unbooked.checkoutSessionId });
+
+  for (const { actor, checkoutSessionId } of [wrongAmount, unbooked]) {
+    assert.equal((await syncCheckout(checkoutSessionId)).outcome, "refunded");
+    const [refund] = await fakeStripe.refunds(checkoutSessionId);
+    const [taken] = (await moneyForOperator(ops)).discrepancies.filter((d) => d.engagement?.studentName === actor.name);
+    assert.deepEqual([taken.refundReference, taken.refund], [refund.id, null]);
+
+    await fakeStripe.failRefund(refund.id);
+    await deliver(await fakeStripe.refundEvent(refund.id, "refund.failed"));
+    const kind = checkoutSessionId === wrongAmount.checkoutSessionId ? "checkout_amount" : "ledger_vs_stripe_charge";
+    assert.deepEqual(await flagged(ops, actor.name), [
+      ["refund_failed", "pi_", null, true, true, false, null],
+      [kind, "pi_", null, false, true, false, "failed"],
+    ]);
+  }
+});
+
 test("a failed Dashboard refund holds the package refund once there is one", async () => {
   const w = await world();
   const ops = await operator(w.institutionId);
