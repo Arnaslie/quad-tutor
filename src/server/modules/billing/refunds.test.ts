@@ -27,13 +27,14 @@ import {
 } from "@/server/db/schema";
 import { purchasePackage, slotsForRequest } from "@/server/modules/engagements/purchase";
 import { endPackage, runTermEndRefunds } from "@/server/modules/engagements/termEnd";
-import type { Actor, TutorActor } from "@/server/modules/identity/actor";
+import type { Actor, OperatorActor, TutorActor } from "@/server/modules/identity/actor";
 import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
 
 import { checkoutRedirect, syncCheckout } from "./checkout-session";
 import { recordRefundFailure } from "./discrepancy";
 import { assertMoneyInvariants } from "./invariants";
-import { blockedRefunds, recordManualRefund, refundThroughStripe, retryUnstampedRefunds } from "./refunds";
+import { recordManualSettlement } from "./ops";
+import { blockedRefunds, refundThroughStripe, retryUnstampedRefunds } from "./refunds";
 import { GatewayError, fakeStripe, stripeGateway, type Gateway } from "./stripe";
 import { handleStripeWebhook } from "./webhook";
 
@@ -88,6 +89,10 @@ async function bought() {
 }
 
 const ids = (engagementId: string) => ({ engagementId, institutionId: home.institutionId });
+
+async function operator(institutionId = home.institutionId): Promise<OperatorActor> {
+  return { ...(await person()), operatorInstitutionIds: [institutionId] };
+}
 
 async function refundRow(engagementId: string) {
   const [row] = await db
@@ -364,13 +369,18 @@ test("ops settling by hand stamps the row manual:<discrepancy>, resolves the fla
   });
   const [flag] = await db.select({ id: moneyDiscrepancy.id }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.engagementId, engagementId));
 
-  assert.equal(await recordManualRefund({ discrepancyId: flag.id, institutionId: randomUUID(), note: "wrong campus" }), false);
-  assert.equal(await recordManualRefund({ discrepancyId: flag.id, institutionId: home.institutionId, note: "Zelle, ops ticket 12" }), true);
-  assert.equal(await recordManualRefund({ discrepancyId: flag.id, institutionId: home.institutionId, note: "again" }), false);
+  const ops = await operator();
+  const gone = { ok: false, refusal: "gone" };
+  assert.deepEqual(await recordManualSettlement({ operator: await operator(randomUUID()), discrepancyId: flag.id, note: "wrong campus" }), gone);
+  assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: flag.id, note: "Zelle, ops ticket 12" }), { ok: true });
+  assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: flag.id, note: "again" }), gone);
   assert.equal((await refundRow(engagementId)).stripeReference, `manual:${flag.id}`);
-  const [resolved] = await db.select({ at: moneyDiscrepancy.resolvedAt, note: moneyDiscrepancy.resolutionNote }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.id, flag.id));
+  const [resolved] = await db
+    .select({ at: moneyDiscrepancy.resolvedAt, note: moneyDiscrepancy.resolutionNote, by: moneyDiscrepancy.resolvedByUserId })
+    .from(moneyDiscrepancy)
+    .where(eq(moneyDiscrepancy.id, flag.id));
   assert.ok(resolved.at);
-  assert.equal(resolved.note, "Zelle, ops ticket 12");
+  assert.deepEqual([resolved.note, resolved.by], ["Zelle, ops ticket 12", ops.userId]);
 
   await age(engagementId);
   assert.equal(await creates(async () => {
@@ -520,7 +530,7 @@ test("a failed stray payment on the engagement neither blocks its package refund
   await patched("refund", lostResponse, async () => {
     await assert.rejects(refundThroughStripe(ids(engagementId)), /socket hang up/);
   });
-  assert.equal(await recordManualRefund({ discrepancyId: flag.id, institutionId: home.institutionId, note: "stray paid back by Zelle" }), true);
+  assert.deepEqual(await recordManualSettlement({ operator: await operator(), discrepancyId: flag.id, note: "stray paid back by Zelle" }), { ok: true });
   assert.equal((await refundRow(engagementId)).stripeReference, null, "settling the stray payment does not stamp the package's refund");
 
   await age(engagementId);
@@ -595,7 +605,7 @@ test("a refund held behind a failed one on its PaymentIntent goes out once ops r
     assert.equal(await refundThroughStripe(ids(engagementId)), "skipped");
     await sweep();
   }), 0);
-  assert.equal(await recordManualRefund({ discrepancyId: open.id, institutionId: home.institutionId, note: "paid by hand" }), true);
+  assert.deepEqual(await recordManualSettlement({ operator: await operator(), discrepancyId: open.id, note: "paid by hand" }), { ok: true });
   assert.equal((await refundRow(engagementId)).stripeReference, `manual:${open.id}`);
   assert.deepEqual(await fakeStripe.refunds(checkoutSessionId), []);
 });

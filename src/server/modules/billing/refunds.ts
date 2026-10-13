@@ -2,11 +2,10 @@ import { and, eq, exists, isNull, like, lt, notExists, or, sql, type SQL } from 
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
-import { ledgerEntry, moneyDiscrepancy } from "@/server/db/schema";
+import { ledgerEntry } from "@/server/db/schema";
 
 import { withLease } from "./lease";
 import {
-  MANUAL_PREFIX,
   failedDashboardRefund,
   ledgerRowBlocker,
   recordDiscrepancy,
@@ -260,46 +259,6 @@ async function retryCampus(institutionId: string, deadline: number) {
     }
   }
   return counts;
-}
-
-/**
- * Ops settled the discrepancy by hand. On a ledger refund it also stamps that row `manual:<discrepancy id>`
- * in the same transaction, so the row stays the engagement's one refund and no sweep sees it again.
- */
-export async function recordManualRefund(params: {
-  discrepancyId: string;
-  institutionId: string;
-  note: string;
-}): Promise<boolean> {
-  return db.transaction(async (tx) => {
-    const scope = and(
-      eq(moneyDiscrepancy.id, params.discrepancyId),
-      eq(moneyDiscrepancy.institutionId, params.institutionId),
-      isNull(moneyDiscrepancy.resolvedAt),
-    );
-    const [found] = await tx
-      .select({ ledgerEntryId: moneyDiscrepancy.ledgerEntryId })
-      .from(moneyDiscrepancy)
-      .where(scope)
-      .for("update");
-    if (!found) return false;
-
-    if (found.ledgerEntryId) {
-      await tx
-        .update(ledgerEntry)
-        .set({ stripeReference: `${MANUAL_PREFIX}${params.discrepancyId}` })
-        .where(
-          and(
-            eq(ledgerEntry.id, found.ledgerEntryId),
-            eq(ledgerEntry.institutionId, params.institutionId),
-            eq(ledgerEntry.type, "refund"),
-            isNull(ledgerEntry.stripeReference),
-          ),
-        );
-    }
-    await tx.update(moneyDiscrepancy).set({ resolvedAt: new Date(), resolutionNote: params.note }).where(scope);
-    return true;
-  });
 }
 
 /** The engagement a refund's PaymentIntent bought, for a refund with no metadata such as one made in the Dashboard. */
