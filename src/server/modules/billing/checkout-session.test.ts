@@ -716,6 +716,35 @@ test("a refund that errored is retried by the sweep on a fresh key, never the on
   assert.equal((await discrepancies(booked.engagementId))[0].refundReference, null);
 });
 
+test("a wrong-amount flag ops resolved before its refund went out is not retried", async () => {
+  const { engagementId, sessionId } = await opened();
+  await fakeStripe.pay(sessionId, { amountTotal: 100 });
+  fakeStripe.failNextRefund();
+  await assert.rejects(syncCheckout(sessionId), /unknown error/);
+  assert.deepEqual((await discrepancies(engagementId)).map((d) => [d.kind, d.refundReference]), [["checkout_amount", null]]);
+
+  await db.update(moneyDiscrepancy).set({ resolvedAt: new Date() }).where(eq(moneyDiscrepancy.engagementId, engagementId));
+  await syncPendingCheckouts(home.institutionId);
+  assert.deepEqual(await fakeStripe.refunds(sessionId), []);
+});
+
+test("a ledger row other than a purchase carrying the PaymentIntent does not count as booking it", async () => {
+  const { engagementId, sessionId } = await opened();
+  const { paymentIntentId } = await fakeStripe.pay(sessionId);
+  await releaseCheckout({ engagementId, institutionId: home.institutionId, checkoutSessionId: sessionId });
+  fakeStripe.failNextRefund();
+  await assert.rejects(syncCheckout(sessionId), /unknown error/);
+  const [stray] = await db
+    .insert(ledgerEntry)
+    .values({ engagementId, institutionId: home.institutionId, type: "processor_fee", amountMinor: 0, stripeReference: paymentIntentId })
+    .returning({ id: ledgerEntry.id });
+
+  await syncPendingCheckouts(home.institutionId);
+  const [refund] = await fakeStripe.refunds(sessionId);
+  assert.equal((await discrepancies(engagementId))[0].refundReference, refund.id);
+  await db.delete(ledgerEntry).where(eq(ledgerEntry.id, stray.id));
+});
+
 test("past its deadline the sweep still settles one row and retries one refund per campus", async () => {
   const first = await opened();
   const second = await opened();
