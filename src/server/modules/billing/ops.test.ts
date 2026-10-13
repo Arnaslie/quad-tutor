@@ -208,9 +208,12 @@ test("settling a refused transfer by hand stamps its row manual:<discrepancy> an
       ledgerEntryType: "tutor_transfer",
       engagement: { courseLabel: w.courseCode, tutorName: w.tutor.name, studentName: actor.name },
       canSettle: true,
+      canResolve: false,
     },
   ]);
 
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: item.id, note: "paid by Zelle" }), { ok: false, refusal: "settle_instead" });
+  assert.deepEqual(await flag(item.id), { resolved: false, note: null, by: null }, "resolving would strand the row unsent and unsettled");
   assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: item.id, note: "paid by Zelle, ticket 31" }), { ok: true });
   assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: item.id, note: "again" }), gone);
   assert.deepEqual(await rows(engagementId, "tutor_transfer"), [{ ...row, stripeReference: `manual:${item.id}` }]);
@@ -229,7 +232,7 @@ test("resolving a discrepancy records when, why and who, and a flag naming no ro
   await fakeStripe.dashboardRefund(paymentIntentId, 5_000);
   assert.equal((await runReconciliation(w.institutionId, Date.now() + 10_000)).flagged, 1);
   const [item] = (await moneyForOperator(ops)).discrepancies;
-  assert.deepEqual([item.kind, item.canSettle, item.ledgerEntryType], ["ledger_vs_stripe_charge", false, null]);
+  assert.deepEqual([item.kind, item.canSettle, item.canResolve, item.ledgerEntryType], ["ledger_vs_stripe_charge", false, true, null]);
 
   assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: item.id, note: "nothing to stamp" }), { ok: false, refusal: "not_settleable" });
   assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: item.id, note: "refunded by support in the Dashboard" }), { ok: true });

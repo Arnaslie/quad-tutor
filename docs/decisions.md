@@ -684,7 +684,9 @@ the money it names is new. Ops pays the student another way and records it with
 the discrepancy and, when it names an unstamped refund or transfer row, stamps that row
 `manual:<discrepancy id>` in the same transaction. The row stays the engagement's one row of
 its kind, no sweep sees a stamped row, and `db:check-money` accepts only `re_…` or
-`manual:…` on a refund row.
+`manual:…` on a refund row. A flag naming an unstamped refund or transfer row can only be
+settled, never just resolved: resolved, the row would stay stopped, unsent and unstamped for
+good, and the transfer sweep would count it as sent.
 
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 Transfers go per engagement once the tutor is verified and the engagement has no open

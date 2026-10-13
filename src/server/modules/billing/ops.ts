@@ -1,4 +1,4 @@
-import { and, desc, eq, exists, inArray, isNotNull, isNull, ne, notExists, sql, type AnyColumn } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, isNotNull, isNull, ne, not, notExists, sql, type AnyColumn } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -42,6 +42,7 @@ export type DiscrepancyItem = {
   ledgerEntryType: LedgerType | null;
   engagement: EngagementContext | null;
   canSettle: boolean;
+  canResolve: boolean;
 };
 
 export type OrphanedAccountItem = { id: string; accountId: string; detectedAt: Date };
@@ -80,7 +81,7 @@ type Refused<R extends string> = { ok: false; refusal: R };
 const refused = <R extends string>(refusal: R): Refused<R> => ({ ok: false, refusal });
 const DONE = { ok: true } as const;
 
-export type ResolveResult = typeof DONE | Refused<"gone">;
+export type ResolveResult = typeof DONE | Refused<"gone" | "settle_instead">;
 export type SettleResult = typeof DONE | Refused<"gone" | "not_settleable">;
 export type LiftResult = typeof DONE | Refused<"gone" | "open_at_stripe">;
 export type ReversalAnswer = "resend" | "manual" | "forfeited";
@@ -148,6 +149,7 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         detectedAt: moneyDiscrepancy.detectedAt,
         ledgerEntryType: ledgerEntry.type,
         canSettle: settleable(),
+        canResolve: sql<boolean>`not ${namesUnstampedRow()}`,
       })
       .from(moneyDiscrepancy)
       .leftJoin(
@@ -234,18 +236,24 @@ const openOnCampus = (operator: OperatorActor, discrepancyId: string) =>
     isNull(moneyDiscrepancy.resolvedAt),
   );
 
-/** Resolving lifts the engagement's pause but never re-arms a ledger row the discrepancy stopped. */
+/**
+ * Resolving lifts the engagement's pause but never re-arms a ledger row the discrepancy stopped. A flag naming a row
+ * Stripe never stamped is refused: resolved, that row would stay unsent and unsettled for good, so ops settles it.
+ */
 export async function resolveDiscrepancy(params: {
   operator: OperatorActor;
   discrepancyId: string;
   note: string;
 }): Promise<ResolveResult> {
+  const scope = openOnCampus(params.operator, params.discrepancyId);
   const resolved = await db
     .update(moneyDiscrepancy)
     .set({ resolvedAt: new Date(), resolutionNote: params.note, resolvedByUserId: params.operator.userId })
-    .where(openOnCampus(params.operator, params.discrepancyId))
+    .where(and(scope, not(namesUnstampedRow())))
     .returning({ id: moneyDiscrepancy.id });
-  return resolved.length > 0 ? DONE : refused("gone");
+  if (resolved.length > 0) return DONE;
+  const open = await db.select({ id: moneyDiscrepancy.id }).from(moneyDiscrepancy).where(scope);
+  return refused(open.length > 0 ? "settle_instead" : "gone");
 }
 
 /**
