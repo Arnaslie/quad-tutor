@@ -118,12 +118,21 @@ const onNews = (value: SQL, column: AnyColumn) =>
 
 const blocker = alias(moneyDiscrepancy, "refund_blocker");
 
-/** Any discrepancy naming a ledger row stops that row for good; resolving one never re-arms it. */
-export const ledgerRowBlocker = (ledgerEntryId: AnyColumn, institutionId: AnyColumn | string) =>
+/**
+ * Any discrepancy naming a ledger row stops that row for good; resolving one never re-arms it. `openOnly` narrows
+ * it to the flags ops can still answer.
+ */
+export const ledgerRowBlocker = (ledgerEntryId: AnyColumn, institutionId: AnyColumn | string, openOnly = false) =>
   db
     .select({ id: blocker.id })
     .from(blocker)
-    .where(and(eq(blocker.ledgerEntryId, ledgerEntryId), eq(blocker.institutionId, institutionId)));
+    .where(
+      and(
+        eq(blocker.ledgerEntryId, ledgerEntryId),
+        eq(blocker.institutionId, institutionId),
+        openOnly ? isNull(blocker.resolvedAt) : undefined,
+      ),
+    );
 
 /**
  * A refund of the purchase that failed with no ledger row of ours (one made in the Dashboard) holds the

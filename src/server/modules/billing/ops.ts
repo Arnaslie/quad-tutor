@@ -21,7 +21,7 @@ import type { OperatorActor } from "@/server/modules/identity/actor";
 import { DELETED_USER } from "@/server/modules/messaging/rules";
 import { courseLabel } from "@/server/modules/messaging/threads";
 
-import { uniqueViolation } from "./checkout-session";
+import { purchaseBooked, retriesRefund, uniqueViolation } from "./checkout-session";
 import { FORFEITED_PREFIX, MANUAL_PREFIX, type Ids } from "./discrepancy";
 import { blockedRefunds, refundHeldBy } from "./refunds";
 import { blockedEngagements, paused } from "./transfers";
@@ -34,7 +34,9 @@ export type EngagementContext = { courseLabel: string; tutorName: string; studen
 export type DiscrepancyItem = {
   id: string;
   kind: Exclude<DiscrepancyKind, "orphaned_account">;
+  /** Null on a transfers gap, whose flag is keyed on the engagement id rather than a Stripe object. */
   stripeReference: string | null;
+  refundReference: string | null;
   ledgerAmountMinor: number | null;
   stripeAmountMinor: number | null;
   currency: string;
@@ -45,12 +47,17 @@ export type DiscrepancyItem = {
   engagement: EngagementContext | null;
   canSettle: boolean;
   canResolve: boolean;
+  /** The flag's Stripe id is the PaymentIntent of a purchase the ledger booked. */
+  paymentBooked: boolean;
+  /** What the flag does to a refund: its own keeps retrying while it is open, or it holds the package's refund row. */
+  refund: "retrying" | "holding" | null;
 };
 
 export type OrphanedAccountItem = { id: string; accountId: string; detectedAt: Date };
 
 export type DisputeItem = {
   id: string;
+  stripeDisputeId: string;
   amountMinor: number;
   currency: string;
   reason: string | null;
@@ -148,7 +155,8 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         id: moneyDiscrepancy.id,
         kind: moneyDiscrepancy.kind,
         engagementId: moneyDiscrepancy.engagementId,
-        stripeReference: moneyDiscrepancy.stripeReference,
+        stripeReference: sql<string | null>`nullif(${moneyDiscrepancy.stripeReference}, ${moneyDiscrepancy.engagementId}::text)`,
+        refundReference: moneyDiscrepancy.refundReference,
         ledgerAmountMinor: moneyDiscrepancy.ledgerAmountMinor,
         stripeAmountMinor: moneyDiscrepancy.stripeAmountMinor,
         currency: moneyDiscrepancy.currency,
@@ -157,6 +165,9 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         heldRefundMinor: heldRefund<number>(ledgerEntry.amountMinor),
         canSettle: settleable(),
         canResolve: sql<boolean>`not ${namesUnstampedRow()}`,
+        paymentBooked: sql<boolean>`${purchaseBooked()}`,
+        refund: sql<DiscrepancyItem["refund"]>`case when ${retriesRefund()} then 'retrying'
+          when ${heldRefund<string>(ledgerEntry.id)} is not null then 'holding' end`,
       })
       .from(moneyDiscrepancy)
       .leftJoin(
@@ -179,6 +190,7 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
     db
       .select({
         id: paymentDispute.id,
+        stripeDisputeId: paymentDispute.stripeDisputeId,
         engagementId: paymentDispute.engagementId,
         amountMinor: paymentDispute.amountMinor,
         currency: paymentDispute.currency,
@@ -211,8 +223,8 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
       )
       .orderBy(desc(ledgerEntry.occurredAt))
       .limit(LIMIT),
-    Promise.all(campuses.map(blockedRefunds)),
-    Promise.all(campuses.map(blockedEngagements)),
+    Promise.all(campuses.map((campus) => blockedRefunds(campus, true))),
+    Promise.all(campuses.map((campus) => blockedEngagements(campus, true))),
   ]);
 
   const context = await contexts(campuses, [
