@@ -14,9 +14,8 @@ time to pass makes those states untestable before launch.
 
 ## Decided by the user on 2026-10-14
 
-1. Testing happens in production. There is no staging (`decisions.md`,
-   Environments), and every production account is a test account today
-   (`decisions.md`, "Data from before Stripe is test data").
+1. Testing happens in production. There is no staging, and every production account
+   is a test account today (`decisions.md`, "Data from before Stripe is test data").
 2. Test users sign in with plus-aliases of the user's own inbox,
    `arnutislie12+<persona>@gmail.com`.
 3. Test users make real transactions against Stripe **test mode**: buying a follow-up
@@ -31,7 +30,7 @@ time to pass makes those states untestable before launch.
   which is how `db:seed` lets its plus-aliases in (`seed.ts:763-791`). Production
   sends mail through Resend, so a persona's link lands in the user's Gmail.
 - **`db:demo` already builds states by driving the real functions**, then moving rows
-  into the past with SQL (`demo.ts:235-254`). Nothing fakes the clock, and this
+  into the past with SQL (`moveIntoPast` in `src/server/db/scenarios/sessions.ts`). Nothing fakes the clock, and this
   proposal does not add one. Code reads both the app clock and the database clock, so
   only rewriting stored timestamps works for both.
 - **The fake payment is refused in production** (`buy-and-pay.ts:5-26`), on purpose,
@@ -69,7 +68,9 @@ package for real, then ends it.
   Stripe id.
 - **Guards.** The fixture payment step refuses an engagement whose student or tutor is
   not a persona. The transfer sweep and the refund path refuse any `fixture_`
-  reference, so fixture money can never reach Stripe.
+  reference, so fixture money can never reach Stripe. The refusal runs before any
+  Stripe lookup too: the transfer sweep calls `chargeOf` on the payment intent before
+  it sends anything (`billing/transfers.ts`).
 - **The money check.** `db:check-money` accepts a `fixture_` reference only on an
   engagement between personas. Anywhere else, it is a violation.
 - **The wipe.** Before launch, deleting everything under `persona_` users removes all
@@ -138,17 +139,9 @@ Personas work in pairs where a state has two sides: `tutor-finals` and
 
 ## New text for `docs/decisions.md`
 
-Added after "Data from before Stripe is test data, and it is cleared before launch"
-(`decisions.md`, "Data from before Stripe is test data"):
-
-> **Test users in production carry fixture money until launch.** Personas
-> (`persona_<key>` users, plus-aliases of the owner's inbox) are built by a reset on
-> `/ops` while `TEST_PERSONAS` is on. Their history is recorded with `fixture_`
-> references and no Stripe charge, through the same functions as real money. Fixture
-> money never reaches Stripe: the transfer sweep and refunds refuse `fixture_`
-> references, and the money check accepts them only between personas. Everything a
-> tester does is real Stripe test-mode money. At launch, `TEST_PERSONAS` is removed and
-> every `persona_` user is deleted.
+Added after "Data from before Stripe is test data, and it is cleared before launch",
+as "Test users in production carry fixture money until launch". That paragraph is
+the rule; this proposal does not repeat it.
 
 ## PRs
 

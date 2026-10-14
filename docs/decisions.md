@@ -815,7 +815,8 @@ references and no Stripe charge, through the same functions as real money. Fixtu
 money never reaches Stripe: the transfer sweep and refunds refuse `fixture_`
 references, and the money check accepts them only between personas. Everything a
 tester does is real Stripe test-mode money. At launch, `TEST_PERSONAS` is removed and
-every `persona_` user is deleted. Both testers sign in through the one inbox. Decided
+every `persona_` user is deleted. This is not a legacy carve-out: like the pre-Stripe
+rows, it is gone at launch. Both testers sign in through the one inbox. Decided
 by the user on 2026-10-14.
 
 **Campus membership is gated on `crimson.ua.edu`**, the UA *student* domain, matched
