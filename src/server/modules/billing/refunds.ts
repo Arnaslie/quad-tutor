@@ -1,5 +1,6 @@
 import { and, eq, exists, isNotNull, isNull, like, lt, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { z } from "zod";
 
 import { db } from "@/server/db";
 import { ledgerEntry } from "@/server/db/schema";
@@ -297,13 +298,17 @@ async function boughtWith(paymentIntentId: string): Promise<Ids | undefined> {
   return bought;
 }
 
+/** An id that is not a uuid, such as one tagged by hand, counts as missing, so the PaymentIntent still decides. */
+const uuidOrNull = z.uuid().nullable().catch(null);
+const refundIds = z.object({ ledgerEntryId: uuidOrNull, engagementId: uuidOrNull, institutionId: uuidOrNull });
+
 /** Applies what Stripe says of one refund now: stamps our row, or flags a failure. */
 export async function reconcileRefund(refund: Refund): Promise<RefundOutcome> {
   const { paymentIntentId } = refund;
   if (!paymentIntentId) return "foreign";
+  const { ledgerEntryId, engagementId, institutionId } = refundIds.parse(refund);
 
-  if (refund.ledgerEntryId) {
-    const { engagementId, institutionId } = refund;
+  if (ledgerEntryId) {
     if (!engagementId || !institutionId) return "foreign";
     const [row] = await db
       .select({
@@ -315,7 +320,7 @@ export async function reconcileRefund(refund: Refund): Promise<RefundOutcome> {
       .from(ledgerEntry)
       .where(
         and(
-          eq(ledgerEntry.id, refund.ledgerEntryId),
+          eq(ledgerEntry.id, ledgerEntryId),
           eq(ledgerEntry.engagementId, engagementId),
           eq(ledgerEntry.institutionId, institutionId),
           eq(ledgerEntry.type, "refund"),
@@ -326,10 +331,7 @@ export async function reconcileRefund(refund: Refund): Promise<RefundOutcome> {
     return settle({ engagementId, institutionId, ...row, paymentIntentId }, refund);
   }
 
-  const ids =
-    refund.engagementId && refund.institutionId
-      ? { engagementId: refund.engagementId, institutionId: refund.institutionId }
-      : await boughtWith(paymentIntentId);
+  const ids = engagementId && institutionId ? { engagementId, institutionId } : await boughtWith(paymentIntentId);
   if (!ids) return "foreign";
   if (isLiveRefund(refund)) return "skipped";
   // A Dashboard refund ops booked as the package refund: the flag names that row, so the row counts as unpaid.
@@ -366,5 +368,6 @@ export async function handleRefundEvent(
   const outcomes: RefundOutcome[] = [];
   for (const refund of refunds) outcomes.push(await reconcileRefund(refund));
   const outcome = (["refund_failed", "refunded", "skipped"] as const).find((o) => outcomes.includes(o)) ?? "foreign";
-  return { outcome, institutionId: refunds.find((r) => r.institutionId)?.institutionId ?? null };
+  const institutionId = refunds.map((r) => refundIds.parse(r).institutionId).find(Boolean) ?? null;
+  return { outcome, institutionId };
 }

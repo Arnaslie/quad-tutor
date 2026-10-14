@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { and, eq, exists, inArray, isNotNull, isNull, like, lt, not, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { z } from "zod";
 
 import { db } from "@/server/db";
 import { engagement, ledgerEntry, moneyDiscrepancy } from "@/server/db/schema";
@@ -340,9 +341,12 @@ async function fulfil(
   return refunded ? "refunded" : "refund_failed";
 }
 
+const checkoutIds = z.object({ engagementId: z.uuid(), institutionId: z.uuid() });
+
 async function act(session: CheckoutSession, patience: Patience): Promise<SyncOutcome> {
-  if (!session.engagementId || !session.institutionId) return "foreign";
-  const ids = { engagementId: session.engagementId, institutionId: session.institutionId };
+  const parsed = checkoutIds.safeParse(session);
+  if (!parsed.success) return "foreign";
+  const ids = parsed.data;
 
   if (session.status === "complete") {
     if (session.paymentStatus !== "paid" || !session.paymentIntentId) return "unpaid";
@@ -361,7 +365,7 @@ export async function syncCheckout(
   patience = PATIENT,
 ): Promise<{ outcome: SyncOutcome; institutionId: string | null }> {
   const session = await stripeGateway().retrieveCheckout(sessionId);
-  return { outcome: await act(session, patience), institutionId: session.institutionId };
+  return { outcome: await act(session, patience), institutionId: checkoutIds.safeParse(session).data?.institutionId ?? null };
 }
 
 const definitive = (error: unknown) =>

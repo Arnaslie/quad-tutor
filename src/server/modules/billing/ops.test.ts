@@ -349,6 +349,35 @@ test("a second failed Dashboard refund after ops resolved the first reopens the 
   assert.deepEqual(await flag(flagId), { resolved: true, note: "second card checked", by: ops.userId }, "replaying both failures is not news");
 });
 
+test("a failed refund hand-tagged with ids that are not uuids on a booked payment is flagged through its PaymentIntent, once", async () => {
+  const w = await world();
+  const { engagementId, paymentIntentId } = await delivered(w);
+  const tagged = await stripeGateway().refund({
+    paymentIntentId,
+    engagementId: "smoke-engagement",
+    institutionId: "smoke-campus",
+    ledgerEntryId: "smoke-row",
+    amountMinor: 2_000,
+    idempotencyKey: `hand-tagged:${paymentIntentId}`,
+  });
+  await fakeStripe.failRefund(tagged.id);
+  const failed = { status: 200, outcome: "refund_failed", institutionId: null };
+  assert.deepEqual(await deliver(await fakeStripe.refundEvent(tagged.id, "refund.failed")), failed);
+
+  const flags = () =>
+    db
+      .select({ kind: moneyDiscrepancy.kind, row: moneyDiscrepancy.ledgerEntryId, amount: moneyDiscrepancy.ledgerAmountMinor, refunds: moneyDiscrepancy.failedRefundIds })
+      .from(moneyDiscrepancy)
+      .where(eq(moneyDiscrepancy.engagementId, engagementId));
+  const one = [{ kind: "refund_failed", row: null, amount: 2_000, refunds: [tagged.id] }];
+  assert.deepEqual(await flags(), one);
+
+  for (const type of ["refund.failed", "charge.refunded"] as const) {
+    assert.deepEqual(await deliver(await fakeStripe.refundEvent(tagged.id, type)), failed, type);
+  }
+  assert.deepEqual(await flags(), one, "replays are not news");
+});
+
 test("a held package refund Stripe stamps while ops settles it refuses the settlement", async () => {
   const w = await world();
   const ops = await operator(w.institutionId);
