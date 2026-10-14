@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
-import { setTimeout as sleep } from "node:timers/promises";
 
 import { and, eq } from "drizzle-orm";
 
@@ -361,7 +360,7 @@ test("a daily pass the key stopped runs again on the next cron run", async () =>
   assert.deepEqual((await flags(w.institutionId)).map((f) => [f.kind, f.stripeReference]), [["orphaned_account", stray.id]]);
 });
 
-test("a daily pass the deadline cut short runs again on the next cron run", async () => {
+test("a daily pass the deadline cut short runs again on the next cron run", async (t) => {
   const w = await world();
   const sessions = [(await checkingOut(w)).checkoutSessionId, (await checkingOut(w)).checkoutSessionId];
   for (const id of sessions) fakeStripe.hide(id);
@@ -370,17 +369,20 @@ test("a daily pass the deadline cut short runs again on the next cron run", asyn
       const [row] = await db.select({ id: engagement.id }).from(engagement).where(eq(engagement.stripeCheckoutSessionId, id));
       assert.equal(await settleCheckout(ids(w, row.id)), "released");
     }
+    t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
     const asked: string[] = [];
     const real = stripeGateway().retrieveCheckout;
     await patched("retrieveCheckout", async (id) => {
-      asked.push(id);
-      await sleep(400);
+      if (sessions.includes(id)) {
+        asked.push(id);
+        t.mock.timers.tick(400);
+      }
       return real(id);
     }, async () => {
       assert.deepEqual(await runReconciliation(w.institutionId, Date.now() + 300), counts(0));
       assert.equal(asked.length, 1, "the deadline stopped the pass after the first Session");
       assert.deepEqual(await reconcile(w), counts(0));
-      assert.equal(asked.length, 3, "the next run asked about both again");
+      assert.deepEqual(asked.slice(1).toSorted(), sessions.toSorted(), "the next run asked about both again");
     });
   } finally {
     for (const id of sessions) fakeStripe.show(id);
