@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import type { DiscrepancyItem } from "@/server/modules/billing/ops";
 
-import { disputeBody, explained, heldLine } from "./copy";
+import { disputeBody, explained, heldLine, lastAnswer } from "./copy";
 
 const item = (overrides: Partial<DiscrepancyItem>): DiscrepancyItem => ({
   id: "d1",
@@ -18,6 +18,7 @@ const item = (overrides: Partial<DiscrepancyItem>): DiscrepancyItem => ({
   ledgerEntryMinor: null,
   heldRefundMinor: null,
   packageRefundAnswered: false,
+  lastAnswer: null,
   engagement: null,
   canSettle: false,
   canResolve: true,
@@ -154,15 +155,22 @@ test("a failed refund on a payment whose package refund is answered never asks o
   assert.deepEqual(explained(item({ ...named, ledgerAmountMinor: 2_000, packageRefundAnswered: true })), {
     title: "A refund to the student failed",
     body,
-    note: "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe before paying anything.",
+    note: "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe. If neither that answer nor this refund reached the student, pay what is missing, then resolve with how you paid.",
     settle: null,
   });
   assert.deepEqual(explained(item({ kind: "refund_failed", stripeReference: "pi_1", canSettle: true, paymentBooked: true, packageRefundAnswered: true })), {
     title: "A refund to the student failed",
     body,
-    note: "It was made in the Stripe Dashboard, so no refund row names it. The package refund already went out or was paid by hand, so check the payment's history in Stripe before paying anything.",
+    note: "It was made in the Stripe Dashboard, so no refund row names it. The package refund already went out or was paid by hand, so check the payment's history in Stripe. If neither that refund nor this one reached the student, pay what is missing, then record it.",
     settle: RECORD,
   });
+});
+
+test("a reopened flag shows ops' last answer word for word, and a flag never answered shows none", () => {
+  const reopened = { kind: "refund_failed", stripeReference: "pi_1", ledgerEntryType: "refund", ledgerEntryMinor: 10_500, packageRefundAnswered: true } as const;
+  assert.equal(lastAnswer(item({ ...reopened, lastAnswer: "retrying in the Dashboard" })), "Last answer: retrying in the Dashboard");
+  assert.equal(lastAnswer(item({ ...reopened, lastAnswer: "<b>paid</b> & done" })), "Last answer: <b>paid</b> & done");
+  assert.equal(lastAnswer(item({ kind: "refund_failed", stripeReference: "pi_1" })), null);
 });
 
 test("a booked Dashboard refund that bounced says what the package owes, not what the Dashboard refunded", () => {

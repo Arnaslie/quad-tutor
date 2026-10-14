@@ -89,7 +89,7 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
       note:
         "It was made in the Stripe Dashboard, so no refund row names it. " +
         (item.packageRefundAnswered
-          ? "The package refund already went out or was paid by hand, so check the payment's history in Stripe before paying anything."
+          ? "The package refund already went out or was paid by hand, so check the payment's history in Stripe. If neither that refund nor this one reached the student, pay what is missing, then record it."
           : !waiting
           ? "The package has no refund waiting yet. Resolving or recording a manual payment both close this, and a refund the package owes later goes to the same card."
           : item.refund === "holding_stopped"
@@ -101,7 +101,7 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     if (item.packageRefundAnswered) {
       return {
         ...plain,
-        note: "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe before paying anything.",
+        note: "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe. If neither that answer nor this refund reached the student, pay what is missing, then resolve with how you paid.",
         settle: null,
       };
     }
@@ -118,6 +118,10 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     ...plain,
     note: `It stopped ${stopped}, which was never sent. Resolving would leave it unsent for good, so pay another way and record it here.`,
   };
+}
+
+export function lastAnswer(item: DiscrepancyItem): string | null {
+  return item.lastAnswer === null ? null : `Last answer: ${item.lastAnswer}`;
 }
 
 export function disputeBody(canLift: boolean): string {

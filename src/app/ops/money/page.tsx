@@ -21,7 +21,7 @@ import {
   recordManualPaymentAction,
   resolveDiscrepancyAction,
 } from "./actions";
-import { disputeBody, explained, heldLine } from "./copy";
+import { disputeBody, explained, heldLine, lastAnswer } from "./copy";
 import { NoteForm, type NoteChoice } from "./note-form";
 import { ReversalForm } from "./reversal-form";
 
@@ -220,6 +220,7 @@ function amounts(item: DiscrepancyItem): Fact[] {
 
 function Discrepancy({ item }: { item: DiscrepancyItem }) {
   const { title, body, note, settle } = explained(item);
+  const answer = lastAnswer(item);
   const choices = [
     ...(settle ? [{ action: recordManualPaymentAction, ...settle }] : []),
     ...(item.canResolve ? [RESOLVE] : []),
@@ -239,6 +240,7 @@ function Discrepancy({ item }: { item: DiscrepancyItem }) {
     >
       <p>{body}</p>
       {note ? <p className="text-muted">{note}</p> : null}
+      {answer ? <p className="whitespace-pre-line [overflow-wrap:anywhere]">{answer}</p> : null}
     </ItemCard>
   );
 }
