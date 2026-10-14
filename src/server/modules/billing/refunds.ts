@@ -289,7 +289,7 @@ async function retryCampus(institutionId: string, deadline: number) {
   return counts;
 }
 
-/** The engagement a refund's PaymentIntent bought, for a refund with no metadata such as one made in the Dashboard. */
+/** The engagement a refund's PaymentIntent bought, which outranks whatever the refund is tagged with. */
 async function boughtWith(paymentIntentId: string): Promise<Ids | undefined> {
   const [bought] = await db
     .select({ engagementId: ledgerEntry.engagementId, institutionId: ledgerEntry.institutionId })
@@ -318,8 +318,9 @@ export async function reconcileRefund(refund: Refund): Promise<Reconciled> {
   const { paymentIntentId } = refund;
   if (!paymentIntentId) return { outcome: "foreign", institutionId: null };
   const { ledgerEntryId, engagementId, institutionId } = refundIds.parse(refund);
+  const bought = await boughtWith(paymentIntentId);
 
-  if (ledgerEntryId && engagementId && institutionId) {
+  if (ledgerEntryId && bought?.engagementId === engagementId && bought.institutionId === institutionId) {
     const [row] = await db
       .select({
         id: ledgerEntry.id,
@@ -331,20 +332,18 @@ export async function reconcileRefund(refund: Refund): Promise<Reconciled> {
       .where(
         and(
           eq(ledgerEntry.id, ledgerEntryId),
-          eq(ledgerEntry.engagementId, engagementId),
-          eq(ledgerEntry.institutionId, institutionId),
+          eq(ledgerEntry.engagementId, bought.engagementId),
+          eq(ledgerEntry.institutionId, bought.institutionId),
           eq(ledgerEntry.type, "refund"),
         ),
       );
     if (row) {
-      if (row.reference !== null && row.reference !== refund.id) return { outcome: "skipped", institutionId };
-      return { outcome: await settle({ engagementId, institutionId, ...row, paymentIntentId }, refund), institutionId };
+      if (row.reference !== null && row.reference !== refund.id) return { outcome: "skipped", institutionId: bought.institutionId };
+      return { outcome: await settle({ ...bought, ...row, paymentIntentId }, refund), institutionId: bought.institutionId };
     }
   }
 
-  const ids =
-    (await boughtWith(paymentIntentId)) ??
-    (engagementId && institutionId ? await ourEngagement({ engagementId, institutionId }) : undefined);
+  const ids = bought ?? (engagementId && institutionId ? await ourEngagement({ engagementId, institutionId }) : undefined);
   if (!ids) return { outcome: "foreign", institutionId: null };
   if (isLiveRefund(refund)) return { outcome: "skipped", institutionId: ids.institutionId };
   // A Dashboard refund ops booked as the package refund: the flag names that row, so the row counts as unpaid.
@@ -372,10 +371,7 @@ export async function reconcileRefund(refund: Refund): Promise<Reconciled> {
 export const REFUND_EVENTS = new Set(["charge.refunded", "refund.updated", "refund.failed", "charge.refund.updated"]);
 
 /** Re-reads the refunds from Stripe, so a stale or repeated event only ever re-applies the current state. */
-export async function handleRefundEvent(
-  type: string,
-  objectId: string,
-): Promise<Reconciled> {
+export async function handleRefundEvent(type: string, objectId: string): Promise<Reconciled> {
   const gateway = stripeGateway();
   const refunds = type === "charge.refunded" ? await gateway.chargeRefunds(objectId) : [await gateway.retrieveRefund(objectId)];
   const reconciled: Reconciled[] = [];
