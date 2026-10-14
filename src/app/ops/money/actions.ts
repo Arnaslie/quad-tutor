@@ -68,8 +68,7 @@ export async function recordManualPaymentAction(_previous: MoneyFormState, formD
     (operator, discrepancyId, note) => recordManualSettlement({ operator, discrepancyId, note }),
     {
       gone: GONE,
-      not_settleable:
-        "Stripe has a record of this money now, so a manual payment would count it twice. Resolve it instead.",
+      not_settleable: "Something changed on this one. Reload the page to see what is left to do.",
     },
   );
 }

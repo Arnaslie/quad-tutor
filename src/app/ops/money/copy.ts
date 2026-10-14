@@ -46,7 +46,7 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
       body: "Someone refunded this payment in the Dashboard, so the package refund was stopped rather than sent a second time.",
       note:
         item.refund === "failed"
-          ? "That Dashboard refund then failed at Stripe, so the student did not get it. Pay them another way and record it on the failed refund card for this payment, then resolve this."
+          ? "That Dashboard refund then failed at Stripe, so the student did not get it. Pay them another way and record it on the failed refund card for this payment. Once that card is recorded, resolve this."
           : item.canSettle
             ? "Booking it records the Dashboard refund as the package refund. If the Ledger and Stripe amounts on this card differ, settle the difference yourself."
             : null,
@@ -69,12 +69,10 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
         body: "The student paid, but no package on the ledger booked the payment, so the payment is sent back.",
       }),
       note: item.refund === "failed"
-        ? "Its refund failed at Stripe. Answer it on the failed refund card for this payment."
+        ? "Its refund failed at Stripe. Answer it on the failed refund card for this payment, or resolve this if that card is already resolved."
         : item.refundReference
           ? "Stripe has refunded it. Resolve this once you have checked."
-          : item.refund === "retrying"
-            ? "The refund has not gone out yet and keeps retrying. Resolving stops the retries."
-            : "Its refund failed and is not retried.",
+          : "The refund has not gone out yet and keeps retrying. Resolving stops the retries.",
     };
   }
   if (item.kind === "refund_failed" && !item.ledgerEntryType) {

@@ -36,15 +36,9 @@ test("money taken with nothing booked says whether its refund went out, retries 
     settle: null,
   });
   assert.deepEqual(explained(item({ ...retrying, refund: null, refundReference: "re_1" })).note, "Stripe has refunded it. Resolve this once you have checked.");
-  const bounced = "Its refund failed at Stripe. Answer it on the failed refund card for this payment.";
+  const bounced = "Its refund failed at Stripe. Answer it on the failed refund card for this payment, or resolve this if that card is already resolved.";
   assert.deepEqual(explained(item({ ...retrying, refund: "failed", refundReference: "re_1" })).note, bounced);
   assert.deepEqual(explained(item({ stripeReference: "pi_1", refund: "failed", refundReference: "re_1" })).note, bounced);
-  assert.deepEqual(explained(item({ stripeReference: "pi_1" })), {
-    title: "Stripe took money no package booked",
-    body: "The student paid, but no package on the ledger booked the payment, so the payment is sent back.",
-    note: "Its refund failed and is not retried.",
-    settle: null,
-  });
 });
 
 test("a charge flag on a booked payment is the plain charge card", () => {
@@ -76,7 +70,7 @@ test("a Dashboard refund that then failed offers no booking and sends ops to the
   assert.deepEqual(explained(item({ stripeReference: "re_1", ledgerEntryType: "refund", canResolve: false, refund: "failed" })), {
     title: "A refund was made in the Stripe Dashboard",
     body: "Someone refunded this payment in the Dashboard, so the package refund was stopped rather than sent a second time.",
-    note: "That Dashboard refund then failed at Stripe, so the student did not get it. Pay them another way and record it on the failed refund card for this payment, then resolve this.",
+    note: "That Dashboard refund then failed at Stripe, so the student did not get it. Pay them another way and record it on the failed refund card for this payment. Once that card is recorded, resolve this.",
     settle: null,
   });
 });
