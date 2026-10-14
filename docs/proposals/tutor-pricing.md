@@ -1,6 +1,6 @@
 # Proposal: tutor-set rates and a lower take after 10 sessions
 
-Status: **proposal, not started; three questions open.** Written 2026-10-14 against
+Status: **proposal, not started; one question open.** Written 2026-10-14 against
 `origin/main` at `701a296`. Nothing in `docs/decisions.md` changes until this is
 accepted. The replacement text is in its own section.
 
@@ -34,9 +34,14 @@ These two items ship as separate PRs, and rates go first. Both need the
 
 ## Rates
 
-- **Where the rate lives.** A new `tutor_profile.session_rate_minor` integer column,
-  `NOT NULL DEFAULT 3500`. The column is additive, and every existing tutor keeps
-  today's $35.
+- **Where the rate lives.** One rate per (tutor, course), decided by the user on
+  2026-10-14. A new `tutor_course.session_rate_minor` integer column,
+  `NOT NULL DEFAULT 3500`. The column is additive, and every existing claim keeps
+  today's $35. A tutor can charge more for Organic than for Calc I, and the rate sits
+  on the core relationship (CLAUDE.md, Invariants).
+- **Changing the rate.** A tutor can change a course's rate at any time, mid-term
+  included, decided by the user on 2026-10-14. The change applies to new requests
+  and new top-ups only.
 - **Bounds.** $25.00 to $50.00, whole dollars only. The rule lives in its own
   import-free module, shared by the tutor's settings form and the server action
   (CLAUDE.md, Conventions). The server validates with Zod.
@@ -92,19 +97,20 @@ for $35 falls on the 37th session. At 9% it falls on the 31st.
 
 ## Open questions
 
-1. **The lower rate: 7%, 8% or 9%?** This brief assumes 8%.
-2. **One rate per tutor, or one per (tutor, course)?** This brief assumes one per
-   tutor. A per-course rate fits the core relationship (CLAUDE.md, Invariants) but
-   adds a field per claim. It can be added later without a migration break.
-3. **Can a tutor change their rate mid-term?** This brief assumes any time, applying
-   to new requests only.
+1. **"Drop to 3%": a 3% take, or 3 points lower (7%)?** This brief's tables still
+   assume 8%, and get redone once this is answered. At a 3% take, the cut on a $35
+   session is $1.05. Card processing costs about $1.10 a session
+   (`decisions.md:146-148`), so every session after the 10th would lose the platform
+   money, and the cap would fall on the 72nd session at $35, which in practice means
+   never. At 7%, the cut is $2.45, and the cap at $35 falls on the 37th.
 
 ## Replacement text for `docs/decisions.md`
 
 Replace the first paragraph under "The take is 10% of each session, capped at $100 per
 tutor per term" (`decisions.md:79-86`) with:
 
-> **Tutors set their own rate, between $25 and $50 a session. The take is 10% of each
+> **Tutors set their own rate for each course they tutor, between $25 and $50 a
+> session. The take is 10% of each
 > of a tutor's first 10 sessions and 8% after, capped at $100 per tutor per term.** The
 > student pays the tutor's rate and nothing on top: a student booking fee was rejected
 > because the student is already paying for the tutor. The price is fixed when the
