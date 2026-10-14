@@ -657,7 +657,8 @@ const fakeGateway: Gateway = {
     }
     fakeRefundsInFlight.add(key);
     try {
-      await fakeRefundHold;
+      fakeRefundHold.reached();
+      await fakeRefundHold.gate;
       return await fakeCreateRefund(key, params);
     } finally {
       fakeRefundsInFlight.delete(key);
@@ -918,7 +919,8 @@ type FakeRefundReplay = {
 
 let fakeRefundOutages = 0;
 const fakeRefundsInFlight = new Set<string>();
-let fakeRefundHold: Promise<void> = Promise.resolve();
+const UNHELD = { gate: Promise.resolve(), reached: () => {} };
+let fakeRefundHold = UNHELD;
 
 async function fakeRefund(id: string): Promise<{ sessionId: string; record: FakeRecord; refund: Refund }> {
   const owner = await fakeRead<{ sessionId: string }>(id);
@@ -1036,14 +1038,19 @@ export const fakeStripe = {
     assertNotProduction();
     fakeRefundOutages += 1;
   },
-  /** Refund creates wait, their keys in flight, until the returned release is called. */
-  holdRefunds(): () => void {
+  /** Refund creates wait, their keys in flight, until `release` is called; `held` settles once one is waiting. */
+  holdRefunds(): { held: Promise<void>; release: () => void } {
     assertNotProduction();
-    let release = () => {};
-    fakeRefundHold = new Promise((resolve) => (release = resolve));
-    return () => {
-      fakeRefundHold = Promise.resolve();
-      release();
+    let reached = () => {};
+    let open = () => {};
+    const held = new Promise<void>((resolve) => (reached = resolve));
+    fakeRefundHold = { gate: new Promise<void>((resolve) => (open = resolve)), reached };
+    return {
+      held,
+      release: () => {
+        fakeRefundHold = UNHELD;
+        open();
+      },
     };
   },
   /** Plays the card network bouncing a refund days after it was created. */

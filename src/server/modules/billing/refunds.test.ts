@@ -152,6 +152,12 @@ async function creates(work: () => Promise<void>): Promise<number> {
   return calls;
 }
 
+async function heldAtStripe(hold: { held: Promise<void> }, first: Promise<unknown>) {
+  const finished = Symbol("finished");
+  const settled = first.then(() => finished, () => finished);
+  assert.notEqual(await Promise.race([hold.held, settled]), finished, "the first call ended before its refund create was held");
+}
+
 const refused = async () => {
   throw new GatewayError("This charge is disputed.", { status: 400, code: "charge_disputed" });
 };
@@ -393,13 +399,13 @@ test("a sweep overlapping the after-commit call gets the in-flight 409, leaves t
   const { actor, engagementId, checkoutSessionId } = await bought();
   await endPackage({ actor, engagementId });
   await age(engagementId);
-  const release = fakeStripe.holdRefunds();
+  const hold = fakeStripe.holdRefunds();
   const first = refundThroughStripe(ids(engagementId));
   try {
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await heldAtStripe(hold, first);
     assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
   } finally {
-    release();
+    hold.release();
   }
   assert.equal(await first, "refunded");
   assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
@@ -484,15 +490,15 @@ test("a second sweep on the same campus is skipped while the first holds the lea
   const { actor, engagementId, checkoutSessionId } = await bought();
   await endPackage({ actor, engagementId });
   await age(engagementId);
-  const release = fakeStripe.holdRefunds();
+  const hold = fakeStripe.holdRefunds();
   const first = sweep();
   try {
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await heldAtStripe(hold, first);
     assert.equal(await creates(async () => {
       assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
     }), 0);
   } finally {
-    release();
+    hold.release();
   }
   assert.deepEqual(await first, { settled: 1, flagged: 0, failed: 0 });
   assert.equal((await fakeStripe.refunds(checkoutSessionId)).length, 1);

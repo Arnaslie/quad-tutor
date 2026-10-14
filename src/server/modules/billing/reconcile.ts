@@ -475,17 +475,13 @@ export async function runReconciliation(
   deadline: number,
   accounts = accountsThisRun(),
 ): Promise<ReconcileCounts> {
-  const started = Date.now();
+  // The database stamps `detectedAt`, so the run starts on its clock: a span timed here drifts by however long the count waits to run.
+  const [{ started }] = await db.execute<{ started: string }>(sql`select now()::text as started`);
   const counts = await withLease(institutionId, "reconciliation", LEASE_MS, () => reconcileCampus(institutionId, deadline, accounts));
   if (!counts) return NONE;
   const [raised] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(moneyDiscrepancy)
-    .where(
-      and(
-        eq(moneyDiscrepancy.institutionId, institutionId),
-        sql`${moneyDiscrepancy.detectedAt} >= now() - ${Date.now() - started} * interval '1 millisecond'`,
-      ),
-    );
+    .where(and(eq(moneyDiscrepancy.institutionId, institutionId), sql`${moneyDiscrepancy.detectedAt} >= ${started}::timestamptz`));
   return { ...counts, flagged: raised.n };
 }
