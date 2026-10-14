@@ -13,7 +13,6 @@ import type { Actor } from "@/server/modules/identity/actor";
 
 import type { Target } from "./packages";
 
-/** Deletes the engagements an earlier run left (by session note marker or by the student's requests in the targets), and stray requests. */
 export async function cleanupByMarker(params: {
   student: Actor;
   targets: Target[];

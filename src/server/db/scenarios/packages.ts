@@ -85,7 +85,7 @@ export async function openPackage(params: {
   target: Target;
   slotsNeeded: number;
 }) {
-  const { student, tutor, target } = params;
+  const { student, tutor, target, slotsNeeded } = params;
 
   const asked = await requestTutors({
     actor: student,
@@ -112,8 +112,8 @@ export async function openPackage(params: {
   await acceptRequest({ tutor, requestId });
 
   const slots = await slotsForRequest({ actor: student, requestId });
-  if (slots.length < params.slotsNeeded) {
-    throw new Error(`${tutor.userId} has ${slots.length} open slot(s), need ${params.slotsNeeded}`);
+  if (slots.length < slotsNeeded) {
+    throw new Error(`${tutor.userId} has ${slots.length} open slot(s), need ${slotsNeeded}`);
   }
 
   const exams = await upcomingExams(target.courseOfferingId);
@@ -127,5 +127,5 @@ export async function openPackage(params: {
     slotStartsAt: slots[0],
   });
 
-  return { requestId, engagementId, asked, anchor };
+  return { engagementId, asked, anchor };
 }
