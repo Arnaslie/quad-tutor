@@ -101,7 +101,7 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     if (item.packageRefundAnswered) {
       return {
         ...plain,
-        note: "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe before paying anything.",
+        note: "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe. If neither that answer nor this refund reached the student, pay what is missing, then resolve with how you paid.",
         settle: null,
       };
     }
@@ -118,6 +118,10 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     ...plain,
     note: `It stopped ${stopped}, which was never sent. Resolving would leave it unsent for good, so pay another way and record it here.`,
   };
+}
+
+export function lastAnswer(item: DiscrepancyItem): string | null {
+  return item.lastAnswer === null ? null : `Last answer: ${item.lastAnswer}`;
 }
 
 export function disputeBody(canLift: boolean): string {

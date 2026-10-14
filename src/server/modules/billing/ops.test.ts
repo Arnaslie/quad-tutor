@@ -13,7 +13,7 @@ import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 import { assertMoneyInvariants } from "./invariants";
 import { answerReversal, liftDisputePause, moneyForOperator, recordManualSettlement, resolveDiscrepancy, type SettleResult } from "./ops";
 import { releaseCheckout } from "@/server/modules/engagements/checkout";
-import { explained } from "@/app/ops/money/copy";
+import { explained, lastAnswer } from "@/app/ops/money/copy";
 
 import { syncCheckout } from "./checkout-session";
 import { runReconciliation } from "./reconcile";
@@ -250,6 +250,7 @@ test("settling a refused transfer by hand stamps its row manual:<discrepancy> an
       ledgerEntryMinor: 3_150,
       heldRefundMinor: null,
       packageRefundAnswered: false,
+      lastAnswer: null,
       engagement: { courseLabel: w.courseCode, tutorName: w.tutor.name, studentName: actor.name },
       canSettle: true,
       canResolve: false,
@@ -294,6 +295,7 @@ test("settling a failed Dashboard refund by hand stamps the package refund it ho
       ledgerEntryMinor: null,
       heldRefundMinor: 10_500,
       packageRefundAnswered: false,
+      lastAnswer: null,
       engagement: { courseLabel: w.courseCode, tutorName: w.tutor.name, studentName: actor.name },
       canSettle: true,
       canResolve: true,
@@ -507,7 +509,7 @@ test("a Dashboard refund ops booked as the package refund that then bounces name
 
 const OWES = "The package owes them $105.00. Pay them that another way, then resolve this with a note on how you paid.";
 const ANSWERED =
-  "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe before paying anything.";
+  "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe. If neither that answer nor this refund reached the student, pay what is missing, then resolve with how you paid.";
 
 /** The package refund went out from our own sweep and the card bounced it. */
 async function bouncedPackageRefund(w: World) {
@@ -532,6 +534,22 @@ test("a Dashboard retry that bounces after ops paid the bounced package refund b
   const open = (await moneyForOperator(ops)).discrepancies;
   assert.deepEqual(open.map((d) => [d.id, d.ledgerAmountMinor, d.canResolve, explained(d).note]), [[failed.id, 10_500, true, ANSWERED]]);
   assert.deepEqual(await flag(failed.id), { resolved: false, note: "paid $105 by Zelle", by: null }, "the reopen keeps how ops answered it");
+});
+
+test("a Dashboard retry ops answered with, that bounced too, reopens the card showing that answer", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const { paymentIntentId } = await bouncedPackageRefund(w);
+  const [failed] = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual([failed.lastAnswer, lastAnswer(failed)], [null, null]);
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: failed.id, note: "retrying in the Dashboard" }), { ok: true });
+
+  await bounce(paymentIntentId, 10_500);
+  const [reopened] = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual(
+    [reopened.id, reopened.lastAnswer, explained(reopened).note, lastAnswer(reopened)],
+    [failed.id, "retrying in the Dashboard", ANSWERED, "Last answer: retrying in the Dashboard"],
+  );
 });
 
 test("a second Dashboard refund that bounces after ops paid a booked one by hand does not ask them to pay the package refund again", async () => {

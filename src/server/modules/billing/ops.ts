@@ -51,6 +51,8 @@ export type DiscrepancyItem = {
    * the flag names it, ops answered its failure before another refund on the PaymentIntent reopened the flag.
    */
   packageRefundAnswered: boolean;
+  /** Ops' note from when they last resolved this flag, which a failed refund reopening it keeps. Free text. */
+  lastAnswer: string | null;
   engagement: EngagementContext | null;
   canSettle: boolean;
   canResolve: boolean;
@@ -210,6 +212,7 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         ledgerEntryMinor: ledgerEntry.amountMinor,
         heldRefundMinor: heldRefund<number>(ledgerEntry.amountMinor),
         packageRefundAnswered: packageRefundAnswered(),
+        lastAnswer: moneyDiscrepancy.resolutionNote,
         canSettle: settleable(),
         canResolve: sql<boolean>`not ${strandsRow()}`,
         paymentBooked: sql<boolean>`${purchaseBooked()}`,
