@@ -1,6 +1,6 @@
 # Proposal: tutor-set rates and a lower take after 10 sessions
 
-Status: **proposal, not started; one question open.** Written 2026-10-14 against
+Status: **proposal, not started; every question answered.** Written 2026-10-14 against
 `origin/main` at `701a296`. Nothing in `docs/decisions.md` changes until this is
 accepted. The replacement text is in its own section.
 
@@ -11,8 +11,7 @@ Decided by the user on 2026-10-14, and taken as input here:
 1. Tutors set their own session rate. The fixed $35 price
    (`decisions.md:79-80`, `SESSION_PRICE_MINOR` in `billing/pricing.ts:1`) goes.
    Rates fall between $25 and $50 a session.
-2. The platform takes a smaller cut once a tutor has completed 10 sessions, 1 to 3
-   points below the starting 10%.
+2. The platform's cut drops from 10% to 3% once a tutor has completed 10 sessions.
 
 These two items ship as separate PRs, and rates go first. Both need the
 `decisions.md` edit merged before the build.
@@ -63,7 +62,7 @@ These two items ship as separate PRs, and rates go first. Both need the
 ## The lower take after 10 sessions
 
 - **The rule.** A tutor's first 10 paid sessions take 10%. From the 11th onward, the
-  take is 8% (open question 1).
+  take is 3%, decided by the user on 2026-10-14.
 - **What counts.** Delivered, recognised sessions: a `session_earned` row for that
   `tutor_profile`, across all courses and all terms. The count is lifetime. A per-term
   count would reset each term and overlap with the cap, which is already the per-term
@@ -77,32 +76,29 @@ These two items ship as separate PRs, and rates go first. Both need the
 - **The cap stays.** $100 per tutor per term, unchanged. The 11th-session rate only
   changes how fast a tutor reaches it.
 - **Rounding.** `fee = min(floor(session × rateBp / 10000), max(0, 10000 − meter))`,
-  where `rateBp` is 1000 or 800. Floor still rounds in the tutor's favour.
+  where `rateBp` is 1000 or 300. Floor still rounds in the tutor's favour.
 - **The tutor sees progress.** The earnings page shows "3 of 10 sessions to a lower
   fee", then the lower rate once it applies. No student sees it, the same as the cap
   meter.
 
 ### What it adds up to
 
-At 8% after the 10th session, and one term:
+At 3% after the 10th session, and one term:
 
 | Rate | 1 session, tutor keeps | 10 sessions | Cap reached on |
 |---|---|---|---|
-| $25 | $22.50 | $225.00 | 48th session |
-| $35 | $31.50 | $315.00 | 34th session |
-| $50 | $45.00 | $450.00 | 23rd session |
+| $25 | $22.50 | $225.00 | 110th session |
+| $35 | $31.50 | $315.00 | 72nd session |
+| $50 | $45.00 | $450.00 | 44th session |
 
-At $35, 32 sessions pay the tutor $1,023.40 and the platform $96.60. At 7% the cap
-for $35 falls on the 37th session. At 9% it falls on the 31st.
+At $35, 32 sessions pay the tutor $1,061.90 and the platform $58.10.
 
-## Open questions
-
-1. **"Drop to 3%": a 3% take, or 3 points lower (7%)?** This brief's tables still
-   assume 8%, and get redone once this is answered. At a 3% take, the cut on a $35
-   session is $1.05. Card processing costs about $1.10 a session
-   (`decisions.md:146-148`), so every session after the 10th would lose the platform
-   money, and the cap would fall on the 72nd session at $35, which in practice means
-   never. At 7%, the cut is $2.45, and the cap at $35 falls on the 37th.
+**The platform loses money on each session after the 10th.** At 3%, a $35 session
+takes $1.05, and card processing costs about $1.10 a session
+(`decisions.md:146-148`). At $25 the take is $0.75. The user chose 3% on
+2026-10-14 after this was raised. The lower take is the reason to stay on the app past the 10th session,
+the same lever as the cap. In practice the cap is now only reached by a tutor on a
+high rate with a heavy term.
 
 ## Replacement text for `docs/decisions.md`
 
@@ -110,13 +106,13 @@ Replace the first paragraph under "The take is 10% of each session, capped at $1
 tutor per term" (`decisions.md:79-86`) with:
 
 > **Tutors set their own rate for each course they tutor, between $25 and $50 a
-> session. The take is 10% of each
-> of a tutor's first 10 sessions and 8% after, capped at $100 per tutor per term.** The
+> session. The take is 10% of each of a tutor's first 10 sessions and 3% after,
+> capped at $100 per tutor per term.** The
 > student pays the tutor's rate and nothing on top: a student booking fee was rejected
 > because the student is already paying for the tutor. The price is fixed when the
 > tutor accepts the request, or when a top-up's checkout is created, and a later rate
 > change never re-prices it. Once a tutor's platform share for a term reaches $100, they
-> keep 100% for the rest of that term. At $35 a session the cap is reached on the 34th
+> keep 100% for the rest of that term. At $35 a session the cap is reached on the 72nd
 > session. The 10-session count is lifetime, across all courses, and is read from the
 > ledger at recognition. A session's rate is fixed once it is written. The rate is shown
 > to students and is never a ranking input.
