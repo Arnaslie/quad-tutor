@@ -88,7 +88,9 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
       ...plain,
       note:
         "It was made in the Stripe Dashboard, so no refund row names it. " +
-        (!waiting
+        (item.packageRefundAnswered
+          ? "The package refund already went out or was paid by hand, so check the payment's history in Stripe before paying anything."
+          : !waiting
           ? "The package has no refund waiting yet. Resolving or recording a manual payment both close this, and a refund the package owes later goes to the same card."
           : item.refund === "holding_stopped"
             ? `Another flag on this package has also stopped its ${waiting} refund for good, so nothing sends it. Pay the student that ${waiting} another way, then record it here and the refund is marked paid.`
@@ -96,6 +98,13 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     };
   }
   if (item.kind === "refund_failed" && item.ledgerEntryType === "refund" && item.ledgerEntryMinor !== null && item.canResolve) {
+    if (item.packageRefundAnswered) {
+      return {
+        ...plain,
+        note: "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe before paying anything.",
+        settle: null,
+      };
+    }
     return {
       ...plain,
       body: "Stripe could not deliver the refund to the student, and nothing sends it again.",

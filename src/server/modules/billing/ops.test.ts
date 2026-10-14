@@ -70,12 +70,17 @@ async function disputed(paymentIntentId: string) {
   return { stripeId: dispute.id, id: row.id };
 }
 
+/** A refund made in the Dashboard to a card that bounces it, flagged from the webhook. */
+async function bounce(paymentIntentId: string, amountMinor: number) {
+  const dashboard = await fakeStripe.dashboardRefund(paymentIntentId, amountMinor);
+  await fakeStripe.failRefund(dashboard.id);
+  await deliver(await fakeStripe.refundEvent(dashboard.id, "refund.failed"));
+}
+
 /** Delivered, then part of it refunded in the Dashboard to a card that bounced it, flagged from the webhook. */
 async function bouncedDashboardRefund(w: World) {
   const bought = await delivered(w);
-  const dashboard = await fakeStripe.dashboardRefund(bought.paymentIntentId, 2_000);
-  await fakeStripe.failRefund(dashboard.id);
-  await deliver(await fakeStripe.refundEvent(dashboard.id, "refund.failed"));
+  await bounce(bought.paymentIntentId, 2_000);
   const [flagged] = await db.select({ id: moneyDiscrepancy.id }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.engagementId, bought.engagementId));
   return { ...bought, flagId: flagged.id };
 }
@@ -244,6 +249,7 @@ test("settling a refused transfer by hand stamps its row manual:<discrepancy> an
       ledgerEntryType: "tutor_transfer",
       ledgerEntryMinor: 3_150,
       heldRefundMinor: null,
+      packageRefundAnswered: false,
       engagement: { courseLabel: w.courseCode, tutorName: w.tutor.name, studentName: actor.name },
       canSettle: true,
       canResolve: false,
@@ -287,6 +293,7 @@ test("settling a failed Dashboard refund by hand stamps the package refund it ho
       ledgerEntryType: null,
       ledgerEntryMinor: null,
       heldRefundMinor: 10_500,
+      packageRefundAnswered: false,
       engagement: { courseLabel: w.courseCode, tutorName: w.tutor.name, studentName: actor.name },
       canSettle: true,
       canResolve: true,
@@ -331,7 +338,7 @@ test("a second failed Dashboard refund after ops resolved the first reopens the 
   const second = await fakeStripe.dashboardRefund(paymentIntentId, 3_000);
   await fakeStripe.failRefund(second.id);
   assert.deepEqual(await deliver(await fakeStripe.refundEvent(second.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: null });
-  assert.deepEqual(await flag(flagId), { resolved: false, note: null, by: null });
+  assert.deepEqual(await flag(flagId), { resolved: false, note: "card replaced", by: null });
   assert.deepEqual((await moneyForOperator(ops)).discrepancies.map((d) => [d.id, d.ledgerAmountMinor]), [[flagId, 3_000]]);
   await endPackage({ actor, engagementId });
   assert.equal(await refundThroughStripe({ engagementId, institutionId: w.institutionId }), "skipped");
@@ -496,6 +503,83 @@ test("a Dashboard refund ops booked as the package refund that then bounces name
   assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: failed.id, note: "paid back by Zelle" }), { ok: true });
   assert.deepEqual(await stripeRefunds(checkoutSessionId), [[5_000, "failed"]]);
   await assertMoneyInvariants(w.institutionId);
+});
+
+const OWES = "The package owes them $105.00. Pay them that another way, then resolve this with a note on how you paid.";
+const ANSWERED =
+  "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe before paying anything.";
+
+/** The package refund went out from our own sweep and the card bounced it. */
+async function bouncedPackageRefund(w: World) {
+  const bought = await delivered(w);
+  await endPackage({ actor: bought.actor, engagementId: bought.engagementId });
+  assert.equal(await refundThroughStripe({ engagementId: bought.engagementId, institutionId: w.institutionId }), "refunded");
+  const [row] = await rows(bought.engagementId, "refund");
+  await fakeStripe.failRefund(row.stripeReference!);
+  await deliver(await fakeStripe.refundEvent(row.stripeReference!, "refund.failed"));
+  return bought;
+}
+
+test("a Dashboard retry that bounces after ops paid the bounced package refund by hand does not ask them to pay it again", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const { paymentIntentId } = await bouncedPackageRefund(w);
+  const [failed] = (await moneyForOperator(ops)).discrepancies;
+  assert.equal(explained(failed).note, OWES);
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: failed.id, note: "paid $105 by Zelle" }), { ok: true });
+
+  await bounce(paymentIntentId, 10_500);
+  const open = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual(open.map((d) => [d.id, d.ledgerAmountMinor, d.canResolve, explained(d).note]), [[failed.id, 10_500, true, ANSWERED]]);
+  assert.deepEqual(await flag(failed.id), { resolved: false, note: "paid $105 by Zelle", by: null }, "the reopen keeps how ops answered it");
+});
+
+test("a second Dashboard refund that bounces after ops paid a booked one by hand does not ask them to pay the package refund again", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const { actor, engagementId, paymentIntentId } = await delivered(w);
+  const dashboard = await fakeStripe.dashboardRefund(paymentIntentId, 5_000);
+  await endPackage({ actor, engagementId });
+  assert.equal(await refundThroughStripe({ engagementId, institutionId: w.institutionId }), "flagged");
+  const [booking] = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: booking.id, note: "support refunded in the Dashboard" }), { ok: true });
+  await fakeStripe.failRefund(dashboard.id);
+  await deliver(await fakeStripe.refundEvent(dashboard.id, "refund.failed"));
+  const [failed] = (await moneyForOperator(ops)).discrepancies;
+  assert.equal(explained(failed).note, OWES);
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: failed.id, note: "paid $105 by Zelle" }), { ok: true });
+
+  await bounce(paymentIntentId, 2_000);
+  const open = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual(open.map((d) => [d.id, d.ledgerAmountMinor, d.canResolve, explained(d).note]), [[failed.id, 2_000, true, ANSWERED]]);
+});
+
+test("a Dashboard refund that bounces before ops answers the bounced package refund still says what the package owes", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const { paymentIntentId } = await bouncedPackageRefund(w);
+  await bounce(paymentIntentId, 4_000);
+  const open = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual(open.map((d) => [d.ledgerAmountMinor, explained(d).note]), [[10_500, OWES]], "an open flag is not reopened, so it keeps the package refund's amount");
+});
+
+test("a Dashboard refund that bounces after the held package refund was paid by hand does not say a package refund is still to come", async () => {
+  const w = await world();
+  const ops = await operator(w.institutionId);
+  const { actor, engagementId, paymentIntentId, flagId } = await bouncedDashboardRefund(w);
+  await endPackage({ actor, engagementId });
+  assert.equal(await refundThroughStripe({ engagementId, institutionId: w.institutionId }), "skipped");
+  assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: flagId, note: "paid back by Zelle" }), { ok: true });
+
+  await bounce(paymentIntentId, 3_000);
+  const [reopened] = (await moneyForOperator(ops)).discrepancies;
+  assert.deepEqual([reopened.id, reopened.heldRefundMinor, reopened.packageRefundAnswered], [flagId, null, true]);
+  assert.deepEqual(explained(reopened), {
+    title: "A refund to the student failed",
+    body: "Stripe could not return this money to the student's card, usually because the card is closed or lost. Nothing sends it to that card again.",
+    note: "It was made in the Stripe Dashboard, so no refund row names it. The package refund already went out or was paid by hand, so check the payment's history in Stripe before paying anything.",
+    settle: { label: "Record manual payment", pending: "Recording…" },
+  });
 });
 
 test("a failed Dashboard refund holds the package refund once there is one", async () => {

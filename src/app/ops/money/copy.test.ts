@@ -17,6 +17,7 @@ const item = (overrides: Partial<DiscrepancyItem>): DiscrepancyItem => ({
   ledgerEntryType: null,
   ledgerEntryMinor: null,
   heldRefundMinor: null,
+  packageRefundAnswered: false,
   engagement: null,
   canSettle: false,
   canResolve: true,
@@ -143,6 +144,23 @@ test("a refund that bounced after Stripe stamped it offers only resolving, while
     title: "A refund to the student failed",
     body: "Stripe could not return this money to the student's card, usually because the card is closed or lost. Nothing sends it to that card again.",
     note: "It stopped the refund to the student, which was never sent. Resolving would leave it unsent for good, so pay another way and record it here.",
+    settle: RECORD,
+  });
+});
+
+test("a failed refund on a payment whose package refund is answered never asks ops to pay that refund again", () => {
+  const body = "Stripe could not return this money to the student's card, usually because the card is closed or lost. Nothing sends it to that card again.";
+  const named = { kind: "refund_failed", stripeReference: "pi_1", ledgerEntryType: "refund", ledgerEntryMinor: 10_500, canSettle: true, paymentBooked: true } as const;
+  assert.deepEqual(explained(item({ ...named, ledgerAmountMinor: 2_000, packageRefundAnswered: true })), {
+    title: "A refund to the student failed",
+    body,
+    note: "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe before paying anything.",
+    settle: null,
+  });
+  assert.deepEqual(explained(item({ kind: "refund_failed", stripeReference: "pi_1", canSettle: true, paymentBooked: true, packageRefundAnswered: true })), {
+    title: "A refund to the student failed",
+    body,
+    note: "It was made in the Stripe Dashboard, so no refund row names it. The package refund already went out or was paid by hand, so check the payment's history in Stripe before paying anything.",
     settle: RECORD,
   });
 });

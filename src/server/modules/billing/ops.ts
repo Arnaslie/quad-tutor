@@ -23,7 +23,7 @@ import { courseLabel } from "@/server/modules/messaging/threads";
 
 import { purchaseBooked, retriesRefund, uniqueViolation } from "./checkout-session";
 import { FORFEITED_PREFIX, MANUAL_PREFIX, paymentRefundBlocker, type Ids } from "./discrepancy";
-import { blockedRefunds, refundHeldBy, stoppedForGood } from "./refunds";
+import { blockedRefunds, packageRefund, stoppedForGood } from "./refunds";
 import { blockedEngagements, paused } from "./transfers";
 
 type DiscrepancyKind = (typeof moneyDiscrepancyKind.enumValues)[number];
@@ -46,6 +46,11 @@ export type DiscrepancyItem = {
   ledgerEntryMinor: number | null;
   /** What settling marks paid by hand: the package refund a failed Dashboard refund holds, once it is written. */
   heldRefundMinor: number | null;
+  /**
+   * On a failed refund flag, the package refund needs nothing from ops: it went out or was paid by hand, or, when
+   * the flag names it, ops answered its failure before another refund on the PaymentIntent reopened the flag.
+   */
+  packageRefundAnswered: boolean;
   engagement: EngagementContext | null;
   canSettle: boolean;
   canResolve: boolean;
@@ -122,9 +127,14 @@ const namesUnstampedRow = () =>
       ),
   );
 
-const heldRefund = <T>(column: Parameters<typeof refundHeldBy>[0]) =>
+const heldRefund = <T>(column: Parameters<typeof packageRefund>[0]) =>
   sql<T | null>`case when ${moneyDiscrepancy.kind} = 'refund_failed' and ${moneyDiscrepancy.ledgerEntryId} is null
-    then (${refundHeldBy(column, moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId)}) end`;
+    then (${packageRefund(column, moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId, false)}) end`;
+
+const packageRefundAnswered = () =>
+  sql<boolean>`(${moneyDiscrepancy.kind} = 'refund_failed' and case when ${moneyDiscrepancy.ledgerEntryId} is null
+    then exists(${packageRefund(ledgerEntry.id, moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId, true)})
+    else ${moneyDiscrepancy.resolutionNote} is not null end)`;
 
 /**
  * The refund this flag is about failed at Stripe, and is answered on the payment's refund_failed flag: the refund of
@@ -199,6 +209,7 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         ledgerEntryType: ledgerEntry.type,
         ledgerEntryMinor: ledgerEntry.amountMinor,
         heldRefundMinor: heldRefund<number>(ledgerEntry.amountMinor),
+        packageRefundAnswered: packageRefundAnswered(),
         canSettle: settleable(),
         canResolve: sql<boolean>`not ${strandsRow()}`,
         paymentBooked: sql<boolean>`${purchaseBooked()}`,

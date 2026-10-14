@@ -1,4 +1,4 @@
-import { and, eq, exists, isNull, like, lt, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, exists, isNotNull, isNull, like, lt, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -80,17 +80,28 @@ const held = () => failedDashboardRefund(purchase.stripeReference, purchase.inst
 /** A flag names the row, so it stays unsent even once nothing else holds it. */
 export const stoppedForGood = () => sql<boolean>`exists(${blocked()})`;
 
-/** The unstamped refund row of the engagement a PaymentIntent bought: the one a failed refund on that PaymentIntent holds. */
-export const refundHeldBy = (
+/**
+ * The refund row of the engagement a PaymentIntent bought. Unstamped, it is the one a failed refund on that
+ * PaymentIntent holds; stamped, it already went out or was paid by hand.
+ */
+export const packageRefund = (
   column: typeof ledgerEntry.id | typeof ledgerEntry.amountMinor | SQL<boolean>,
   paymentIntentId: AnyColumn,
   institutionId: AnyColumn,
+  stamped: boolean,
 ) =>
   db
     .select({ value: column })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
-    .where(and(unstampedRefund, eq(purchase.stripeReference, paymentIntentId), eq(purchase.institutionId, institutionId)))
+    .where(
+      and(
+        eq(ledgerEntry.type, "refund"),
+        stamped ? isNotNull(ledgerEntry.stripeReference) : isNull(ledgerEntry.stripeReference),
+        eq(purchase.stripeReference, paymentIntentId),
+        eq(purchase.institutionId, institutionId),
+      ),
+    )
     .limit(1);
 
 /** Unstamped refund rows of engagements bought through Stripe; one bought before Stripe has no `pi_` and never appears. */
