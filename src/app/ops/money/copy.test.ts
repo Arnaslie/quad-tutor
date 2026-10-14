@@ -15,6 +15,7 @@ const item = (overrides: Partial<DiscrepancyItem>): DiscrepancyItem => ({
   currency: "usd",
   detectedAt: new Date(0),
   ledgerEntryType: null,
+  ledgerEntryMinor: null,
   heldRefundMinor: null,
   engagement: null,
   canSettle: false,
@@ -137,11 +138,11 @@ test("a failed refund with no row of ours tells an unbooked payment from a Dashb
 });
 
 test("a refund that bounced after Stripe stamped it offers only resolving, while one refused unsent offers only recording", () => {
-  const failed = { kind: "refund_failed", stripeReference: "pi_1", ledgerEntryType: "refund", canSettle: true, paymentBooked: true } as const;
-  assert.deepEqual(explained(item({ ...failed, canResolve: true })), {
+  const failed = { kind: "refund_failed", stripeReference: "pi_1", ledgerEntryType: "refund", ledgerEntryMinor: 10_500, canSettle: true, paymentBooked: true } as const;
+  assert.deepEqual(explained(item({ ...failed, ledgerAmountMinor: 10_500, canResolve: true })), {
     title: "A refund to the student failed",
     body: "Stripe could not deliver the refund to the student, and nothing sends it again.",
-    note: "Pay them another way, then resolve this with a note on how you paid.",
+    note: "The package owes them $105.00. Pay them that another way, then resolve this with a note on how you paid.",
     settle: null,
   });
   assert.deepEqual(explained(item({ ...failed, canResolve: false })), {
@@ -150,6 +151,14 @@ test("a refund that bounced after Stripe stamped it offers only resolving, while
     note: "It stopped the refund to the student, which was never sent. Resolving would leave it unsent for good, so pay another way and record it here.",
     settle: RECORD,
   });
+});
+
+test("a booked Dashboard refund that bounced says what the package owes, not what the Dashboard refunded", () => {
+  const bounced = { kind: "refund_failed", stripeReference: "pi_1", ledgerEntryType: "refund", canSettle: true, paymentBooked: true } as const;
+  assert.equal(
+    explained(item({ ...bounced, ledgerAmountMinor: 5_000, ledgerEntryMinor: 10_500 })).note,
+    "The package owes them $105.00. Pay them that another way, then resolve this with a note on how you paid.",
+  );
 });
 
 test("a dispute card says what lifting the pause pays out", () => {

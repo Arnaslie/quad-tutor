@@ -321,7 +321,25 @@ export async function reconcileRefund(refund: Refund): Promise<RefundOutcome> {
       : await boughtWith(paymentIntentId);
   if (!ids) return "foreign";
   if (isLiveRefund(refund)) return "skipped";
-  await recordRefundFailure(ids, { refund, paymentIntentId, amountMinor: refund.amountMinor, currency: refund.currency });
+  // A Dashboard refund ops booked as the package refund: the flag names that row, so the row counts as unpaid.
+  const [booked] = await db
+    .select({ id: ledgerEntry.id })
+    .from(ledgerEntry)
+    .where(
+      and(
+        eq(ledgerEntry.type, "refund"),
+        eq(ledgerEntry.stripeReference, refund.id),
+        eq(ledgerEntry.engagementId, ids.engagementId),
+        eq(ledgerEntry.institutionId, ids.institutionId),
+      ),
+    );
+  await recordRefundFailure(ids, {
+    refund,
+    paymentIntentId,
+    amountMinor: refund.amountMinor,
+    currency: refund.currency,
+    ledgerEntryId: booked?.id,
+  });
   return "refund_failed";
 }
 

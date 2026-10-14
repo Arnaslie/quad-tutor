@@ -97,11 +97,11 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
             : `It holds the package's ${waiting} refund so it is not sent to the same card. If you paid the student that ${waiting} another way, record it, and the refund is marked paid and never sent. Resolving instead sends it to the same card.`),
     };
   }
-  if (item.kind === "refund_failed" && item.ledgerEntryType === "refund" && item.canResolve) {
+  if (item.kind === "refund_failed" && item.ledgerEntryType === "refund" && item.ledgerEntryMinor !== null && item.canResolve) {
     return {
       ...plain,
       body: "Stripe could not deliver the refund to the student, and nothing sends it again.",
-      note: "Pay them another way, then resolve this with a note on how you paid.",
+      note: `The package owes them ${formatMinor(item.ledgerEntryMinor, item.currency)}. Pay them that another way, then resolve this with a note on how you paid.`,
       settle: null,
     };
   }

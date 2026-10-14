@@ -42,6 +42,8 @@ export type DiscrepancyItem = {
   currency: string;
   detectedAt: Date;
   ledgerEntryType: LedgerType | null;
+  /** The amount of the row the flag names. A Dashboard refund booked onto that row may be for less. */
+  ledgerEntryMinor: number | null;
   /** What settling marks paid by hand: the package refund a failed Dashboard refund holds, once it is written. */
   heldRefundMinor: number | null;
   engagement: EngagementContext | null;
@@ -195,6 +197,7 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         currency: moneyDiscrepancy.currency,
         detectedAt: moneyDiscrepancy.detectedAt,
         ledgerEntryType: ledgerEntry.type,
+        ledgerEntryMinor: ledgerEntry.amountMinor,
         heldRefundMinor: heldRefund<number>(ledgerEntry.amountMinor),
         canSettle: settleable(),
         canResolve: sql<boolean>`not ${strandsRow()}`,
