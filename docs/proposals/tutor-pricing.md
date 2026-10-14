@@ -121,7 +121,7 @@ updating: "the 29th at $35 pays $2.00" and "caps on the 32nd" (`decisions.md:139
 
 ## PRs
 
-1. This proposal and the `decisions.md` edit. You merge it.
+1. This proposal and the `decisions.md` edit.
 2. Tutor-set rates. This has a schema migration, so merge-gate flags it and you merge
    it.
 3. The lower take after 10 sessions. It changes the take, so merge-gate flags it and

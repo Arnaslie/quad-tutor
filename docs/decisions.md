@@ -76,13 +76,18 @@ The refill books straight into one of the tutor's published open slots, with no
 accept step: the tutor already offered that hour, and one session commits them to
 nothing beyond it. A package needs the tutor's accept (see Renewals).
 
-**The take is 10% of each session, capped at $100 per tutor per term.** The session
-price stays $35 and the student pays nothing on top: a student booking fee was
-rejected because the student is already paying for the tutor. Once a tutor's platform
-share for a term reaches $100, they keep 100% for the rest of that term. This replaces
-the flat 22%, which was too high. At $35 a session the cap is reached on the 29th
-session — $1,000 of sessions, about $900 of it to the tutor. The ceiling is 100
-tutors × $100 × 3 terms ≈ $30k a year, before processing.
+**Tutors set their own rate for each course they tutor, between $25 and $50 a
+session. The take is 10% of each of a tutor's first 10 sessions and 5% after, capped
+at $100 per tutor per term.** The student pays the tutor's rate and nothing on top: a
+student booking fee was rejected because the student is already paying for the tutor.
+The price is fixed when the tutor accepts the request, or when a top-up's checkout is
+created, and a later rate change never re-prices it. Once a tutor's platform share for
+a term reaches $100, they keep 100% for the rest of that term. This replaces the flat
+22%, which was too high, and the fixed $35 price. At $35 a session the cap is reached
+on the 48th session. The 10-session count is lifetime, across all courses, and is read
+from the ledger at recognition. The rate is shown to students and is never a ranking
+input. The ceiling is 100 tutors × $100 × 3 terms ≈ $30k a year, before processing.
+Details and worked figures: `docs/proposals/tutor-pricing.md`.
 
 The cap is the disintermediation lever, not just a discount. The tutor with the most
 to gain from cash is the busy one, and past the cap that tutor's on-app sessions cost
@@ -138,10 +143,11 @@ drift:
   - Nothing holds the tutor while waiting on an engagement for update, or on a
     session. `setDefaultLocation` (`tutoring/location.ts`) also takes the tutor first.
 - **Rounding.** Integer minor units only:
-  `fee = min(floor(session × 1000 / 10000), max(0, 10000 − meter))`. Floor rounds in the
-  tutor's favour, and the session that crosses the line takes a partial fee (the 29th
-  at $35 pays $2.00), so the meter lands on exactly $100.00 and never over. A
-  through-final session ($31.50) pays $3.15 and caps on the 32nd.
+  `fee = min(floor(session × rateBp / 10000), max(0, 10000 − meter))`, where `rateBp`
+  is 1000 for a tutor's first 10 sessions and 500 after. Floor rounds in the tutor's
+  favour, and the session that crosses the line takes a partial fee (the 48th at $35
+  pays $0.25), so the meter lands on exactly $100.00 and never over. A through-final
+  session at $35 ($31.50) pays $3.15, then $1.57, and caps on the 54th.
 - **The platform absorbs card processing, before and after the cap.** "Keep 100%" is
   literally true. At Stripe's standard US card rate a $140 four-pack costs about $4.36
   to collect, roughly $1.10 a session: a third of the $3.50 fee before the cap and a
