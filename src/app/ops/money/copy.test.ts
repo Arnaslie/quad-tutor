@@ -161,7 +161,7 @@ test("a failed refund on a payment whose package refund is answered never asks o
   assert.deepEqual(explained(item({ kind: "refund_failed", stripeReference: "pi_1", canSettle: true, paymentBooked: true, packageRefundAnswered: true })), {
     title: "A refund to the student failed",
     body,
-    note: "It was made in the Stripe Dashboard, so no refund row names it. The package refund already went out or was paid by hand, so check the payment's history in Stripe before paying anything.",
+    note: "It was made in the Stripe Dashboard, so no refund row names it. The package refund already went out or was paid by hand, so check the payment's history in Stripe. If neither that refund nor this one reached the student, pay what is missing, then record it.",
     settle: RECORD,
   });
 });

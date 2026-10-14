@@ -595,7 +595,7 @@ test("a Dashboard refund that bounces after the held package refund was paid by 
   assert.deepEqual(explained(reopened), {
     title: "A refund to the student failed",
     body: "Stripe could not return this money to the student's card, usually because the card is closed or lost. Nothing sends it to that card again.",
-    note: "It was made in the Stripe Dashboard, so no refund row names it. The package refund already went out or was paid by hand, so check the payment's history in Stripe before paying anything.",
+    note: "It was made in the Stripe Dashboard, so no refund row names it. The package refund already went out or was paid by hand, so check the payment's history in Stripe. If neither that refund nor this one reached the student, pay what is missing, then record it.",
     settle: { label: "Record manual payment", pending: "Recording…" },
   });
 });

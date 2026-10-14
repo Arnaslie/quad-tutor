@@ -89,7 +89,7 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
       note:
         "It was made in the Stripe Dashboard, so no refund row names it. " +
         (item.packageRefundAnswered
-          ? "The package refund already went out or was paid by hand, so check the payment's history in Stripe before paying anything."
+          ? "The package refund already went out or was paid by hand, so check the payment's history in Stripe. If neither that refund nor this one reached the student, pay what is missing, then record it."
           : !waiting
           ? "The package has no refund waiting yet. Resolving or recording a manual payment both close this, and a refund the package owes later goes to the same card."
           : item.refund === "holding_stopped"
