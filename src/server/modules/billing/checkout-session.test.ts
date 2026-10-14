@@ -518,6 +518,33 @@ test("a stamped Session Stripe does not know is released and flagged, and its ev
   assert.deepEqual(await discrepancies(engagementId), [{ kind: "ledger_vs_stripe_charge", stripeReference: ghost, refundReference: null }]);
 });
 
+test("a checkout or refund whose metadata ids are not uuids, such as a smoke test's, is foreign instead of a 500", async () => {
+  const gateway = stripeGateway();
+  const smoke = { engagementId: `smoke-${run}`, institutionId: "smoke-campus" };
+  const session = await gateway.createCheckout({
+    ...smoke,
+    amountMinor: 3_500,
+    currency: "usd",
+    description: "smoke",
+    customerEmail: "smoke@example.test",
+    expiresAt: new Date(Date.now() + 35 * 60 * 1000),
+    successUrl: "http://localhost:3000/sessions",
+    cancelUrl: "http://localhost:3000/checkout/cancel",
+  });
+  const { paymentIntentId } = await fakeStripe.pay(session.id);
+  const foreign = { status: 200, outcome: "foreign", institutionId: null };
+  assert.deepEqual(await deliver(session.id), foreign);
+
+  const refund = (key: string, ledgerEntryId?: string) =>
+    gateway.refund({ paymentIntentId: paymentIntentId!, ...smoke, ledgerEntryId, amountMinor: 1_000, idempotencyKey: `smoke:${paymentIntentId}:${key}` });
+  const tagged = await refund("tagged", "smoke-row");
+  const failed = await fakeStripe.failRefund((await refund("failed")).id);
+  for (const [id, type] of [[tagged.id, "refund.updated"], [failed.id, "refund.failed"], [tagged.id, "charge.refunded"]] as const) {
+    const { payload, signature } = await fakeStripe.refundEvent(id, type);
+    assert.deepEqual(await handleStripeWebhook(payload, signature), foreign, type);
+  }
+});
+
 test("Connect events are ignored", async () => {
   const { engagementId, sessionId } = await opened();
   await fakeStripe.pay(sessionId);
