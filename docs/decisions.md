@@ -745,7 +745,10 @@ verification waits, and goes out once Stripe verifies it again.
 **CI and local dev run on a signed fake, not Stripe.** One gateway module is the only
 importer of `stripe`. Its fake signs real webhook events with the configured secret, so
 verification and idempotency are tested with no Stripe secret in CI. It is refused in
-production, like the email and proof-store fallbacks.
+production, like the email and proof-store fallbacks. One daily job is the exception:
+`stripe-smoke` runs the real gateway against test mode, and imports `stripe` itself only to
+charge `pm_card_visa` and to make the verified test account it transfers to, two things the
+app leaves to Stripe's hosted pages.
 
 **Ledger and Stripe are reconciled daily and never auto-corrected.** A divergence becomes a
 discrepancy, which pauses that engagement's transfers and goes to `/ops/money`. The
