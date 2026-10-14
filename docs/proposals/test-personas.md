@@ -1,8 +1,8 @@
 # Proposal: test users in production, in pre-built states
 
-Status: **proposal, not started; two questions open.** Written 2026-10-14 against
-`origin/main` at `701a296`. Nothing in `docs/decisions.md` changes until this is
-accepted. The exact new text is in its own section.
+Status: **accepted 2026-10-14, build started.** Written 2026-10-14 against
+`origin/main` at `701a296`. The accepted rule is in `docs/decisions.md` ("Test users
+in production carry fixture money until launch").
 
 ## The problem
 
@@ -16,7 +16,7 @@ time to pass makes those states untestable before launch.
 
 1. Testing happens in production. There is no staging (`decisions.md`,
    Environments), and every production account is a test account today
-   (`decisions.md:795-800`).
+   (`decisions.md`, "Data from before Stripe is test data").
 2. Test users sign in with plus-aliases of the user's own inbox,
    `arnutislie12+<persona>@gmail.com`.
 3. Test users make real transactions against Stripe **test mode**: buying a follow-up
@@ -37,7 +37,7 @@ time to pass makes those states untestable before launch.
 - **The fake payment is refused in production** (`buy-and-pay.ts:5-26`), on purpose,
   and stays refused.
 - **The transfer sweep never pays out a package with no Stripe reference**
-  (`decisions.md:800-802`).
+  (`decisions.md`, "Data from before Stripe is test data").
 
 ## The design
 
@@ -74,7 +74,7 @@ package for real, then ends it.
   engagement between personas. Anywhere else, it is a violation.
 - **The wipe.** Before launch, deleting everything under `persona_` users removes all
   fixture money in one step, along with the rest of the test data
-  (`decisions.md:795-800`).
+  (`decisions.md`, "Data from before Stripe is test data").
 
 ### Running it
 
@@ -128,19 +128,18 @@ is built, not hard-coded.
 Personas work in pairs where a state has two sides: `tutor-finals` and
 `student-finals` share engagements, and so do `tutor-disputed` and its student.
 
-## Open questions
+## Answered by the user on 2026-10-14
 
-1. **Does the second tester use the same inbox?** This brief assumes yes: every
-   persona is a plus-alias of `arnutislie12@gmail.com`, and both testers read the
-   links there. A second inbox would mean a second set of personas.
-2. **The money-check exception.** `decisions.md:795-800` says the check needs "no
-   legacy carve-out". Fixture references are a carve-out, limited to personas and
-   removed by the wipe. This brief needs the user's sign-off on that.
+1. **Both testers use the same inbox.** Every persona is a plus-alias of
+   `arnutislie12@gmail.com`, and both testers read the links there. There is one set
+   of personas.
+2. **The money-check exception is signed off.** Fixture references are allowed,
+   limited to payments between personas and removed by the wipe at launch.
 
 ## New text for `docs/decisions.md`
 
-Add after "Data from before Stripe is test data, and it is cleared before launch"
-(`decisions.md:795-802`):
+Added after "Data from before Stripe is test data, and it is cleared before launch"
+(`decisions.md`, "Data from before Stripe is test data"):
 
 > **Test users in production carry fixture money until launch.** Personas
 > (`persona_<key>` users, plus-aliases of the owner's inbox) are built by a reset on
@@ -153,9 +152,8 @@ Add after "Data from before Stripe is test data, and it is cleared before launch
 
 ## PRs
 
-1. This proposal and the `decisions.md` edit. You merge it.
-2. The scenario pieces, pulled out of `db:demo`. Behavior-preserving, already
-   started (`refactor/scenario-pieces`).
+1. This proposal and the `decisions.md` edit.
+2. The scenario pieces, pulled out of `db:demo`. Behavior-preserving, merged in #76.
 3. The fixture payment step, its guards and the money-check exception. It touches
    money, so merge-gate flags it and you merge it.
 4. The tutor personas, after the pricing PRs land.

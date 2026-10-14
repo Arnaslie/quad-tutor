@@ -808,6 +808,16 @@ are deleted before go-live rather than corrected or exempted, so the check needs
 legacy carve-out. As a backstop, the transfer sweep never sends money for an engagement
 whose `package_purchase` has no Stripe reference.
 
+**Test users in production carry fixture money until launch.** Personas
+(`persona_<key>` users, plus-aliases of the owner's inbox) are built by a reset on
+`/ops` while `TEST_PERSONAS` is on. Their history is recorded with `fixture_`
+references and no Stripe charge, through the same functions as real money. Fixture
+money never reaches Stripe: the transfer sweep and refunds refuse `fixture_`
+references, and the money check accepts them only between personas. Everything a
+tester does is real Stripe test-mode money. At launch, `TEST_PERSONAS` is removed and
+every `persona_` user is deleted. Both testers sign in through the one inbox. Decided
+by the user on 2026-10-14.
+
 **Campus membership is gated on `crimson.ua.edu`**, the UA *student* domain, matched
 against `institution.email_domain`. One domain per institution: supporting several
 means that column stops being a single text field, which is not worth doing before a
