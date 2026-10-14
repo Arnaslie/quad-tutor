@@ -61,7 +61,8 @@ export const FORFEITED_PREFIX = "forfeited:";
  * One PaymentIntent never carries two refund rows: it is one engagement's purchase, with one refund.
  * A row failing, or a refund the flag has not recorded failing, on a flag ops already resolved reopens it at that
  * amount: the money it names is news. The reconciliation replays every failed refund on the PaymentIntent each
- * day, so which refunds already failed is told apart by their ids, never by an amount.
+ * day, so which refunds already failed is told apart by their ids, never by an amount. A reopen keeps ops' last
+ * note unless the news is a row failing, so an answered package refund is told apart from one still owed.
  */
 export async function recordRefundFailure(
   ids: Ids,
@@ -98,7 +99,7 @@ export async function recordRefundFailure(
         detectedAt: onNews(sql`now()`, moneyDiscrepancy.detectedAt),
         resolvedAt: onNews(sql`null`, moneyDiscrepancy.resolvedAt),
         resolvedByUserId: onNews(sql`null`, moneyDiscrepancy.resolvedByUserId),
-        resolutionNote: onNews(sql`null`, moneyDiscrepancy.resolutionNote),
+        resolutionNote: onNews(sql`case when excluded.ledger_entry_id is null then ${moneyDiscrepancy.resolutionNote} end`, moneyDiscrepancy.resolutionNote),
         failedRefundIds: sql`case when ${moneyDiscrepancy.failedRefundIds} @> excluded.failed_refund_ids
           then ${moneyDiscrepancy.failedRefundIds} else ${moneyDiscrepancy.failedRefundIds} || excluded.failed_refund_ids end`,
       },

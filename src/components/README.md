@@ -190,7 +190,7 @@ fifth surface goes behind one of these, not beside them.
 |---|---|
 | student | `/courses`, `/courses/[offeringId]`, `/requests`, `/sessions`, `/sessions/[id]` |
 | tutor | `/tutor`, `/tutor/courses`, `/tutor/availability`, `/tutor/sessions` |
-| ops | `/ops/verifications`, `/ops/reports` |
+| ops | `/ops/verifications`, `/ops/reports`, `/ops/money` |
 
 `/messages` sits outside both groups, since one user can be on either side of a
 thread. It reaches every surface through a header icon with an unread count

@@ -688,7 +688,11 @@ holds the package refund again. The flag records the id of every refund whose fa
 carries in `failed_refund_ids`, and only a refund not in that list is news: the
 reconciliation replays every failed refund on the PaymentIntent each day, so an amount
 cannot tell a new failure from an old one, and two failures of different amounts would
-reopen the flag every day. Ops pays the
+reopen the flag every day. A reopen keeps the note ops resolved it with, unless the news
+is a row of ours failing. So a flag that names the package refund and still carries a note
+was answered after that refund failed, and its card does not ask ops to pay it again. A
+newest-failure test cannot tell this: a Dashboard refund that bounces before ops answers
+would read as answered. Ops pays the
 student another way and records it with `recordManualSettlement` in `billing/ops.ts`
 (formerly `recordManualRefund`), which resolves the discrepancy and, when it names an
 unstamped refund or transfer row, stamps that row `manual:<discrepancy id>` in the same
