@@ -62,7 +62,7 @@ async function smokeAccount(stripe: Stripe): Promise<string> {
       },
       tos_acceptance: { date: Math.floor(Date.now() / 1000), ip: "127.0.0.1" },
       metadata: { tutor_profile_id: ACCOUNT_TAG },
-    }, { idempotencyKey: "stripe-smoke-account" });
+    });
     id = account.id;
     console.log(`ok  created a test account tagged ${ACCOUNT_TAG}`);
   }
