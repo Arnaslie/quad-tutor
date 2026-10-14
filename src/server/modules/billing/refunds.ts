@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 import { db } from "@/server/db";
-import { ledgerEntry } from "@/server/db/schema";
+import { engagement, ledgerEntry } from "@/server/db/schema";
 
 import { withLease } from "./lease";
 import {
@@ -302,14 +302,24 @@ async function boughtWith(paymentIntentId: string): Promise<Ids | undefined> {
 const uuidOrNull = z.uuid().nullable().catch(null);
 const refundIds = z.object({ ledgerEntryId: uuidOrNull, engagementId: uuidOrNull, institutionId: uuidOrNull });
 
-/** Applies what Stripe says of one refund now: stamps our row, or flags a failure. */
-export async function reconcileRefund(refund: Refund): Promise<RefundOutcome> {
+/** The pair refundPayment tags on a payment no package booked, trusted only when it names one of our engagements on that campus. */
+async function ourEngagement(ids: Ids): Promise<Ids | undefined> {
+  const [row] = await db
+    .select({ engagementId: engagement.id, institutionId: engagement.institutionId })
+    .from(engagement)
+    .where(and(eq(engagement.id, ids.engagementId), eq(engagement.institutionId, ids.institutionId)));
+  return row;
+}
+
+type Reconciled = { outcome: RefundOutcome; institutionId: string | null };
+
+/** Applies what Stripe says of one refund now: stamps our row, or flags a failure on the campus whose payment it was. */
+export async function reconcileRefund(refund: Refund): Promise<Reconciled> {
   const { paymentIntentId } = refund;
-  if (!paymentIntentId) return "foreign";
+  if (!paymentIntentId) return { outcome: "foreign", institutionId: null };
   const { ledgerEntryId, engagementId, institutionId } = refundIds.parse(refund);
 
-  if (ledgerEntryId) {
-    if (!engagementId || !institutionId) return "foreign";
+  if (ledgerEntryId && engagementId && institutionId) {
     const [row] = await db
       .select({
         id: ledgerEntry.id,
@@ -326,14 +336,17 @@ export async function reconcileRefund(refund: Refund): Promise<RefundOutcome> {
           eq(ledgerEntry.type, "refund"),
         ),
       );
-    if (!row) return "foreign";
-    if (row.reference !== null && row.reference !== refund.id) return "skipped";
-    return settle({ engagementId, institutionId, ...row, paymentIntentId }, refund);
+    if (row) {
+      if (row.reference !== null && row.reference !== refund.id) return { outcome: "skipped", institutionId };
+      return { outcome: await settle({ engagementId, institutionId, ...row, paymentIntentId }, refund), institutionId };
+    }
   }
 
-  const ids = engagementId && institutionId ? { engagementId, institutionId } : await boughtWith(paymentIntentId);
-  if (!ids) return "foreign";
-  if (isLiveRefund(refund)) return "skipped";
+  const ids =
+    (await boughtWith(paymentIntentId)) ??
+    (engagementId && institutionId ? await ourEngagement({ engagementId, institutionId }) : undefined);
+  if (!ids) return { outcome: "foreign", institutionId: null };
+  if (isLiveRefund(refund)) return { outcome: "skipped", institutionId: ids.institutionId };
   // A Dashboard refund ops booked as the package refund: the flag names that row, so the row counts as unpaid.
   const [booked] = await db
     .select({ id: ledgerEntry.id })
@@ -353,7 +366,7 @@ export async function reconcileRefund(refund: Refund): Promise<RefundOutcome> {
     currency: refund.currency,
     ledgerEntryId: booked?.id,
   });
-  return "refund_failed";
+  return { outcome: "refund_failed", institutionId: ids.institutionId };
 }
 
 export const REFUND_EVENTS = new Set(["charge.refunded", "refund.updated", "refund.failed", "charge.refund.updated"]);
@@ -362,12 +375,11 @@ export const REFUND_EVENTS = new Set(["charge.refunded", "refund.updated", "refu
 export async function handleRefundEvent(
   type: string,
   objectId: string,
-): Promise<{ outcome: RefundOutcome; institutionId: string | null }> {
+): Promise<Reconciled> {
   const gateway = stripeGateway();
   const refunds = type === "charge.refunded" ? await gateway.chargeRefunds(objectId) : [await gateway.retrieveRefund(objectId)];
-  const outcomes: RefundOutcome[] = [];
-  for (const refund of refunds) outcomes.push(await reconcileRefund(refund));
-  const outcome = (["refund_failed", "refunded", "skipped"] as const).find((o) => outcomes.includes(o)) ?? "foreign";
-  const institutionId = refunds.map((r) => refundIds.parse(r).institutionId).find(Boolean) ?? null;
-  return { outcome, institutionId };
+  const reconciled: Reconciled[] = [];
+  for (const refund of refunds) reconciled.push(await reconcileRefund(refund));
+  const outcome = (["refund_failed", "refunded", "skipped"] as const).find((o) => reconciled.some((r) => r.outcome === o)) ?? "foreign";
+  return { outcome, institutionId: reconciled.map((r) => r.institutionId).find(Boolean) ?? null };
 }

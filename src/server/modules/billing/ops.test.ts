@@ -337,7 +337,7 @@ test("a second failed Dashboard refund after ops resolved the first reopens the 
 
   const second = await fakeStripe.dashboardRefund(paymentIntentId, 3_000);
   await fakeStripe.failRefund(second.id);
-  assert.deepEqual(await deliver(await fakeStripe.refundEvent(second.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: null });
+  assert.deepEqual(await deliver(await fakeStripe.refundEvent(second.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: w.institutionId });
   assert.deepEqual(await flag(flagId), { resolved: false, note: "card replaced", by: null });
   assert.deepEqual((await moneyForOperator(ops)).discrepancies.map((d) => [d.id, d.ledgerAmountMinor]), [[flagId, 3_000]]);
   await endPackage({ actor, engagementId });
@@ -361,7 +361,7 @@ test("a failed refund hand-tagged with ids that are not uuids on a booked paymen
     idempotencyKey: `hand-tagged:${paymentIntentId}`,
   });
   await fakeStripe.failRefund(tagged.id);
-  const failed = { status: 200, outcome: "refund_failed", institutionId: null };
+  const failed = { status: 200, outcome: "refund_failed", institutionId: w.institutionId };
   assert.deepEqual(await deliver(await fakeStripe.refundEvent(tagged.id, "refund.failed")), failed);
 
   const flags = () =>
@@ -607,7 +607,7 @@ test("a Dashboard refund ops booked as the package refund that then bounces name
   assert.deepEqual([row.amountMinor, row.stripeReference], [10_500, dashboard.id]);
 
   await fakeStripe.failRefund(dashboard.id);
-  assert.deepEqual(await deliver(await fakeStripe.refundEvent(dashboard.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: null });
+  assert.deepEqual(await deliver(await fakeStripe.refundEvent(dashboard.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: w.institutionId });
   const [failed] = (await moneyForOperator(ops)).discrepancies;
   const [named] = await db.select({ ledgerEntryId: moneyDiscrepancy.ledgerEntryId }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.id, failed.id));
   assert.equal(named.ledgerEntryId, row.id, "the flag names the row the Dashboard refund was booked onto");
