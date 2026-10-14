@@ -1,8 +1,8 @@
 # Proposal: tutor-set rates and a lower take after 10 sessions
 
-Status: **proposal, not started; every question answered.** Written 2026-10-14 against
-`origin/main` at `701a296`. Nothing in `docs/decisions.md` changes until this is
-accepted. The replacement text is in its own section.
+Status: **accepted 2026-10-14, build not started.** Written 2026-10-14 against
+`origin/main` at `701a296`. The accepted rule is in `docs/decisions.md` (Product,
+"Tutors set their own rate").
 
 ## The items
 
@@ -21,7 +21,7 @@ These two items ship as separate PRs, and rates go first. Both need the
 - **The price a student paid is already locked in.** `engagement.price_paid_minor`
   (`schema.ts:448`) stores what was charged. `perSessionMinor` (`pricing.ts:93`)
   derives each session's value from it. `recognise()`
-  (`engagements/confirmation.ts:25-51`) and `unusedRefundMinor` read that, never the
+  (`engagements/confirmation.ts:25-79`) and `unusedRefundMinor` read that, never the
   constant. A rate change can therefore never re-price a package someone has bought.
 - **Only quoting reads the constant.** `packageOptions()` and `topUpOption()`
   (`pricing.ts:35-67`) build every price shown to a student from
@@ -85,7 +85,7 @@ These two items ship as separate PRs, and rates go first. Both need the
 
 At 5% after the 10th session, and one term:
 
-| Rate | 1 session, tutor keeps | 10 sessions | Cap reached on |
+| Rate | 1 session, tutor keeps | 10 sessions | Cap reached on (first term) |
 |---|---|---|---|
 | $25 | $22.50 | $225.00 | 70th session |
 | $35 | $31.50 | $315.00 | 48th session |
@@ -98,26 +98,6 @@ $35 session takes $1.75, and processing costs about $1.10 a session
 (`decisions.md:146-148`), leaving about $0.65. At $25 the take is $1.25, about $0.15
 over processing. The user chose 5% on 2026-10-14. The lower take is the reason to stay
 on the app past the 10th session, the same lever as the cap.
-
-## Replacement text for `docs/decisions.md`
-
-Replace the first paragraph under "The take is 10% of each session, capped at $100 per
-tutor per term" (`decisions.md:79-86`) with:
-
-> **Tutors set their own rate for each course they tutor, between $25 and $50 a
-> session. The take is 10% of each of a tutor's first 10 sessions and 5% after,
-> capped at $100 per tutor per term.** The
-> student pays the tutor's rate and nothing on top: a student booking fee was rejected
-> because the student is already paying for the tutor. The price is fixed when the
-> tutor accepts the request, or when a top-up's checkout is created, and a later rate
-> change never re-prices it. Once a tutor's platform share for a term reaches $100, they
-> keep 100% for the rest of that term. At $35 a session the cap is reached on the 48th
-> session. The 10-session count is lifetime, across all courses, and is read from the
-> ledger at recognition. A session's rate is fixed once it is written. The rate is shown
-> to students and is never a ranking input.
-
-The cap rules below that paragraph stay. Two examples in them name $35 and need
-updating: "the 29th at $35 pays $2.00" and "caps on the 32nd" (`decisions.md:139-143`).
 
 ## PRs
 
