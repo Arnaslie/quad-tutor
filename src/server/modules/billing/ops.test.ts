@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { engagement, ledgerEntry, moneyDiscrepancy, paymentDispute } from "@/server/db/schema";
@@ -339,7 +339,7 @@ test("a second failed Dashboard refund after ops resolved the first reopens the 
 
   const second = await fakeStripe.dashboardRefund(paymentIntentId, 3_000);
   await fakeStripe.failRefund(second.id);
-  assert.deepEqual(await deliver(await fakeStripe.refundEvent(second.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: null });
+  assert.deepEqual(await deliver(await fakeStripe.refundEvent(second.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: w.institutionId });
   assert.deepEqual(await flag(flagId), { resolved: false, note: "card replaced", by: null });
   assert.deepEqual((await moneyForOperator(ops)).discrepancies.map((d) => [d.id, d.ledgerAmountMinor]), [[flagId, 3_000]]);
   await endPackage({ actor, engagementId });
@@ -363,7 +363,7 @@ test("a failed refund hand-tagged with ids that are not uuids on a booked paymen
     idempotencyKey: `hand-tagged:${paymentIntentId}`,
   });
   await fakeStripe.failRefund(tagged.id);
-  const failed = { status: 200, outcome: "refund_failed", institutionId: null };
+  const failed = { status: 200, outcome: "refund_failed", institutionId: w.institutionId };
   assert.deepEqual(await deliver(await fakeStripe.refundEvent(tagged.id, "refund.failed")), failed);
 
   const flags = () =>
@@ -378,6 +378,127 @@ test("a failed refund hand-tagged with ids that are not uuids on a booked paymen
     assert.deepEqual(await deliver(await fakeStripe.refundEvent(tagged.id, type)), failed, type);
   }
   assert.deepEqual(await flags(), one, "replays are not news");
+});
+
+/** Refunds part of a payment under whatever metadata it is tagged with, fails it, and delivers the failure and a replay. */
+async function failedTagged(paymentIntentId: string, tags: { engagementId: string; institutionId: string; ledgerEntryId?: string }) {
+  const refund = await stripeGateway().refund({ paymentIntentId, ...tags, amountMinor: 2_000, idempotencyKey: `tagged:${randomUUID()}` });
+  await fakeStripe.failRefund(refund.id);
+  const results = [];
+  for (const type of ["refund.failed", "charge.refunded"] as const) results.push(await deliver(await fakeStripe.refundEvent(refund.id, type)));
+  return { refundId: refund.id, results };
+}
+
+const refundFlags = (where: SQL) =>
+  db
+    .select({
+      engagementId: moneyDiscrepancy.engagementId,
+      institutionId: moneyDiscrepancy.institutionId,
+      paymentIntentId: moneyDiscrepancy.stripeReference,
+      row: moneyDiscrepancy.ledgerEntryId,
+      refunds: moneyDiscrepancy.failedRefundIds,
+    })
+    .from(moneyDiscrepancy)
+    .where(and(eq(moneyDiscrepancy.kind, "refund_failed"), where))
+    .orderBy(moneyDiscrepancy.detectedAt);
+
+const foreignRefund = { status: 200, outcome: "foreign", institutionId: null };
+const failedOn = (institutionId: string) => ({ status: 200, outcome: "refund_failed", institutionId });
+
+test("a failed refund tagged with an engagement and campus we don't have is flagged through its PaymentIntent, or is foreign, never a 500", async () => {
+  const w = await world();
+  const { engagementId, paymentIntentId } = await delivered(w);
+  const stranger = { engagementId: randomUUID(), institutionId: randomUUID() };
+
+  const booked = await failedTagged(paymentIntentId, stranger);
+  assert.deepEqual(booked.results, [failedOn(w.institutionId), failedOn(w.institutionId)]);
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.stripeReference, paymentIntentId)), [
+    { engagementId, institutionId: w.institutionId, paymentIntentId, row: null, refunds: [booked.refundId] },
+  ]);
+
+  const session = await stripeGateway().createCheckout({
+    ...stranger,
+    amountMinor: 3_500,
+    currency: "usd",
+    description: "not ours",
+    customerEmail: "stranger@example.test",
+    expiresAt: new Date(Date.now() + 35 * 60_000),
+    successUrl: "http://localhost:3000/sessions",
+    cancelUrl: "http://localhost:3000/checkout/cancel",
+  });
+  const loose = (await fakeStripe.pay(session.id)).paymentIntentId!;
+  assert.deepEqual((await failedTagged(loose, stranger)).results, [foreignRefund, foreignRefund]);
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.stripeReference, loose)), []);
+});
+
+test("a failed refund on one campus's payment tagged with another campus's engagement is flagged on the payment's own campus", async () => {
+  const home = await world();
+  const away = await world();
+  const mine = await delivered(home);
+  const theirs = await delivered(away);
+
+  const { refundId, results } = await failedTagged(mine.paymentIntentId, { engagementId: theirs.engagementId, institutionId: away.institutionId });
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.stripeReference, mine.paymentIntentId)), [
+    { engagementId: mine.engagementId, institutionId: home.institutionId, paymentIntentId: mine.paymentIntentId, row: null, refunds: [refundId] },
+  ]);
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.institutionId, away.institutionId)), [], "nothing lands on the other campus");
+  assert.deepEqual(results, [failedOn(home.institutionId), failedOn(home.institutionId)]);
+});
+
+test("a refund tagged with one campus's engagement and another campus's id is never flagged as that mix", async () => {
+  const home = await world();
+  const away = await world();
+  const { engagementId, paymentIntentId } = await delivered(home);
+
+  const booked = await failedTagged(paymentIntentId, { engagementId, institutionId: away.institutionId });
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.stripeReference, paymentIntentId)), [
+    { engagementId, institutionId: home.institutionId, paymentIntentId, row: null, refunds: [booked.refundId] },
+  ]);
+  assert.deepEqual(booked.results, [failedOn(home.institutionId), failedOn(home.institutionId)]);
+
+  const held = await checkingOut(home);
+  const unbookedPayment = (await fakeStripe.pay(held.checkoutSessionId)).paymentIntentId!;
+  const mixed = await failedTagged(unbookedPayment, { engagementId: held.engagementId, institutionId: away.institutionId });
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.stripeReference, unbookedPayment)), []);
+  assert.deepEqual(mixed.results, [foreignRefund, foreignRefund]);
+
+  const own = await failedTagged(unbookedPayment, { engagementId: held.engagementId, institutionId: home.institutionId });
+  assert.deepEqual(own.results, [failedOn(home.institutionId), failedOn(home.institutionId)], "an unbooked payment's own pair still decides");
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.stripeReference, unbookedPayment)), [
+    { engagementId: held.engagementId, institutionId: home.institutionId, paymentIntentId: unbookedPayment, row: null, refunds: [own.refundId] },
+  ]);
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.institutionId, away.institutionId)), []);
+});
+
+test("a failed refund on our own payment tagged with a ledger id that names no row of ours is flagged through its PaymentIntent, once", async () => {
+  const w = await world();
+  const { engagementId, paymentIntentId } = await delivered(w);
+  const { refundId, results } = await failedTagged(paymentIntentId, { engagementId, institutionId: w.institutionId, ledgerEntryId: randomUUID() });
+  assert.deepEqual(results, [failedOn(w.institutionId), failedOn(w.institutionId)]);
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.stripeReference, paymentIntentId)), [
+    { engagementId, institutionId: w.institutionId, paymentIntentId, row: null, refunds: [refundId] },
+  ]);
+});
+
+test("a failed refund on one campus's payment tagged with another campus's real refund row is flagged on the payment's campus and stamps nothing", async () => {
+  const home = await world();
+  const away = await world();
+  const mine = await delivered(home);
+  await endPackage({ actor: mine.actor, engagementId: mine.engagementId });
+  const [unsent] = await rows(mine.engagementId, "refund");
+  const theirs = await delivered(away);
+
+  const { refundId, results } = await failedTagged(theirs.paymentIntentId, {
+    ledgerEntryId: unsent.id,
+    engagementId: mine.engagementId,
+    institutionId: home.institutionId,
+  });
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.stripeReference, theirs.paymentIntentId)), [
+    { engagementId: theirs.engagementId, institutionId: away.institutionId, paymentIntentId: theirs.paymentIntentId, row: null, refunds: [refundId] },
+  ]);
+  assert.deepEqual((await rows(mine.engagementId, "refund")).map((r) => r.stripeReference), [null], "the tagged campus's refund row stays unsent");
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.institutionId, home.institutionId)), [], "nothing lands on the tagged campus");
+  assert.deepEqual(results, [failedOn(away.institutionId), failedOn(away.institutionId)]);
 });
 
 test("a held package refund Stripe stamps while ops settles it refuses the settlement", async () => {
@@ -509,7 +630,7 @@ test("a Dashboard refund ops booked as the package refund that then bounces name
   assert.deepEqual([row.amountMinor, row.stripeReference], [10_500, dashboard.id]);
 
   await fakeStripe.failRefund(dashboard.id);
-  assert.deepEqual(await deliver(await fakeStripe.refundEvent(dashboard.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: null });
+  assert.deepEqual(await deliver(await fakeStripe.refundEvent(dashboard.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: w.institutionId });
   const [failed] = (await moneyForOperator(ops)).discrepancies;
   const [named] = await db.select({ ledgerEntryId: moneyDiscrepancy.ledgerEntryId }).from(moneyDiscrepancy).where(eq(moneyDiscrepancy.id, failed.id));
   assert.equal(named.ledgerEntryId, row.id, "the flag names the row the Dashboard refund was booked onto");

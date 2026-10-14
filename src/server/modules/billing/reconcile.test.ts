@@ -82,7 +82,7 @@ test("a failed Dashboard refund is flagged by the webhook and the reconciliation
   const dashboard = await fakeStripe.dashboardRefund(paymentIntentId, 2_000);
   await fakeStripe.failRefund(dashboard.id);
 
-  assert.deepEqual(await deliver(await fakeStripe.refundEvent(dashboard.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: null });
+  assert.deepEqual(await deliver(await fakeStripe.refundEvent(dashboard.id, "refund.failed")), { status: 200, outcome: "refund_failed", institutionId: w.institutionId });
   const flagged = { kind: "refund_failed", engagementId, ledgerEntryId: null, stripeReference: paymentIntentId, ledgerAmountMinor: 2_000, stripeAmountMinor: 0, resolutionNote: null };
   assert.deepEqual(await flags(w.institutionId), [flagged]);
   assert.deepEqual(await reconcile(w), counts(1));
