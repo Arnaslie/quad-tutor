@@ -748,7 +748,9 @@ verification and idempotency are tested with no Stripe secret in CI. It is refus
 production, like the email and proof-store fallbacks. One daily job is the exception:
 `stripe-smoke` runs the real gateway against test mode, and imports `stripe` itself only to
 charge `pm_card_visa` and to make the verified test account it transfers to, two things the
-app leaves to Stripe's hosted pages.
+app leaves to Stripe's hosted pages. That account carries no `institution_id`, so it is
+invisible to the app: reconcile looks for orphaned accounts one campus id at a time, and the
+Connect webhook answers "foreign" to an account without a campus uuid.
 
 **Ledger and Stripe are reconciled daily and never auto-corrected.** A divergence becomes a
 discrepancy, which pauses that engagement's transfers and goes to `/ops/money`. The
