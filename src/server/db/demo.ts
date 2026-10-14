@@ -1,41 +1,22 @@
-import { and, eq, inArray, isNotNull, isNull, like, notInArray, sql } from "drizzle-orm";
-
 import { db } from "./index";
-import {
-  courseCodeAlias,
-  courseOffering,
-  engagement,
-  ledgerEntry,
-  matchRequest,
-  reliabilityEvent,
-  sessionBooking,
-  studentProfile,
-  term,
-  tutorCourse,
-  tutorProfile,
-  user,
-} from "./schema";
+import { cleanupByMarker } from "./scenarios/cleanup";
+import { openPackage, resolveTarget } from "./scenarios/packages";
+import { actorFor, tutorActorFor, userIdByEmail } from "./scenarios/people";
+import { bookSessions, moveIntoPast, sessionIdsInOrder } from "./scenarios/sessions";
 
 import { balanceFor } from "@/server/modules/billing/ledger";
 import { formatMinor } from "@/server/modules/billing/pricing";
-import { upcomingExams } from "@/server/modules/catalog/courses";
-import { buyPackage } from "@/server/modules/engagements/buy-and-pay";
 import {
   confirmAttendance,
   denyAttendance,
   releaseLapsedConfirmations,
 } from "@/server/modules/engagements/confirmation";
-import { slotsForRequest } from "@/server/modules/engagements/purchase";
-import { confirmationDeadline } from "@/server/modules/engagements/slots";
 import {
   sessionBoardForStudent,
   sessionBoardForTutor,
   type SessionBoard,
   type SessionListItem,
 } from "@/server/modules/engagements/reads";
-import { bookSession, slotsForEngagement } from "@/server/modules/engagements/scheduling";
-import type { Actor, TutorActor } from "@/server/modules/identity/actor";
-import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
 
 const MARKER = "db:demo";
 const STUDENT_NOTE = `Bringing last year's midterm [${MARKER}]`;
@@ -52,205 +33,9 @@ const SECOND_COURSE_CODE = "ST 260";
 const SECOND_SECTION = "001";
 const SECOND_TUTOR = "seed_priyanka-shah";
 
-async function actorFor(userId: string): Promise<Actor> {
-  const rows = await db
-    .select({
-      userId: user.id,
-      name: user.name,
-      email: user.email,
-      institutionId: studentProfile.institutionId,
-      studentProfileId: studentProfile.id,
-      tutorProfileId: tutorProfile.id,
-    })
-    .from(user)
-    .innerJoin(studentProfile, eq(studentProfile.userId, user.id))
-    .leftJoin(tutorProfile, eq(tutorProfile.userId, user.id))
-    .where(eq(user.id, userId))
-    .limit(1);
-
-  const actor = rows.at(0);
-  if (!actor) throw new Error(`no seeded user ${userId} — run npm run db:seed first`);
-  return actor;
-}
-
 async function studentUserId(): Promise<string> {
   const email = process.argv.at(2)?.trim().toLowerCase();
-  if (!email) return STUDENT;
-
-  const [row] = await db.select({ id: user.id }).from(user).where(eq(user.email, email));
-  if (!row) throw new Error(`no user ${email} — sign in on the app once first`);
-  return row.id;
-}
-
-async function tutorActorFor(userId: string): Promise<TutorActor> {
-  const actor = await actorFor(userId);
-  if (!actor.tutorProfileId) throw new Error(`${userId} has no tutor profile`);
-  return actor as TutorActor;
-}
-
-type Target = {
-  courseOfferingId: string;
-
-  tutorCourseIds: string[];
-  accepterTutorCourseId: string;
-};
-
-async function resolveTarget(cast: {
-  code: string;
-  section: string;
-
-  tutors: string[];
-}): Promise<Target> {
-  const offerings = await db
-    .select({ id: courseOffering.id, courseId: courseOffering.courseId })
-    .from(courseOffering)
-    .innerJoin(
-      courseCodeAlias,
-      and(
-        eq(courseCodeAlias.courseId, courseOffering.courseId),
-        isNull(courseCodeAlias.validToTermId),
-      ),
-    )
-    .innerJoin(term, eq(term.id, courseOffering.termId))
-    .where(
-      and(
-        eq(courseCodeAlias.code, cast.code),
-        eq(courseOffering.section, cast.section),
-        sql`current_date between ${term.startsOn} and ${term.endsOn}`,
-      ),
-    )
-    .limit(1);
-
-  const offering = offerings.at(0);
-  if (!offering) throw new Error(`no ${cast.code}-${cast.section} offering — seed first`);
-
-  const userIds = cast.tutors;
-  const rows = await db
-    .select({ id: tutorCourse.id, userId: tutorProfile.userId })
-    .from(tutorCourse)
-    .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
-    .where(
-      and(
-        eq(tutorCourse.courseId, offering.courseId),
-        eq(tutorCourse.status, "active"),
-        inArray(tutorProfile.userId, userIds),
-      ),
-    );
-
-  const byUser = new Map(rows.map((row) => [row.userId, row.id]));
-  const missing = userIds.filter((id) => !byUser.has(id));
-  if (missing.length > 0) {
-    throw new Error(`not tutoring ${cast.code}: ${missing.join(", ")} — seed first`);
-  }
-
-  return {
-    courseOfferingId: offering.id,
-    tutorCourseIds: userIds.map((id) => byUser.get(id)!),
-    accepterTutorCourseId: byUser.get(userIds[0])!,
-  };
-}
-
-async function cleanup(
-  actor: Actor,
-  targets: Target[],
-): Promise<{ engagements: number; requests: number }> {
-  const offeringIds = targets.map((target) => target.courseOfferingId);
-  const tutorCourseIds = targets.flatMap((target) => target.tutorCourseIds);
-
-  const ours = and(
-    eq(matchRequest.studentProfileId, actor.studentProfileId),
-    inArray(matchRequest.courseOfferingId, offeringIds),
-    inArray(matchRequest.tutorCourseId, tutorCourseIds),
-  );
-
-  return db.transaction(async (tx) => {
-    const marked = await tx
-      .selectDistinct({ id: sessionBooking.engagementId })
-      .from(sessionBooking)
-      .where(like(sessionBooking.studentNote, `%${MARKER}%`));
-
-    const fromRequests = await tx
-      .select({ id: engagement.id })
-      .from(engagement)
-      .innerJoin(matchRequest, eq(matchRequest.id, engagement.matchRequestId))
-      .where(ours);
-
-    const engagementIds = [
-      ...new Set([...marked, ...fromRequests].map((row) => row.id)),
-    ];
-
-    if (engagementIds.length > 0) {
-      const sessions = await tx
-        .select({ id: sessionBooking.id })
-        .from(sessionBooking)
-        .where(inArray(sessionBooking.engagementId, engagementIds));
-      const sessionIds = sessions.map((row) => row.id);
-
-      const requests = await tx
-        .select({ id: engagement.matchRequestId })
-        .from(engagement)
-        .where(
-          and(inArray(engagement.id, engagementIds), isNotNull(engagement.matchRequestId)),
-        );
-
-      if (sessionIds.length > 0) {
-        await tx
-          .delete(reliabilityEvent)
-          .where(inArray(reliabilityEvent.sessionId, sessionIds));
-      }
-      await tx.delete(ledgerEntry).where(inArray(ledgerEntry.engagementId, engagementIds));
-      await tx
-        .delete(sessionBooking)
-        .where(inArray(sessionBooking.engagementId, engagementIds));
-      await tx.delete(engagement).where(inArray(engagement.id, engagementIds));
-
-      const requestIds = requests
-        .map((row) => row.id)
-        .filter((id): id is string => id !== null);
-      if (requestIds.length > 0) {
-        await tx.delete(matchRequest).where(inArray(matchRequest.id, requestIds));
-      }
-    }
-
-    const attached = await tx
-      .select({ id: engagement.matchRequestId })
-      .from(engagement)
-      .where(isNotNull(engagement.matchRequestId));
-
-    const attachedIds = attached
-      .map((row) => row.id)
-      .filter((id): id is string => id !== null);
-
-    const stray = await tx
-      .delete(matchRequest)
-      .where(
-        and(ours, attachedIds.length > 0 ? notInArray(matchRequest.id, attachedIds) : undefined),
-      )
-      .returning({ id: matchRequest.id });
-
-    return { engagements: engagementIds.length, requests: stray.length };
-  });
-}
-
-async function moveIntoPast(params: {
-  engagementId: string;
-  sessionId: string;
-  hoursAgo: number;
-}): Promise<void> {
-  const scheduledAt = new Date(Date.now() - params.hoursAgo * 60 * 60 * 1000);
-
-  await db
-    .update(sessionBooking)
-    .set({
-      scheduledAt,
-      confirmationWindowEndsAt: confirmationDeadline(scheduledAt),
-    })
-    .where(
-      and(
-        eq(sessionBooking.id, params.sessionId),
-        eq(sessionBooking.engagementId, params.engagementId),
-      ),
-    );
+  return email ? userIdByEmail(email) : STUDENT;
 }
 
 function line(item: SessionListItem): string {
@@ -271,6 +56,16 @@ function printBoard(label: string, board: SessionBoard): void {
   }
 }
 
+async function printLedger(label: string, engagementId: string): Promise<void> {
+  const balance = await balanceFor(engagementId);
+  console.log(`\n  ledger — ${label}`);
+  console.log(`    paid        ${formatMinor(balance.paidMinor)}`);
+  console.log(`    recognised  ${formatMinor(balance.recognisedMinor)}`);
+  console.log(`    deferred    ${formatMinor(balance.deferredMinor)}`);
+  console.log(`    tutor owed  ${formatMinor(balance.tutorOwedMinor)}`);
+  console.log(`    refunded    ${formatMinor(balance.refundedMinor)}`);
+}
+
 async function main(): Promise<void> {
   const student = await actorFor(await studentUserId());
   const tutor = await tutorActorFor(ACCEPTING_TUTOR);
@@ -285,73 +80,31 @@ async function main(): Promise<void> {
     tutors: [SECOND_TUTOR],
   });
 
-  const removed = await cleanup(student, [target, secondTarget]);
+  const removed = await cleanupByMarker({
+    student,
+    targets: [target, secondTarget],
+    marker: MARKER,
+  });
   console.log(
     `\ncleaned up ${removed.engagements} previous demo engagement(s), ${removed.requests} stray request(s)`,
   );
 
-  const asked = await requestTutors({
-    actor: student,
-    courseOfferingId: target.courseOfferingId,
-    tutorCourseIds: target.tutorCourseIds,
-    kind: "exam_anchored",
+  const { engagementId, asked, anchor } = await openPackage({
+    student,
+    tutor,
+    target,
+    slotsNeeded: 4,
   });
   console.log(`${student.name} asked ${asked.created} tutors (cap ${asked.limit})`);
-
-  const pending = await db
-    .select({ id: matchRequest.id })
-    .from(matchRequest)
-    .where(
-      and(
-        eq(matchRequest.studentProfileId, student.studentProfileId),
-        eq(matchRequest.tutorCourseId, target.accepterTutorCourseId),
-        eq(matchRequest.status, "pending"),
-      ),
-    )
-    .limit(1);
-
-  const requestId = pending.at(0)?.id;
-  if (!requestId) throw new Error("no pending request for the accepting tutor");
-
-  await acceptRequest({ tutor, requestId });
   console.log(`${tutor.name} accepted — the other asks auto-withdrew`);
-
-  const slots = await slotsForRequest({ actor: student, requestId });
-  if (slots.length < 4) throw new Error(`only ${slots.length} slots available, need 4`);
-
-  const exams = await upcomingExams(target.courseOfferingId);
-  const anchor = exams.at(0) ?? null;
-
-  const { engagementId } = await buyPackage({
-    actor: student,
-    requestId,
-    kind: "exam_anchored",
-    anchorExamId: anchor?.id ?? null,
-    slotStartsAt: slots[0],
-  });
   console.log(
     `package purchased${anchor ? `, anchored to ${anchor.name} on ${anchor.occursOn}` : ""}`,
   );
 
-  const booked: string[] = [];
-  for (let i = 0; i < 3; i += 1) {
-    const open = await slotsForEngagement({ actor: student, engagementId });
-    const { sessionId } = await bookSession({
-      actor: student,
-      engagementId,
-      slotStartsAt: open[0],
-      studentNote: STUDENT_NOTE,
-    });
-    booked.push(sessionId);
-  }
+  await bookSessions({ student, engagementId, count: 3, studentNote: STUDENT_NOTE });
 
-  const all = await db
-    .select({ id: sessionBooking.id })
-    .from(sessionBooking)
-    .where(eq(sessionBooking.engagementId, engagementId))
-    .orderBy(sessionBooking.scheduledAt);
-
-  const [completed, disputed, awaiting] = all.map((row) => row.id);
+  const all = await sessionIdsInOrder(engagementId);
+  const [completed, disputed, awaiting] = all;
   console.log(`${all.length} sessions booked`);
 
   await moveIntoPast({ engagementId, sessionId: completed, hoursAgo: 6 });
@@ -373,78 +126,24 @@ async function main(): Promise<void> {
   console.log("session 3 → left unanswered (awaiting an answer from both sides)");
   console.log("session 4 → still upcoming");
 
-  const second = await autoReleasedPackage(student, secondTarget);
+  const secondTutor = await tutorActorFor(SECOND_TUTOR);
+  const second = await openPackage({
+    student,
+    tutor: secondTutor,
+    target: secondTarget,
+    slotsNeeded: 1,
+  });
+  const [lapsed] = await sessionIdsInOrder(second.engagementId);
+  await moveIntoPast({ engagementId: second.engagementId, sessionId: lapsed, hoursAgo: 26 });
+
+  const released = await releaseLapsedConfirmations();
+  console.log(`${secondTutor.name}: ${released} lapsed session(s) auto-released — paid on silence`);
 
   printBoard(`${student.name} (student)`, await sessionBoardForStudent(student));
   printBoard(`${tutor.name} (tutor)`, await sessionBoardForTutor(tutor));
 
   await printLedger(`${COURSE_CODE} with ${tutor.name}`, engagementId);
-  await printLedger(`${SECOND_COURSE_CODE} with ${second.tutorName}`, second.engagementId);
-}
-
-async function printLedger(label: string, engagementId: string): Promise<void> {
-  const balance = await balanceFor(engagementId);
-  console.log(`\n  ledger — ${label}`);
-  console.log(`    paid        ${formatMinor(balance.paidMinor)}`);
-  console.log(`    recognised  ${formatMinor(balance.recognisedMinor)}`);
-  console.log(`    deferred    ${formatMinor(balance.deferredMinor)}`);
-  console.log(`    tutor owed  ${formatMinor(balance.tutorOwedMinor)}`);
-  console.log(`    refunded    ${formatMinor(balance.refundedMinor)}`);
-}
-
-async function autoReleasedPackage(
-  student: Actor,
-  target: Target,
-): Promise<{ engagementId: string; tutorName: string }> {
-  const tutor = await tutorActorFor(SECOND_TUTOR);
-
-  await requestTutors({
-    actor: student,
-    courseOfferingId: target.courseOfferingId,
-    tutorCourseIds: target.tutorCourseIds,
-    kind: "exam_anchored",
-  });
-
-  const pending = await db
-    .select({ id: matchRequest.id })
-    .from(matchRequest)
-    .where(
-      and(
-        eq(matchRequest.studentProfileId, student.studentProfileId),
-        eq(matchRequest.tutorCourseId, target.accepterTutorCourseId),
-        eq(matchRequest.status, "pending"),
-      ),
-    )
-    .limit(1);
-
-  const requestId = pending.at(0)?.id;
-  if (!requestId) throw new Error(`no pending request for ${SECOND_TUTOR}`);
-
-  await acceptRequest({ tutor, requestId });
-
-  const slots = await slotsForRequest({ actor: student, requestId });
-  if (slots.length === 0) throw new Error(`${SECOND_TUTOR} has no open slots`);
-
-  const exams = await upcomingExams(target.courseOfferingId);
-  const { engagementId } = await buyPackage({
-    actor: student,
-    requestId,
-    kind: "exam_anchored",
-    anchorExamId: exams.at(0)?.id ?? null,
-    slotStartsAt: slots[0],
-  });
-
-  const [booking] = await db
-    .select({ id: sessionBooking.id })
-    .from(sessionBooking)
-    .where(eq(sessionBooking.engagementId, engagementId));
-
-  await moveIntoPast({ engagementId, sessionId: booking.id, hoursAgo: 26 });
-
-  const released = await releaseLapsedConfirmations();
-  console.log(`${tutor.name}: ${released} lapsed session(s) auto-released — paid on silence`);
-
-  return { engagementId, tutorName: tutor.name };
+  await printLedger(`${SECOND_COURSE_CODE} with ${secondTutor.name}`, second.engagementId);
 }
 
 main()
