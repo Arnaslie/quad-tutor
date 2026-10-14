@@ -298,18 +298,15 @@ async function boughtWith(paymentIntentId: string): Promise<Ids | undefined> {
   return bought;
 }
 
-const refundIds = z.object({
-  ledgerEntryId: z.uuid().nullable(),
-  engagementId: z.uuid().nullable(),
-  institutionId: z.uuid().nullable(),
-});
+/** An id that is not a uuid, such as one tagged by hand, counts as missing, so the PaymentIntent still decides. */
+const uuidOrNull = z.uuid().nullable().catch(null);
+const refundIds = z.object({ ledgerEntryId: uuidOrNull, engagementId: uuidOrNull, institutionId: uuidOrNull });
 
 /** Applies what Stripe says of one refund now: stamps our row, or flags a failure. */
 export async function reconcileRefund(refund: Refund): Promise<RefundOutcome> {
   const { paymentIntentId } = refund;
-  const parsed = refundIds.safeParse(refund);
-  if (!paymentIntentId || !parsed.success) return "foreign";
-  const { ledgerEntryId, engagementId, institutionId } = parsed.data;
+  if (!paymentIntentId) return "foreign";
+  const { ledgerEntryId, engagementId, institutionId } = refundIds.parse(refund);
 
   if (ledgerEntryId) {
     if (!engagementId || !institutionId) return "foreign";
@@ -371,6 +368,6 @@ export async function handleRefundEvent(
   const outcomes: RefundOutcome[] = [];
   for (const refund of refunds) outcomes.push(await reconcileRefund(refund));
   const outcome = (["refund_failed", "refunded", "skipped"] as const).find((o) => outcomes.includes(o)) ?? "foreign";
-  const institutionId = refunds.map((r) => refundIds.safeParse(r).data?.institutionId).find(Boolean) ?? null;
+  const institutionId = refunds.map((r) => refundIds.parse(r).institutionId).find(Boolean) ?? null;
   return { outcome, institutionId };
 }
