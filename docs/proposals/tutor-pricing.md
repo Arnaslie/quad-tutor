@@ -8,9 +8,9 @@ Status: **accepted 2026-10-14, build not started.** Written 2026-10-14 against
 
 Decided by the user on 2026-10-14, and taken as input here:
 
-1. Tutors set their own session rate. The fixed $35 price
-   (`decisions.md:79-80`, `SESSION_PRICE_MINOR` in `billing/pricing.ts:1`) goes.
-   Rates fall between $25 and $50 a session.
+1. Tutors set their own session rate. The fixed $35 price (`decisions.md`, Product,
+   the take; `SESSION_PRICE_MINOR` in `billing/pricing.ts:1`) goes. Rates fall
+   between $25 and $50 a session.
 2. The platform's cut drops from 10% to 5% once a tutor has completed 10 sessions.
 
 These two items ship as separate PRs, and rates go first. Both need the
@@ -70,7 +70,7 @@ These two items ship as separate PRs, and rates go first. Both need the
 - **Computed from the ledger, never a counter.** `recognise()` counts the tutor's
   earlier `session_earned` rows under the lock it already holds, and picks the rate.
   This follows the cap's own rule, a sum over the ledger rather than a counter that
-  can drift (`decisions.md:93-95`).
+  can drift (`decisions.md`, Product, the take).
 - **Fixed once written.** A session's fee never changes after recognition. Reaching
   10 does not re-price earlier sessions.
 - **The cap stays.** $100 per tutor per term, unchanged. The 11th-session rate only
@@ -93,11 +93,11 @@ At 5% after the 10th session, and one term:
 
 At $35, 32 sessions pay the tutor $1,046.50 and the platform $73.50.
 
-**After the 10th session the platform keeps little past card processing.** At 5%, a
-$35 session takes $1.75, and processing costs about $1.10 a session
-(`decisions.md:146-148`), leaving about $0.65. At $25 the take is $1.25, about $0.15
-over processing. The user chose 5% on 2026-10-14. The lower take is the reason to stay
-on the app past the 10th session, the same lever as the cap.
+**After the 10th session the platform keeps little past card processing.** At 5%, a $35
+session takes $1.75, and processing costs about $1.10 a session (`decisions.md`,
+Product, processing), leaving about $0.65. At $25 the take is $1.25 and processing about
+$0.80 a session, leaving about $0.45. The user chose 5% on 2026-10-14. The lower take is
+the reason to stay on the app past the 10th session, the same lever as the cap.
 
 ## PRs
 

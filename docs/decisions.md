@@ -76,18 +76,19 @@ The refill books straight into one of the tutor's published open slots, with no
 accept step: the tutor already offered that hour, and one session commits them to
 nothing beyond it. A package needs the tutor's accept (see Renewals).
 
-**Tutors set their own rate for each course they tutor, between $25 and $50 a
-session. The take is 10% of each of a tutor's first 10 sessions and 5% after, capped
-at $100 per tutor per term.** The student pays the tutor's rate and nothing on top: a
-student booking fee was rejected because the student is already paying for the tutor.
-The price is fixed when the tutor accepts the request, or when a top-up's checkout is
-created, and a later rate change never re-prices it. Once a tutor's platform share for
-a term reaches $100, they keep 100% for the rest of that term. This replaces the flat
-22%, which was too high, and the fixed $35 price. At $35 a session the cap is reached
-on the 48th session of a tutor's first term, and the 58th of a later one. The 10-session count is lifetime, across all courses, and is read
-from the ledger at recognition. The rate is shown to students and is never a ranking
-input. The ceiling is 100 tutors × $100 × 3 terms ≈ $30k a year, before processing.
-Details and worked figures: `docs/proposals/tutor-pricing.md`.
+**Tutors set their own rate for each course they tutor, between $25 and $50 a session.
+The take is 10% of each of a tutor's first 10 sessions and 5% after, capped at $100 per
+tutor per term.** The student pays the tutor's rate and nothing on top: a student
+booking fee was rejected because the student is already paying for the tutor. The price
+is fixed when the tutor accepts the request, or when a top-up's checkout is created, and
+a later rate change never re-prices it. Once a tutor's platform share for a term reaches
+$100, they keep 100% for the rest of that term. This replaces the flat 22%, which was
+too high, and the fixed $35 price. At $35 a session the cap is reached on the 48th
+session of a tutor's first term, and the 58th of a later one. The 10-session count is
+lifetime, across all courses, and is read from the ledger at recognition. The rate is
+shown to students and is never a ranking input. The ceiling is 100 tutors × $100 × 3
+terms ≈ $30k a year, before processing. Details and worked figures:
+`docs/proposals/tutor-pricing.md`.
 
 The cap is the disintermediation lever, not just a discount. The tutor with the most
 to gain from cash is the busy one, and past the cap that tutor's on-app sessions cost
@@ -151,8 +152,9 @@ drift:
 - **The platform absorbs card processing, before and after the cap.** "Keep 100%" is
   literally true. At Stripe's standard US card rate a $140 four-pack costs about $4.36
   to collect, roughly $1.10 a session: a third of the $3.50 fee in a tutor's first 10
-  sessions, about two thirds of the $1.75 after, and a straight loss past the cap, plus Connect's per-payout charge. Passing processing through
-  to capped tutors was the alternative, and was rejected to keep the promise simple.
+  sessions, about two thirds of the $1.75 after, and a straight loss past the cap, plus
+  Connect's per-payout charge. Passing processing through to capped tutors was the
+  alternative, and was rejected to keep the promise simple.
 - **The tutor sees their own meter; no student ever does.** The earnings page shows
   progress toward the cap ("$64 of $100 this term"), because the incentive only works
   if a busy tutor knows how close they are. Whether a tutor is capped says how busy
@@ -948,10 +950,11 @@ is help-seeking behavior rather than cost. **The initial market is students alre
 paying, not non-consumers.**
 
 **3. Get the real course codes and the CAS peer-tutor pay rate** from the UA contact.
-Known wage floor: UA on-campus ~$10/hr, America Reads/Counts $12/hr, athletics
-tutoring $10–17.50. Target roughly 2×: **$25–30/hr to the tutor, $30–40 session price.**
-The 20–25% take this originally targeted is superseded by 10%, then 5% after a tutor's 10th session, capped at $100 per
-tutor per term (see Product) — well under Wyzant (~34%) and Preply (~33%).
+Known wage floor: UA on-campus ~$10/hr, America Reads/Counts $12/hr, athletics tutoring
+$10–17.50. Target roughly 2×: **$25–30/hr to the tutor, $30–40 session price.** The
+20–25% take this originally targeted is superseded by 10%, then 5% after a tutor's 10th
+session, capped at $100 per tutor per term (see Product) — well under Wyzant (~34%) and
+Preply (~33%).
 
 **4. Clear pre-Stripe test data from production before launch.** Every account is a
 test account and no pre-Stripe purchase was charged (see Technical). Wipe it before
