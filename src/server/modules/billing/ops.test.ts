@@ -478,6 +478,27 @@ test("a failed refund on our own payment tagged with a ledger id that names no r
   ]);
 });
 
+test("a failed refund on one campus's payment tagged with another campus's real refund row is flagged on the payment's campus and stamps nothing", async () => {
+  const home = await world();
+  const away = await world();
+  const mine = await delivered(home);
+  await endPackage({ actor: mine.actor, engagementId: mine.engagementId });
+  const [unsent] = await rows(mine.engagementId, "refund");
+  const theirs = await delivered(away);
+
+  const { refundId, results } = await failedTagged(theirs.paymentIntentId, {
+    ledgerEntryId: unsent.id,
+    engagementId: mine.engagementId,
+    institutionId: home.institutionId,
+  });
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.stripeReference, theirs.paymentIntentId)), [
+    { engagementId: theirs.engagementId, institutionId: away.institutionId, paymentIntentId: theirs.paymentIntentId, row: null, refunds: [refundId] },
+  ]);
+  assert.deepEqual((await rows(mine.engagementId, "refund")).map((r) => r.stripeReference), [null], "the tagged campus's refund row stays unsent");
+  assert.deepEqual(await refundFlags(eq(moneyDiscrepancy.institutionId, home.institutionId)), [], "nothing lands on the tagged campus");
+  assert.deepEqual(results, [failedOn(away.institutionId), failedOn(away.institutionId)]);
+});
+
 test("a held package refund Stripe stamps while ops settles it refuses the settlement", async () => {
   const w = await world();
   const ops = await operator(w.institutionId);
