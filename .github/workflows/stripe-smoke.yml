@@ -1,0 +1,53 @@
+# Runs the real Stripe gateway against test mode once a day: a card payment, a partial
+# refund and a transfer to a test connected account, each read back. CI otherwise runs on
+# the fake, so this is the only check that the adapter still matches Stripe's API.
+name: stripe-smoke
+
+on:
+  schedule:
+    - cron: "23 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs at once could each create the tagged test account.
+concurrency:
+  group: stripe-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the key
+        id: key
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+        run: |
+          if [ -z "${STRIPE_SECRET_KEY}" ]; then
+            echo "::notice::STRIPE_TEST_SECRET_KEY is not set, so the Stripe smoke test is skipped. Add it under Settings > Secrets and variables > Actions."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [[ "${STRIPE_SECRET_KEY}" != sk_test_* ]]; then
+            echo "::error::STRIPE_TEST_SECRET_KEY is not a test-mode key (sk_test_). Refusing to run."
+            exit 1
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.run == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.run == 'true'
+        with:
+          node-version: 24
+          cache: npm
+      - if: steps.key.outputs.run == 'true'
+        run: npm ci
+      - name: Smoke test
+        if: steps.key.outputs.run == 'true'
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+        run: npm run stripe:smoke

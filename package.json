@@ -17,7 +17,8 @@
     "db:catalog": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/seed.ts --catalog",
     "db:demo": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/demo.ts",
     "db:studio": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs studio",
-    "merge-gate": "node ./scripts/merge-gate.mjs"
+    "merge-gate": "node ./scripts/merge-gate.mjs",
+    "stripe:smoke": "node --env-file-if-exists=.env.local --import tsx ./scripts/stripe-smoke.ts"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

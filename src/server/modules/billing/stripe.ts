@@ -5,7 +5,7 @@ import path from "node:path";
 
 import Stripe from "stripe";
 
-const API_VERSION = "2026-09-30.endive";
+export const API_VERSION = "2026-09-30.endive";
 const MIN_EXPIRY_SECONDS = 30 * 60;
 const MAX_EXPIRY_SECONDS = 24 * 60 * 60;
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
