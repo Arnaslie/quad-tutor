@@ -86,7 +86,7 @@ async function refuseMixed(tx: Tx, institutionId: string, people: People): Promi
   }
 
   if (mixed.length > 0) {
-    throw new ResetRefused(`Nothing was reset. A real account shares these rows with a test user. Ask them to cancel what they started, or ask someone with database access to clear the rows.\n${mixed.join("\n")}`);
+    throw new ResetRefused(`Nothing was reset. A real account shares these rows with a test user. Someone with database access has to clear them first.\n${mixed.join("\n")}`);
   }
 }
 
