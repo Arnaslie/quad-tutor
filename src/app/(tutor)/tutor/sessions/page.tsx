@@ -15,7 +15,7 @@ import {
 import { LATE_CANCEL_HOURS } from "@/server/modules/engagements/attendance";
 import { deliveredIfUnanswered, lapseCopy } from "@/server/modules/engagements/answer-outcome";
 import { payoutsFor, payoutsOf } from "@/server/modules/billing/connect";
-import { formatMinor, TAKE_RATE_BP } from "@/server/modules/billing/pricing";
+import { formatMinor, FULL_TAKE_SESSIONS, LOWER_TAKE_RATE_BP } from "@/server/modules/billing/pricing";
 import {
   earningsForTutor,
   feeCapProgressForTutor,
@@ -104,7 +104,7 @@ export default async function TutorSessionsPage() {
 }
 
 function FeeCapCard({ progress }: { progress: FeeCapProgress }) {
-  const { chargedMinor, capMinor, termName } = progress;
+  const { chargedMinor, capMinor, termName, sessionsEarned, rateBp } = progress;
   const capped = chargedMinor >= capMinor;
   const percent = Math.min(100, Math.round((chargedMinor / capMinor) * 100));
   const cap = formatMinor(capMinor);
@@ -134,8 +134,16 @@ function FeeCapCard({ progress }: { progress: FeeCapProgress }) {
       <p className="text-sm text-muted">
         {capped
           ? `You've hit the cap — you keep 100% for the rest of ${termName}.`
-          : `We take ${TAKE_RATE_BP / 100}% of each session until we've taken ${cap} this term. After that, you keep 100%.`}
+          : `We take ${rateBp / 100}% of each session until we've taken ${cap} this term. After that, you keep 100%.`}
       </p>
+      {sessionsEarned < FULL_TAKE_SESSIONS ? (
+        <p className="text-sm text-muted">
+          <span className="font-semibold text-foreground">
+            {sessionsEarned} of {FULL_TAKE_SESSIONS}
+          </span>{" "}
+          sessions to a lower fee. After your {FULL_TAKE_SESSIONS}th, we take {LOWER_TAKE_RATE_BP / 100}%.
+        </p>
+      ) : null}
     </Card>
   );
 }
