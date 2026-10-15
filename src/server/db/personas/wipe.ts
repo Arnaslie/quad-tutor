@@ -33,6 +33,8 @@ import {
 
 import { PERSONA_PREFIX, PERSONA_SECTION } from "@/server/modules/billing/fixtures";
 
+export class ResetRefused extends Error {}
+
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 type People = { userIds: string[]; studentIds: string[]; tutorCourseIds: string[] };
@@ -84,7 +86,7 @@ async function refuseMixed(tx: Tx, institutionId: string, people: People): Promi
   }
 
   if (mixed.length > 0) {
-    throw new Error(`Refusing to reset personas: these rows pair a persona with a real account. Clear them by hand first.\n${mixed.join("\n")}`);
+    throw new ResetRefused(`Nothing was reset. These rows pair a test user with a real account, so clear them by hand first.\n${mixed.join("\n")}`);
   }
 }
 

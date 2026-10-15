@@ -35,6 +35,7 @@ import {
   tutorProfile,
   user,
 } from "@/server/db/schema";
+import { holdingPersonas } from "@/server/db/personas/lock";
 import { asRequestedKind } from "@/server/modules/billing/pricing";
 import { tutorUser } from "@/server/modules/engagements/access";
 import { deliveredIfUnanswered } from "@/server/modules/engagements/answer-outcome";
@@ -731,7 +732,7 @@ export async function notifyMovedSessions(institutionId: string): Promise<number
 }
 
 export async function runNotifications(institutionId: string): Promise<number> {
-  return (
+  const sent = await holdingPersonas(institutionId, "send", async () =>
     (await notifyPendingRequests(institutionId)) +
     (await notifyAcceptedRequests(institutionId)) +
     (await notifySessionChanges(institutionId)) +
@@ -740,6 +741,7 @@ export async function runNotifications(institutionId: string): Promise<number> {
     (await notifyUpcomingSessions(institutionId)) +
     (await notifyCoveredSections(institutionId)) +
     (await notifyVerificationDecisions(institutionId)) +
-    (await notifyUnreadMessages(institutionId))
+    (await notifyUnreadMessages(institutionId)),
   );
+  return sent ?? 0;
 }
