@@ -44,12 +44,12 @@ export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings
     sql`${ledgerEntry.type} = 'tutor_transfer' and ${ledgerEntry.stripeReference} like ${`${prefix}%`}`;
   const rows = await db
     .select({
-      earnedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${accrued}), 0)::int`,
+      earnedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${accrued}), 0)::bigint`.mapWith(Number),
       transferredMinor: sql<number>`(
         coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${transfer("tr\\_")} or ${transfer(MANUAL_PREFIX)} or ${transfer(escapeLike(FIXTURE_TRANSFER_PREFIX))}), 0)
         - coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'transfer_reversal'), 0)
-      )::int`,
-      forfeitedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${transfer(FORFEITED_PREFIX)}), 0)::int`,
+      )::bigint`.mapWith(Number),
+      forfeitedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${transfer(FORFEITED_PREFIX)}), 0)::bigint`.mapWith(Number),
       sessionsDelivered: sql<number>`count(${ledgerEntry.sessionId}) filter (where ${accrued})::int`,
       currency: sql<string>`coalesce(max(${ledgerEntry.currency}) filter (where ${accrued}), 'usd')`,
     })

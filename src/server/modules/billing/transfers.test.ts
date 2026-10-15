@@ -428,3 +428,12 @@ test("money invariants hold on every campus after every transfer path", async ()
   assert.deepEqual(await sweep(w), { ...nothing, sent: 1 });
   for (const institutionId of allCampuses()) await assertMoneyInvariants(institutionId);
 });
+
+test("lifetime earnings past $21M still add up", async () => {
+  const w = await world();
+  const { engagementId } = await delivered(w);
+  await db.insert(ledgerEntry).values(
+    Array.from({ length: 22 }, () => ({ engagementId, institutionId: w.institutionId, type: "tutor_accrued" as const, amountMinor: 99_999_999 })),
+  );
+  assert.equal((await earningsForTutor(w.tutor)).earnedMinor, 2_200_003_128);
+});

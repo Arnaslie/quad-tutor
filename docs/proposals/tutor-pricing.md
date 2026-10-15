@@ -99,7 +99,8 @@ At $35, 32 sessions pay the tutor $1,046.50 and the platform $73.50.
 **After the 10th session the platform keeps little past card processing.** At 5%, a $35
 session takes $1.75, and processing costs about $1.10 a session (`decisions.md`,
 Product, processing), leaving about $0.65. At $25 the take is $1.25 and processing about
-$0.80 a session, leaving about $0.45. The user chose 5% on 2026-10-14. The lower take is
+$0.80 a session, leaving about $0.45. Below about $14 a session, a single top-up
+at 5% costs more to collect than it takes; the user accepted that on 2026-10-15. The user chose 5% on 2026-10-14. The lower take is
 the reason to stay on the app past the 10th session, the same lever as the cap.
 
 ## PRs

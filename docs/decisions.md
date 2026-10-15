@@ -155,7 +155,11 @@ drift:
   to collect, roughly $1.10 a session: a third of the $3.50 fee in a tutor's first 10
   sessions, about two thirds of the $1.75 after, and a straight loss past the cap, plus
   Connect's per-payout charge. Passing processing through to capped tutors was the
-  alternative, and was rejected to keep the promise simple.
+  alternative, and was rejected to keep the promise simple. Low rates lose money too: a
+  single session pays for itself at about $4.25 a session at 10% and $14.30 at 5%, and a
+  four-pack at about $1.05 and $3.60. Below that, the platform pays to collect. The user
+  accepted this on 2026-10-15 rather than raise the $1 floor, since rates that low will be
+  rare.
 - **The tutor sees their own meter; no student ever does.** The earnings page shows
   progress toward the cap ("$64 of $100 this term"), because the incentive only works
   if a busy tutor knows how close they are. Whether a tutor is capped says how busy

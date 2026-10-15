@@ -160,7 +160,7 @@ export async function moneyFacts(institutionId: string): Promise<MoneyFacts> {
 }
 
 async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
-  const total = sql<number>`coalesce(sum(${ledgerEntry.amountMinor}), 0)::int`;
+  const total = sql<number>`coalesce(sum(${ledgerEntry.amountMinor}), 0)::bigint`.mapWith(Number);
   const count = sql<number>`count(${ledgerEntry.id})::int`;
   const persona = `${escapeLike(PERSONA_PREFIX)}%`;
 
