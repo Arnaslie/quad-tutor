@@ -1,4 +1,3 @@
-export const SESSION_PRICE_MINOR = 3_500;
 export const TAKE_RATE_BP = 1_000;
 export const TERM_FEE_CAP_MINOR = 10_000;
 
@@ -33,46 +32,40 @@ function discounted(listMinor: number, discountBp: number): number {
   return listMinor - Math.floor((listMinor * discountBp) / 10_000);
 }
 
-export function packageOptions(): PackageOption[] {
-  const examList = SESSION_PRICE_MINOR * EXAM_ANCHORED_SESSIONS;
-  const finalList = SESSION_PRICE_MINOR * THROUGH_FINAL_SESSIONS;
-  const finalPrice = discounted(finalList, THROUGH_FINAL_DISCOUNT_BP);
+const PACKAGE_SESSIONS: Record<PackageKind, number> = {
+  exam_anchored: EXAM_ANCHORED_SESSIONS,
+  through_final: THROUGH_FINAL_SESSIONS,
+  top_up: TOP_UP_SESSIONS,
+};
 
-  return [
-    {
-      kind: "exam_anchored",
-      sessions: EXAM_ANCHORED_SESSIONS,
-      priceMinor: examList,
-      perSessionMinor: Math.floor(examList / EXAM_ANCHORED_SESSIONS),
-      savingsMinor: 0,
-    },
-    {
-      kind: "through_final",
-      sessions: THROUGH_FINAL_SESSIONS,
-      priceMinor: finalPrice,
-      perSessionMinor: Math.floor(finalPrice / THROUGH_FINAL_SESSIONS),
-      savingsMinor: finalList - finalPrice,
-    },
-  ];
-}
-
-export function topUpOption(): PackageOption {
-  const price = SESSION_PRICE_MINOR * TOP_UP_SESSIONS;
+export function packageOption(kind: PackageKind, rateMinor: number): PackageOption {
+  const sessions = PACKAGE_SESSIONS[kind];
+  const listMinor = rateMinor * sessions;
+  const priceMinor =
+    kind === "through_final" ? discounted(listMinor, THROUGH_FINAL_DISCOUNT_BP) : listMinor;
   return {
-    kind: "top_up",
-    sessions: TOP_UP_SESSIONS,
-    priceMinor: price,
-    perSessionMinor: SESSION_PRICE_MINOR,
-    savingsMinor: 0,
+    kind,
+    sessions,
+    priceMinor,
+    perSessionMinor: Math.floor(priceMinor / sessions),
+    savingsMinor: listMinor - priceMinor,
   };
 }
 
-export function packageOption(kind: PackageKind): PackageOption {
-  const option = [...packageOptions(), topUpOption()].find(
-    (candidate) => candidate.kind === kind,
-  );
-  if (!option) throw new Error(`Unknown package kind: ${kind}`);
-  return option;
+export function packageOptions(rateMinor: number): PackageOption[] {
+  return REQUESTABLE_KINDS.map((kind) => packageOption(kind, rateMinor));
+}
+
+export function topUpOption(rateMinor: number): PackageOption {
+  return packageOption("top_up", rateMinor);
+}
+
+export function packagePriceRange(
+  kind: PackageKind,
+  ratesMinor: readonly number[],
+): { lowMinor: number; highMinor: number } {
+  const prices = ratesMinor.map((rateMinor) => packageOption(kind, rateMinor).priceMinor);
+  return { lowMinor: Math.min(...prices), highMinor: Math.max(...prices) };
 }
 
 export function bookAgainOpen(params: {
@@ -84,7 +77,7 @@ export function bookAgainOpen(params: {
 }
 
 export function packageSummary(kind: PackageKind): string {
-  const { sessions } = packageOption(kind);
+  const sessions = PACKAGE_SESSIONS[kind];
   if (kind === "through_final") return `${sessions} sessions, through the final`;
   if (kind === "exam_anchored") return `${sessions} sessions, up to the next exam`;
   return "One session";

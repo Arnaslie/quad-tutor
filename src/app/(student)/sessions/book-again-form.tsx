@@ -19,12 +19,14 @@ export function BookAgainForm({
   tutorName,
   location,
   currency,
+  rateMinor,
   slots,
 }: {
   tutorCourseId: string;
   tutorName: string;
   location: string | null;
   currency: string;
+  rateMinor: number;
   slots: string[];
 }) {
   const [kind, setKind] = useState<PackageKind>(BOOK_AGAIN_ORDER[0]);
@@ -38,7 +40,7 @@ export function BookAgainForm({
         {BOOK_AGAIN_ORDER.map((option) => (
           <PackageChoice
             key={option}
-            option={packageOption(option)}
+            option={packageOption(option, rateMinor)}
             currency={currency}
             selected={option === kind}
             onSelect={() => setKind(option)}
@@ -57,7 +59,7 @@ export function BookAgainForm({
             tutorCourseId={tutorCourseId}
             tutorName={tutorName}
             location={location}
-            priceMinor={packageOption("top_up").priceMinor}
+            priceMinor={packageOption("top_up", rateMinor).priceMinor}
             currency={currency}
             slots={slots}
           />

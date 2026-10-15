@@ -27,7 +27,7 @@ import {
 } from "@/server/modules/billing/pricing";
 import { CHECKOUT_HOLD_MINUTES } from "@/server/modules/billing/checkout-window";
 
-import type { Executor } from "./access";
+import { quotedRate, type Executor } from "./access";
 import { SESSION_MINUTES, remindedAtForNewBooking } from "./attendance";
 import { bookAgain } from "./reads";
 import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slots";
@@ -270,6 +270,7 @@ export async function purchasePackage(params: {
         id: matchRequest.id,
         status: matchRequest.status,
         requestedKind: matchRequest.requestedKind,
+        rateMinor: quotedRate,
         studentProfileId: matchRequest.studentProfileId,
         tutorCourseId: matchRequest.tutorCourseId,
         courseOfferingId: matchRequest.courseOfferingId,
@@ -327,7 +328,7 @@ export async function purchasePackage(params: {
         slotStartsAt: params.slotStartsAt,
       });
     }
-    const option = packageOption(kind);
+    const option = packageOption(kind, request.rateMinor);
 
     const open = await slotOpen(tx, {
       tutorProfileId: request.tutorProfileId,
@@ -383,8 +384,6 @@ export async function purchaseTopUp(params: {
   slotStartsAt: Date;
   studentNote?: string | null;
 }): Promise<PurchaseResult> {
-  const option = topUpOption();
-
   return db.transaction(async (tx) => {
     const claim = await tx
       .select({ tutorProfileId: tutorCourse.tutorProfileId })
@@ -400,6 +399,7 @@ export async function purchaseTopUp(params: {
     await lockTutor(tx, claim[0].tutorProfileId);
 
     const gate = await refillGate(tx, params);
+    const option = topUpOption(gate.sessionRateMinor);
 
     const pending = await openCheckouts(
       tx,

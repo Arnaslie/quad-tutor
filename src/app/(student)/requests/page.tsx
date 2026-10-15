@@ -268,7 +268,7 @@ async function PurchaseStep({
         location={actorRequest.tutorLocation}
         slots={slots.map((slot) => slot.toISOString())}
         exams={exams}
-        options={packageOptions()}
+        options={packageOptions(actorRequest.rateMinor)}
         requestedKind={actorRequest.requestedKind}
       />
     </div>
