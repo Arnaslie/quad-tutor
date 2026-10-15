@@ -7,6 +7,8 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
 const INBOX = { local: "arnutislie12", domain: "gmail.com" };
 
+export const PERSONA_SECTION = "persona";
+
 export type PersonaCampus = { institutionId: string; testRun?: string };
 
 export type PersonaSummary = { key: string; email: string; role: "tutor" | "student"; state: string };

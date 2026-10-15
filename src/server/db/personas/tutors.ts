@@ -166,15 +166,15 @@ async function offeringFor(institutionId: string, code: string) {
   return row;
 }
 
-async function lastEndedTerm(institutionId: string): Promise<string> {
+export async function lastEndedTerm(institutionId: string): Promise<{ id: string; endsOn: string }> {
   const [row] = await db
-    .select({ id: term.id })
+    .select({ id: term.id, endsOn: term.endsOn })
     .from(term)
     .where(and(eq(term.institutionId, institutionId), lt(term.endsOn, sql`current_date`)))
     .orderBy(desc(term.endsOn))
     .limit(1);
   if (!row) throw new Error("No past term to have taken the course in — run db:catalog first.");
-  return row.id;
+  return row;
 }
 
 export async function claimedTutor(
@@ -188,7 +188,7 @@ export async function claimedTutor(
   const { tutorCourseId } = await claimCourse({
     tutor,
     courseId: offering.courseId,
-    takenTermId: await lastEndedTerm(campus.institutionId),
+    takenTermId: (await lastEndedTerm(campus.institutionId)).id,
     takenUnderProfessorId: offering.professorId,
     gradeEarned: "A",
   });

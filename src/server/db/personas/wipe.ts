@@ -3,9 +3,11 @@ import { and, eq, inArray, like, or } from "drizzle-orm";
 import { db } from "../index";
 import { escapeLike } from "../like";
 import {
+  courseOffering,
   demandSignal,
   engagement,
   enrollment,
+  exam,
   institutionEmail,
   ledgerEntry,
   matchRequest,
@@ -30,6 +32,8 @@ import {
 } from "../schema";
 
 import { PERSONA_PREFIX } from "@/server/modules/billing/fixtures";
+
+import { PERSONA_SECTION } from "./people";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -162,6 +166,11 @@ export async function wipePersonas(institutionId: string): Promise<{ users: numb
     await tx.delete(matchRequest).where(ofPersonas(matchRequest));
     await tx.delete(demandSignal).where(inArray(demandSignal.studentProfileId, studentIds));
     await tx.delete(enrollment).where(inArray(enrollment.studentProfileId, studentIds));
+    const personaOfferings = and(eq(courseOffering.institutionId, institutionId), eq(courseOffering.section, PERSONA_SECTION));
+    await tx
+      .delete(exam)
+      .where(inArray(exam.courseOfferingId, tx.select({ id: courseOffering.id }).from(courseOffering).where(personaOfferings)));
+    await tx.delete(courseOffering).where(personaOfferings);
     await tx.delete(verificationFile).where(inArray(verificationFile.tutorCourseId, tutorCourseIds));
     await tx.delete(tutorCourse).where(inArray(tutorCourse.id, tutorCourseIds));
     await tx.delete(tutorAvailability).where(inArray(tutorAvailability.tutorProfileId, tutorIds));
