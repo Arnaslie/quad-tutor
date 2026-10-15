@@ -49,3 +49,7 @@ next-env.d.ts
 
 # local stand-in for the private Blob store (dev only)
 /.proof-store/
+
+# npm run test:e2e
+/test-results/
+/playwright-report/
