@@ -76,10 +76,9 @@ The refill books straight into one of the tutor's published open slots, with no
 accept step: the tutor already offered that hour, and one session commits them to
 nothing beyond it. A package needs the tutor's accept (see Renewals).
 
-**Tutors set their own rate for each course they tutor, in whole dollars, with no
-maximum.
-The take is 10% of each of a tutor's first 10 sessions and 5% after, capped at $100 per
-tutor per term.** The student pays the tutor's rate and nothing on top: a student
+**Tutors set their own rate for each course they tutor, in whole dollars from $1 to
+$200 a session. The take is 10% of each of a tutor's first 10 sessions and 5% after,
+capped at $100 per tutor per term.** The student pays the tutor's rate and nothing on top: a student
 booking fee was rejected because the student is already paying for the tutor. The price
 is fixed when the tutor accepts the request, or when a top-up's checkout is created, and
 a later rate change never re-prices it. Once a tutor's platform share for a term reaches
@@ -87,7 +86,9 @@ $100, they keep 100% for the rest of that term. This replaces the flat 22%, whic
 too high, and the fixed $35 price. At $35 a session the cap is reached on the 48th
 session of a tutor's first term, and the 58th of a later one. The 10-session count is
 lifetime, across all courses, and is read from the ledger at recognition. The rate is
-shown to students and is never a ranking input. The ceiling is 100 tutors × $100 × 3
+shown to students and is never a ranking input. The $200 ceiling is a fraud guard, not
+a market limit: without it, a stolen card and a colluding tutor could move large sums
+through payouts. The most the platform can earn is 100 tutors × $100 × 3
 terms ≈ $30k a year, before processing. Details and worked figures:
 `docs/proposals/tutor-pricing.md`.
 
