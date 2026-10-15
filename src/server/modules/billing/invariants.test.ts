@@ -158,3 +158,32 @@ test("a transfer on an engagement whose purchase never went through Stripe is fl
   assert.deepEqual(invariants({ ...healthy, engagements: [e(null)] }), ["transfers only from a Stripe purchase"]);
   assert.deepEqual(invariants({ ...healthy, engagements: [e("pi_test_seeded")] }), []);
 });
+
+test("fixture references pass only between personas, and a fixture purchase pays out only fixture transfers", () => {
+  const e = (betweenPersonas: boolean, references: Record<string, (string | null)[]>) => ({
+    id: "e",
+    status: "active" as const,
+    pricePaidMinor: 14_000,
+    betweenPersonas,
+    totals: { package_purchase: t(14_000), session_earned: t(3_500), tutor_accrued: t(3_150), platform_fee: t(350), tutor_transfer: t(3_150) },
+    references,
+  });
+  const fixture = { package_purchase: ["fixture_pi_1"], tutor_transfer: ["fixture_tr_1"] };
+  assert.deepEqual(invariants({ ...healthy, engagements: [e(true, fixture)] }), []);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e(false, fixture)] }), [
+    "fixture reference only between personas",
+    "fixture reference only between personas",
+  ]);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e(false, { package_purchase: ["pi_1"], tutor_transfer: ["fixture_tr_1"] })] }), [
+    "fixture reference only between personas",
+    "transfer reference is tr_, manual: or forfeited:",
+  ]);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e(true, { package_purchase: ["pi_1"], tutor_transfer: ["fixture_tr_1"] })] }), [
+    "transfer reference is tr_, manual: or forfeited:",
+  ]);
+  for (const transfer of ["tr_1", "manual:abc", null]) {
+    assert.deepEqual(invariants({ ...healthy, engagements: [e(true, { package_purchase: ["fixture_pi_1"], tutor_transfer: [transfer] })] }), [
+      "a fixture purchase pays out fixture_tr_",
+    ]);
+  }
+});

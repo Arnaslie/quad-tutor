@@ -1,17 +1,21 @@
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
+import { escapeLike } from "@/server/db/like";
 import {
   courseOffering,
   engagement,
   engagementStatus,
   ledgerEntry,
   ledgerEntryType,
+  studentProfile,
   tutorCourse,
+  tutorProfile,
 } from "@/server/db/schema";
 
 import { FULL_TAKE_SESSIONS, LOWER_TAKE_RATE_BP, TAKE_RATE_BP, TERM_FEE_CAP_MINOR } from "./pricing";
 import { FORFEITED_PREFIX, MANUAL_PREFIX } from "./discrepancy";
+import { FIXTURE_PAYMENT_PREFIX, FIXTURE_TRANSFER_PREFIX, PERSONA_PREFIX, isFixture } from "./fixtures";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type LedgerType = (typeof ledgerEntryType.enumValues)[number];
@@ -24,6 +28,7 @@ const FEE = "platform_fee" satisfies LedgerType;
 const REFUND = "refund" satisfies LedgerType;
 const TRANSFER = "tutor_transfer" satisfies LedgerType;
 const REVERSAL = "transfer_reversal" satisfies LedgerType;
+const REFERENCED: LedgerType[] = [PURCHASE, REFUND, TRANSFER, REVERSAL];
 
 const UNPAID: readonly EngagementStatus[] = ["pending_payment", "cancelled"];
 const CLOSED: readonly EngagementStatus[] = ["completed", "refunded", "cancelled"];
@@ -35,6 +40,7 @@ export type MoneyFacts = {
     id: string;
     status: EngagementStatus;
     pricePaidMinor: number;
+    betweenPersonas?: boolean;
     totals: Totals;
     references?: Partial<Record<LedgerType, (string | null)[]>>;
   }[];
@@ -72,15 +78,23 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
         flag("refund reference is re_ or manual:", subject, reference);
       }
     }
+    const fixturePurchase = references(PURCHASE).some((reference) => reference?.startsWith(FIXTURE_PAYMENT_PREFIX));
+    if (!e.betweenPersonas) {
+      for (const reference of REFERENCED.flatMap(references)) {
+        if (isFixture(reference)) flag("fixture reference only between personas", subject, String(reference));
+      }
+    }
     for (const reference of references(TRANSFER)) {
-      if (reference && !["tr_", MANUAL_PREFIX, FORFEITED_PREFIX].some((prefix) => reference.startsWith(prefix))) {
+      if (fixturePurchase) {
+        if (!reference?.startsWith(FIXTURE_TRANSFER_PREFIX)) flag("a fixture purchase pays out fixture_tr_", subject, String(reference));
+      } else if (reference && !["tr_", MANUAL_PREFIX, FORFEITED_PREFIX].some((prefix) => reference.startsWith(prefix))) {
         flag("transfer reference is tr_, manual: or forfeited:", subject, reference);
       }
     }
     for (const reference of references(REVERSAL)) {
       if (!reference?.startsWith("trr_")) flag("reversal reference is trr_", subject, String(reference));
     }
-    if (rows(e.totals, TRANSFER) > 0 && !references(PURCHASE).some((reference) => reference?.startsWith("pi_"))) {
+    if (rows(e.totals, TRANSFER) > 0 && !fixturePurchase && !references(PURCHASE).some((reference) => reference?.startsWith("pi_"))) {
       flag("transfers only from a Stripe purchase", subject, `${rows(e.totals, TRANSFER)} transfer rows`);
     }
     if (deferred < 0) flag("deferred >= 0", subject, `deferred ${deferred}`);
@@ -148,11 +162,20 @@ export async function moneyFacts(institutionId: string): Promise<MoneyFacts> {
 async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
   const total = sql<number>`coalesce(sum(${ledgerEntry.amountMinor}), 0)::int`;
   const count = sql<number>`count(${ledgerEntry.id})::int`;
+  const persona = `${escapeLike(PERSONA_PREFIX)}%`;
 
   const [engagements, byEngagement, bySession, tutorTerms, referenceRows] = await Promise.all([
     tx
-      .select({ id: engagement.id, status: engagement.status, pricePaidMinor: engagement.pricePaidMinor })
+      .select({
+        id: engagement.id,
+        status: engagement.status,
+        pricePaidMinor: engagement.pricePaidMinor,
+        betweenPersonas: sql<boolean>`${studentProfile.userId} like ${persona} and ${tutorProfile.userId} like ${persona}`,
+      })
       .from(engagement)
+      .innerJoin(studentProfile, eq(studentProfile.id, engagement.studentProfileId))
+      .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
+      .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
       .where(eq(engagement.institutionId, institutionId)),
     tx
       .select({ key: ledgerEntry.engagementId, type: ledgerEntry.type, minor: total, rows: count })
@@ -186,7 +209,7 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
       .where(
         and(
           eq(ledgerEntry.institutionId, institutionId),
-          inArray(ledgerEntry.type, [PURCHASE, REFUND, TRANSFER, REVERSAL]),
+          inArray(ledgerEntry.type, REFERENCED),
         ),
       ),
   ]);

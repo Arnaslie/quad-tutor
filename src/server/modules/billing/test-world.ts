@@ -54,6 +54,7 @@ const campuses: string[] = [];
 const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
 export type World = {
+  prefix: string;
   institutionId: string;
   offeringId: string;
   termId: string;
@@ -64,8 +65,8 @@ export type World = {
 };
 
 let people = 0;
-export async function person(institutionId: string): Promise<Actor> {
-  const id = `test_money_${run}_${(people += 1)}`;
+export async function person(institutionId: string, prefix = "test_money"): Promise<Actor> {
+  const id = `${prefix}_${run}_${(people += 1)}`;
   await db.insert(user).values({ id, name: id, email: `${id}@example.test`, emailVerified: true });
   users.push(id);
   const [profile] = await db.insert(studentProfile).values({ userId: id, institutionId }).returning({ id: studentProfile.id });
@@ -77,7 +78,7 @@ export async function operator(institutionId: string): Promise<OperatorActor> {
 }
 
 /** A campus of its own per test, so counts and the lease never mix, with a tutor Stripe has verified. */
-export async function world(): Promise<World> {
+export async function world(prefix = "test_money"): Promise<World> {
   const slug = `money-${run}-${campuses.length}`;
   const [inst] = await db
     .insert(institution)
@@ -90,7 +91,7 @@ export async function world(): Promise<World> {
   await db.insert(courseCodeAlias).values({ institutionId: inst.id, courseId: courseRow.id, code: courseCode });
   const [offering] = await db.insert(courseOffering).values({ institutionId: inst.id, courseId: courseRow.id, termId: now.id, section: "001" }).returning({ id: courseOffering.id });
 
-  const base = await person(inst.id);
+  const base = await person(inst.id, prefix);
   const [profile] = await db.insert(tutorProfile).values({ userId: base.userId, institutionId: inst.id }).returning({ id: tutorProfile.id });
   await db.insert(tutorAvailability).values(
     [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ tutorProfileId: profile.id, institutionId: inst.id, weekday, startMinute: 8 * 60, endMinute: 20 * 60 })),
@@ -103,12 +104,12 @@ export async function world(): Promise<World> {
   const accountId = await ensureConnectAccount(tutor);
   await fakeStripe.setAccount(accountId, "verified");
   assert.equal((await syncConnectAccount(accountId)).outcome, "kyc_synced");
-  return { institutionId: inst.id, offeringId: offering.id, termId: now.id, courseCode, tutor, tutorCourseId: claim.id, accountId };
+  return { prefix, institutionId: inst.id, offeringId: offering.id, termId: now.id, courseCode, tutor, tutorCourseId: claim.id, accountId };
 }
 
 /** A student whose request the tutor accepted, and the four-pack they would buy. */
-export async function accepted(w: World) {
-  const actor = await person(w.institutionId);
+export async function accepted(w: World, prefix = w.prefix) {
+  const actor = await person(w.institutionId, prefix);
   await requestTutors({ actor, courseOfferingId: w.offeringId, tutorCourseIds: [w.tutorCourseId], kind: "exam_anchored" });
   const [request] = await db
     .select({ id: matchRequest.id })
@@ -130,16 +131,19 @@ export async function checkingOut(w: World) {
   return { actor, engagementId: row.id, checkoutSessionId: row.sessionId! };
 }
 
+export async function firstSessionDelivered(w: World, actor: Actor, engagementId: string) {
+  const [session] = await db.select({ id: sessionBooking.id }).from(sessionBooking).where(eq(sessionBooking.engagementId, engagementId));
+  await db.update(sessionBooking).set({ scheduledAt: new Date(Date.now() - 3 * 3_600_000) }).where(eq(sessionBooking.id, session.id));
+  await confirmAttendance({ actor, sessionId: session.id });
+  assert.equal((await confirmAttendance({ actor: w.tutor, sessionId: session.id })).status, "completed");
+}
+
 /** Paid through the fake, its first session confirmed by both sides so `recognise()` accrues it. */
 export async function delivered(w: World) {
   const { actor, engagementId, checkoutSessionId } = await checkingOut(w);
   await fakeStripe.pay(checkoutSessionId);
   assert.equal((await syncCheckout(checkoutSessionId)).outcome, "fulfilled");
-
-  const [session] = await db.select({ id: sessionBooking.id }).from(sessionBooking).where(eq(sessionBooking.engagementId, engagementId));
-  await db.update(sessionBooking).set({ scheduledAt: new Date(Date.now() - 3 * 3_600_000) }).where(eq(sessionBooking.id, session.id));
-  await confirmAttendance({ actor, sessionId: session.id });
-  assert.equal((await confirmAttendance({ actor: w.tutor, sessionId: session.id })).status, "completed");
+  await firstSessionDelivered(w, actor, engagementId);
 
   const [paid] = await db
     .select({ pi: ledgerEntry.stripeReference })

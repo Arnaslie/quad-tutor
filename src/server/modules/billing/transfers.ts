@@ -7,6 +7,7 @@ import { engagement, ledgerEntry, moneyDiscrepancy, paymentDispute, tutorCourse,
 
 import { refreshKyc } from "./connect";
 import { ledgerRowBlocker, recordDiscrepancy, type Ids } from "./discrepancy";
+import { refuseFixture, type FixtureTransferReference } from "./fixtures";
 import type { KycStatus } from "./kyc";
 import { withLease } from "./lease";
 import { createOnce } from "./refunds";
@@ -274,6 +275,7 @@ async function send(row: Sending, retry: boolean, kyc: Kyc): Promise<Outcome> {
 
 /** A paused engagement's row is still stamped when Stripe has its transfer; only a new create waits on ops. */
 async function retry(row: Awaited<ReturnType<typeof unstampedRows>>[number], kyc: Kyc): Promise<Outcome | null> {
+  refuseFixture(row.paymentIntentId);
   const found = await ours(row);
   if (found) {
     await stamp(row, found.id);
@@ -286,20 +288,16 @@ async function retry(row: Awaited<ReturnType<typeof unstampedRows>>[number], kyc
   return send({ ...row, accountId: row.accountId, chargeId }, true, kyc);
 }
 
-async function decide(payee: Payee, kyc: Kyc): Promise<Outcome | null> {
-  if (!payee.accountId || (await kyc.check(payee)) !== "verified") return "waiting";
-  const chargeId = await chargeOf(payee);
-  if (!chargeId) return "failed";
-
-  const row = await db.transaction(async (tx) => {
-    const scope = and(eq(engagement.id, payee.engagementId), eq(engagement.institutionId, payee.institutionId));
+export function reserveTransfer(ids: Ids, stripeReference: FixtureTransferReference | null) {
+  return db.transaction(async (tx) => {
+    const scope = and(eq(engagement.id, ids.engagementId), eq(engagement.institutionId, ids.institutionId));
     const [locked] = await tx.select({ currency: engagement.currency }).from(engagement).where(scope).for("no key update");
     if (!locked) return null;
     // A separate statement after the lock: one statement's snapshot predates its own lock wait.
     const [due] = await tx
       .select({
-        owedMinor: owedMinor(payee.engagementId, payee.institutionId),
-        paused: paused(payee.engagementId, payee.institutionId),
+        owedMinor: owedMinor(ids.engagementId, ids.institutionId),
+        paused: paused(ids.engagementId, ids.institutionId),
       })
       .from(engagement)
       .where(scope);
@@ -307,11 +305,12 @@ async function decide(payee: Payee, kyc: Kyc): Promise<Outcome | null> {
     const [inserted] = await tx
       .insert(ledgerEntry)
       .values({
-        engagementId: payee.engagementId,
-        institutionId: payee.institutionId,
+        engagementId: ids.engagementId,
+        institutionId: ids.institutionId,
         type: "tutor_transfer",
         amountMinor: due.owedMinor,
         currency: locked.currency,
+        stripeReference,
       })
       .returning({
         id: ledgerEntry.id,
@@ -321,6 +320,15 @@ async function decide(payee: Payee, kyc: Kyc): Promise<Outcome | null> {
       });
     return inserted;
   });
+}
+
+async function decide(payee: Payee, kyc: Kyc): Promise<Outcome | null> {
+  refuseFixture(payee.paymentIntentId);
+  if (!payee.accountId || (await kyc.check(payee)) !== "verified") return "waiting";
+  const chargeId = await chargeOf(payee);
+  if (!chargeId) return "failed";
+
+  const row = await reserveTransfer(payee, null);
   if (!row) return null;
   return send({ ...payee, ...row, accountId: payee.accountId, chargeId }, false, kyc);
 }

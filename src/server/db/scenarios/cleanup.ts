@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, like, notInArray } from "drizzle-orm";
 
 import { db } from "../index";
+import { escapeLike } from "../like";
 import {
   engagement,
   ledgerEntry,
@@ -21,7 +22,10 @@ export async function cleanupByMarker(params: {
   const offeringIds = params.targets.map((target) => target.courseOfferingId);
   const tutorCourseIds = params.targets.flatMap((target) => target.tutorCourseIds);
 
+  const { institutionId } = params.student;
+
   const ours = and(
+    eq(matchRequest.institutionId, institutionId),
     eq(matchRequest.studentProfileId, params.student.studentProfileId),
     inArray(matchRequest.courseOfferingId, offeringIds),
     inArray(matchRequest.tutorCourseId, tutorCourseIds),
@@ -31,13 +35,18 @@ export async function cleanupByMarker(params: {
     const marked = await tx
       .selectDistinct({ id: sessionBooking.engagementId })
       .from(sessionBooking)
-      .where(like(sessionBooking.studentNote, `%${params.marker}%`));
+      .where(
+        and(
+          eq(sessionBooking.institutionId, institutionId),
+          like(sessionBooking.studentNote, `%${escapeLike(params.marker)}%`),
+        ),
+      );
 
     const fromRequests = await tx
       .select({ id: engagement.id })
       .from(engagement)
       .innerJoin(matchRequest, eq(matchRequest.id, engagement.matchRequestId))
-      .where(ours);
+      .where(and(eq(engagement.institutionId, institutionId), ours));
 
     const engagementIds = [
       ...new Set([...marked, ...fromRequests].map((row) => row.id)),
@@ -79,7 +88,7 @@ export async function cleanupByMarker(params: {
     const attached = await tx
       .select({ id: engagement.matchRequestId })
       .from(engagement)
-      .where(isNotNull(engagement.matchRequestId));
+      .where(and(eq(engagement.institutionId, institutionId), isNotNull(engagement.matchRequestId)));
 
     const attachedIds = attached
       .map((row) => row.id)
