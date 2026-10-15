@@ -23,6 +23,7 @@ import {
   THREAD_SIDES,
 } from "../modules/messaging/rules";
 import { NOTE_MAX } from "../modules/ratings/rules";
+import { DEFAULT_RATE_MINOR } from "../modules/tutoring/rate-rules";
 
 import { user, session, account, verification } from "./auth-schema";
 
@@ -335,6 +336,7 @@ export const tutorCourse = pgTable(
     ),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     status: tutorCourseStatus("status").notNull().default("pending_verification"),
+    sessionRateMinor: integer("session_rate_minor").notNull().default(DEFAULT_RATE_MINOR),
 
     proofKind: proofKind("proof_kind"),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
@@ -406,6 +408,7 @@ export const matchRequest = pgTable(
 
     status: matchRequestStatus("status").notNull().default("pending"),
     requestedKind: packageKind("requested_kind"),
+    quotedRateMinor: integer("quoted_rate_minor"),
 
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 
