@@ -5,16 +5,21 @@ import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db } from "../index";
 import { course, courseCodeAlias, courseOffering, engagement, ledgerEntry, matchRequest, messageThread, term, tutorCourse } from "../schema";
-import { tutorActorFor } from "../scenarios/people";
+import { actorFor, tutorActorFor } from "../scenarios/people";
 
 import { assertMoneyInvariants } from "@/server/modules/billing/invariants";
+import { buyPackage, buyTopUp } from "@/server/modules/engagements/buy-and-pay";
+import { slotsForRequest, slotsForTopUp } from "@/server/modules/engagements/purchase";
+import { bookAgainList, packagesForStudent, sessionBoardForStudent } from "@/server/modules/engagements/reads";
+import { endPackage } from "@/server/modules/engagements/termEnd";
 import { cleanup, delivered, person, rows, run, world, type World } from "@/server/modules/billing/test-world";
-import { requestTutors } from "@/server/modules/matching/requests";
+import { requestsForStudent, requestTutors, standingFor } from "@/server/modules/matching/requests";
 import { cardRatings } from "@/server/modules/ratings/reads";
 import { earningsForTutor, feeCapProgressForTutor } from "@/server/modules/tutoring/earnings";
 
 import { personaUserId, type PersonaCampus } from "./people";
 import { resetPersonas } from "./reset";
+import { STUDENT_PERSONAS } from "./students";
 import { TUTOR_PERSONAS } from "./tutors";
 import { wipePersonas } from "./wipe";
 
@@ -31,7 +36,8 @@ before(async () => {
   w = await world();
   campus = { institutionId: w.institutionId, testRun: run };
   await db.insert(term).values({ institutionId: w.institutionId, name: "Before", startsOn: "2020-01-06", endsOn: "2020-05-01" });
-  for (const code of new Set(TUTOR_PERSONAS.map((persona) => persona.course))) {
+  const courses = [...TUTOR_PERSONAS.map((persona) => persona.course), ...STUDENT_PERSONAS.flatMap((persona) => persona.pair?.course ?? [])];
+  for (const code of new Set(courses)) {
     const [row] = await db.insert(course).values({ institutionId: w.institutionId, title: code, department: "TEST" }).returning({ id: course.id });
     await db.insert(courseCodeAlias).values({ institutionId: w.institutionId, courseId: row.id, code });
     await db.insert(courseOffering).values({ institutionId: w.institutionId, courseId: row.id, termId: w.termId, section: "001" });
@@ -40,6 +46,7 @@ before(async () => {
 });
 
 const tutor = (key: string) => tutorActorFor(personaUserId(campus, key));
+const student = (key: string) => actorFor(personaUserId(campus, key));
 
 async function fees(key: string): Promise<number[]> {
   const { tutorProfileId } = await tutor(key);
@@ -77,7 +84,22 @@ test("tutor personas earn what the real pricing code says, and the money check p
   const built = await resetPersonas(campus);
   assert.deepEqual(
     built.map((persona) => persona.key),
-    TUTOR_PERSONAS.map((persona) => persona.key),
+    [
+      ...TUTOR_PERSONAS.map((persona) => persona.key),
+      "student-new",
+      "student-accepted",
+      "student-accepted-tutor",
+      "student-mid",
+      "student-mid-tutor",
+      "student-confirm",
+      "student-confirm-tutor",
+      "student-done",
+      "student-done-tutor",
+      "student-refund",
+      "student-refund-tutor",
+      "student-strikes",
+      "student-strikes-tutor",
+    ],
   );
 
   assert.deepEqual(await earningsForTutor(await tutor("tutor-1")), {
@@ -131,15 +153,135 @@ test("a $25 through-final package pays 2_250 a session, and the 11th session tak
   });
 });
 
+test("each student persona sees its package, what it paid and whether it can end", async () => {
+  const packages = async (key: string) =>
+    (await packagesForStudent(await student(key))).map((pkg) => ({
+      kind: pkg.kind,
+      courseCode: pkg.courseCode,
+      tutorName: pkg.tutorName,
+      sessionsDelivered: pkg.sessionsDelivered,
+      sessionsRemaining: pkg.sessionsRemaining,
+      pricePaidMinor: pkg.pricePaidMinor,
+      refundMinor: pkg.ending.refundMinor,
+      blocked: pkg.ending.blocked?.reason ?? null,
+    }));
+  const accepted = async (key: string) =>
+    (await requestsForStudent(await student(key))).map((request) => ({
+      status: request.status,
+      courseCode: request.courseCode,
+      requestedKind: request.requestedKind,
+      rateMinor: request.rateMinor,
+      engagementId: request.engagementId,
+    }));
+
+  assert.deepEqual(await accepted("student-new"), []);
+  assert.deepEqual(await packages("student-new"), []);
+
+  assert.deepEqual(await accepted("student-accepted"), [
+    { status: "accepted", courseCode: "MATH 125", requestedKind: "exam_anchored", rateMinor: 4_000, engagementId: null },
+  ]);
+  assert.deepEqual(await accepted("student-refund"), [
+    { status: "accepted", courseCode: "EC 110", requestedKind: "through_final", rateMinor: 2_500, engagementId: null },
+  ]);
+
+  assert.deepEqual(await packages("student-mid"), [
+    {
+      kind: "exam_anchored",
+      courseCode: "CH 101",
+      tutorName: "Grace Kim",
+      sessionsDelivered: 2,
+      sessionsRemaining: 1,
+      pricePaidMinor: 12_000,
+      refundMinor: 6_000,
+      blocked: null,
+    },
+  ]);
+  assert.equal((await sessionBoardForStudent(await student("student-mid"))).upcoming.length, 1);
+
+  assert.deepEqual(await packages("student-confirm"), [
+    {
+      kind: "exam_anchored",
+      courseCode: "BSC 114",
+      tutorName: "Ben Carter",
+      sessionsDelivered: 1,
+      sessionsRemaining: 2,
+      pricePaidMinor: 18_000,
+      refundMinor: 13_500,
+      blocked: "awaiting_answer",
+    },
+  ]);
+  const toConfirm = (await sessionBoardForStudent(await student("student-confirm"))).awaitingAnswer;
+  assert.deepEqual(
+    toConfirm.map((item) => ({ otherPartyName: item.otherPartyName, yourAnswer: item.yourAnswer, action: item.action })),
+    [{ otherPartyName: "Ben Carter", yourAnswer: null, action: "confirm_or_deny" }],
+  );
+
+  assert.deepEqual(await packages("student-done"), []);
+  assert.deepEqual(
+    (await bookAgainList(await student("student-done"))).map((pair) => ({
+      courseCode: pair.courseCode,
+      tutorName: pair.tutorName,
+      sessionRateMinor: pair.sessionRateMinor,
+      liveRequest: pair.liveRequest,
+    })),
+    [{ courseCode: "MATH 126", tutorName: "Zoe Hart", sessionRateMinor: 3_500, liveRequest: null }],
+  );
+
+  assert.deepEqual(await packages("student-strikes"), [
+    {
+      kind: "exam_anchored",
+      courseCode: "ST 260",
+      tutorName: "Sam Novak",
+      sessionsDelivered: 1,
+      sessionsRemaining: 3,
+      pricePaidMinor: 20_000,
+      refundMinor: 15_000,
+      blocked: null,
+    },
+  ]);
+  assert.deepEqual(await standingFor(await student("student-strikes")), {
+    parallelAskLimit: 1,
+    depositRequired: true,
+    cleanSessionsToRecover: 3,
+  });
+  assert.equal((await standingFor(await student("student-mid"))).parallelAskLimit, 3);
+});
+
 test("running the reset again rebuilds the same personas and leaves everyone else alone", async () => {
   const bystanderLedger = await rows(bystander.engagementId, "tutor_accrued");
   const first = await visibleState();
-  assert.equal(first.length, 35);
+  assert.equal(first.length, 39);
 
   await resetPersonas(campus);
 
   assert.deepEqual(await visibleState(), first);
   assert.deepEqual(await rows(bystander.engagementId, "tutor_accrued"), bystanderLedger);
+  await assertMoneyInvariants(w.institutionId);
+});
+
+test("a tester can buy and end student-refund's package and top up student-done", async () => {
+  const refunder = await student("student-refund");
+  const [request] = await requestsForStudent(refunder);
+  const slots = await slotsForRequest({ actor: refunder, requestId: request.id });
+  const { engagementId } = await buyPackage({ actor: refunder, requestId: request.id, anchorExamId: null, slotStartsAt: slots.at(-1)! });
+  assert.deepEqual(await endPackage({ actor: refunder, engagementId }), {
+    engagementId,
+    studentProfileId: refunder.studentProfileId,
+    sessionsPurchased: 8,
+    sessionsDelivered: 0,
+    refundMinor: 18_000,
+    currency: "usd",
+  });
+
+  const done = await student("student-done");
+  const [pair] = await bookAgainList(done);
+  const [slot] = await slotsForTopUp({ actor: done, tutorCourseId: pair.tutorCourseId });
+  await buyTopUp({ actor: done, tutorCourseId: pair.tutorCourseId, slotStartsAt: slot });
+  assert.deepEqual(
+    (await packagesForStudent(done)).map((pkg) => ({ kind: pkg.kind, sessionsRemaining: pkg.sessionsRemaining, pricePaidMinor: pkg.pricePaidMinor })),
+    [{ kind: "top_up", sessionsRemaining: 0, pricePaidMinor: 3_500 }],
+  );
+
   await assertMoneyInvariants(w.institutionId);
 });
 

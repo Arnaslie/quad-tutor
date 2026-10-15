@@ -9,10 +9,14 @@ import { releaseRatings } from "@/server/modules/ratings/release";
 import { refreshScores } from "@/server/modules/scoring/stats";
 
 import type { PersonaCampus, PersonaSummary } from "./people";
+import { buildStudentPersonas } from "./students";
 import { buildTutorPersonas } from "./tutors";
 import { wipePersonas } from "./wipe";
 
-const BUILDERS: readonly ((campus: PersonaCampus) => Promise<PersonaSummary[]>)[] = [buildTutorPersonas];
+const BUILDERS: readonly ((campus: PersonaCampus) => Promise<PersonaSummary[]>)[] = [
+  buildTutorPersonas,
+  buildStudentPersonas,
+];
 
 const stamp = (column: AnyColumn) => sql`coalesce(${column}, now())`;
 
