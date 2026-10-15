@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import { db } from "../index";
-import { sessionBooking } from "../schema";
+import { ledgerEntry, sessionBooking } from "../schema";
 
 import type { Actor } from "@/server/modules/identity/actor";
 import { bookSession, slotsForEngagement } from "@/server/modules/engagements/scheduling";
@@ -53,6 +53,23 @@ export async function moveIntoPast(params: {
       and(
         eq(sessionBooking.id, params.sessionId),
         eq(sessionBooking.engagementId, params.engagementId),
+      ),
+    );
+}
+
+/** Dates a recognised session's ledger rows to when it was taught, so its rating window closed as an old one's would. */
+export async function backdateLedger(params: {
+  engagementId: string;
+  sessionId: string;
+  at: Date;
+}): Promise<void> {
+  await db
+    .update(ledgerEntry)
+    .set({ occurredAt: params.at })
+    .where(
+      and(
+        eq(ledgerEntry.sessionId, params.sessionId),
+        eq(ledgerEntry.engagementId, params.engagementId),
       ),
     );
 }

@@ -11,10 +11,11 @@ import {
 } from "../schema";
 
 import { upcomingExams } from "@/server/modules/catalog/courses";
-import { buyPackage } from "@/server/modules/engagements/buy-and-pay";
-import { slotsForRequest } from "@/server/modules/engagements/purchase";
+import type { RequestedKind } from "@/server/modules/billing/pricing";
+import { pay } from "@/server/modules/engagements/buy-and-pay";
+import { purchasePackage, slotsForRequest, type PurchaseResult } from "@/server/modules/engagements/purchase";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
-import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
+import { acceptRequest, requestRenewal, requestTutors } from "@/server/modules/matching/requests";
 
 /** A current-term offering and the tutors asked for it; the first tutor is the one who accepts. */
 export type Target = {
@@ -79,20 +80,42 @@ export async function resolveTarget(cast: {
   };
 }
 
-export async function openPackage(params: {
+type Settle = (result: PurchaseResult) => Promise<{ engagementId: string }>;
+
+type Purchase = {
   student: Actor;
   tutor: TutorActor;
-  target: Target;
   slotsNeeded: number;
-}) {
-  const { student, tutor, target, slotsNeeded } = params;
+  kind?: RequestedKind;
+  settle?: Settle;
+};
+
+export async function openPackage(params: Purchase & { target: Target }) {
+  const { student, target } = params;
 
   const asked = await requestTutors({
     actor: student,
     courseOfferingId: target.courseOfferingId,
     tutorCourseIds: target.tutorCourseIds,
-    kind: "exam_anchored",
+    kind: params.kind ?? "exam_anchored",
   });
+
+  const bought = await acceptAndBuy(params, target.accepterTutorCourseId, target.courseOfferingId);
+  return { ...bought, asked };
+}
+
+/** "Book again" with the same tutor once the student's last package with them has nothing left to book. */
+export async function renewPackage(params: Purchase & { target: Target }) {
+  await requestRenewal({
+    actor: params.student,
+    tutorCourseId: params.target.accepterTutorCourseId,
+    kind: params.kind ?? "exam_anchored",
+  });
+  return acceptAndBuy(params, params.target.accepterTutorCourseId, params.target.courseOfferingId);
+}
+
+async function acceptAndBuy(params: Purchase, tutorCourseId: string, courseOfferingId: string) {
+  const { student, tutor, slotsNeeded } = params;
 
   const pending = await db
     .select({ id: matchRequest.id })
@@ -100,7 +123,7 @@ export async function openPackage(params: {
     .where(
       and(
         eq(matchRequest.studentProfileId, student.studentProfileId),
-        eq(matchRequest.tutorCourseId, target.accepterTutorCourseId),
+        eq(matchRequest.tutorCourseId, tutorCourseId),
         eq(matchRequest.status, "pending"),
       ),
     )
@@ -116,16 +139,19 @@ export async function openPackage(params: {
     throw new Error(`${tutor.userId} has ${slots.length} open slot(s), need ${slotsNeeded}`);
   }
 
-  const exams = await upcomingExams(target.courseOfferingId);
+  const exams = await upcomingExams(courseOfferingId);
   const anchor = exams.at(0) ?? null;
 
-  const { engagementId } = await buyPackage({
-    actor: student,
-    requestId,
-    kind: "exam_anchored",
-    anchorExamId: anchor?.id ?? null,
-    slotStartsAt: slots[0],
-  });
+  const settle = params.settle ?? pay;
+  const { engagementId } = await settle(
+    await purchasePackage({
+      actor: student,
+      requestId,
+      kind: params.kind ?? "exam_anchored",
+      anchorExamId: anchor?.id ?? null,
+      slotStartsAt: slots[0],
+    }),
+  );
 
-  return { engagementId, asked, anchor };
+  return { engagementId, anchor };
 }
