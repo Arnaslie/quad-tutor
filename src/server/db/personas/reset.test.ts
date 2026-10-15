@@ -398,14 +398,16 @@ test("the reset refuses to delete a request a real student sent a persona tutor"
 });
 
 test("while a reset runs, the email sweep sends nothing and a second reset is refused", async () => {
-  const resetting = resetPersonas(campus);
+  let finished = false;
+  const resetting = resetPersonas(campus).finally(() => (finished = true));
   const midway = async () =>
     (await db.execute<{ n: number }>(sql`
       select count(*)::int as n from engagement e
       join pg_locks l on l.locktype = 'advisory' and l.mode = 'ExclusiveLock' and l.objid = hashtext(${w.institutionId})::oid
       where e.institution_id = ${w.institutionId} and e.id <> ${bystander.engagementId}
     `))[0].n;
-  while ((await midway()) === 0) await sleep(5);
+  while (!finished && (await midway()) === 0) await sleep(5);
+  assert.equal(finished, false);
 
   const sentMidway = await runNotifications(w.institutionId);
   const second = await resetPersonas(campus).then(
