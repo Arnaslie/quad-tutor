@@ -20,7 +20,7 @@ type Pair = {
   course: string;
   rateDollars: number;
   kind: RequestedKind;
-  bought?: { delivered: number; then?: readonly Next[] };
+  bought?: { delivered: number; steps?: readonly Next[] };
 };
 
 type StudentPersona = { key: string; name: string; pair?: Pair };
@@ -40,7 +40,7 @@ export const STUDENT_PERSONAS: readonly StudentPersona[] = [
       course: "CH 101",
       rateDollars: 30,
       kind: "exam_anchored",
-      bought: { delivered: 2, then: ["upcoming"] },
+      bought: { delivered: 2, steps: ["upcoming"] },
     },
   },
   {
@@ -51,7 +51,7 @@ export const STUDENT_PERSONAS: readonly StudentPersona[] = [
       course: "BSC 114",
       rateDollars: 45,
       kind: "exam_anchored",
-      bought: { delivered: 1, then: ["ended"] },
+      bought: { delivered: 1, steps: ["ended"] },
     },
   },
   {
@@ -72,12 +72,10 @@ export const STUDENT_PERSONAS: readonly StudentPersona[] = [
       course: "ST 260",
       rateDollars: 50,
       kind: "exam_anchored",
-      bought: { delivered: 1, then: ["late_cancel", "late_cancel"] },
+      bought: { delivered: 1, steps: ["late_cancel", "late_cancel"] },
     },
   },
 ];
-
-const HOUR = 60 * 60 * 1000;
 
 async function describe(student: Actor): Promise<string> {
   const [packages, requests, again, board, standing] = await Promise.all([
@@ -132,14 +130,14 @@ async function buildStudent(campus: PersonaCampus, persona: StudentPersona): Pro
   if (!pair.bought) {
     await acceptedRequest({ student, tutor, target, kind: pair.kind });
   } else {
-    const { delivered, then = [] } = pair.bought;
-    const times = await historyTimes(campus.institutionId, delivered + then.filter((next) => next === "late_cancel").length);
+    const { delivered, steps = [] } = pair.bought;
+    const times = await historyTimes(campus.institutionId, delivered);
     const { engagementId } = await openPackage({ student, tutor, target, slotsNeeded: 1, kind: pair.kind, settle: fixturePay });
     for (let i = 0; i < delivered; i += 1) {
       const sessionId = i === 0 ? (await sessionIdsInOrder(engagementId))[0] : await nextSession(student, engagementId);
       await teach({ student, tutor, engagementId, sessionId, stars: undefined, taughtAt: times.shift()! });
     }
-    for (const next of then) {
+    for (const next of steps) {
       const sessionId = await nextSession(student, engagementId);
       if (next === "upcoming") await moveIntoPast({ engagementId, sessionId, hoursAgo: -48 });
       if (next === "ended") {
@@ -149,7 +147,6 @@ async function buildStudent(campus: PersonaCampus, persona: StudentPersona): Pro
       if (next === "late_cancel") {
         await moveIntoPast({ engagementId, sessionId, hoursAgo: -2 });
         await cancelSession({ actor: student, sessionId });
-        await moveIntoPast({ engagementId, sessionId, hoursAgo: (Date.now() - times.shift()!.getTime()) / HOUR });
       }
     }
   }
