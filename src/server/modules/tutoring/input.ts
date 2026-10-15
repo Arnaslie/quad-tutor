@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { PROOF_KINDS } from "./proof-rules";
+import { RATE_RULE, rateMinorFromDollars } from "./rate-rules";
 
 export const claimCourseInput = z.object({
   courseId: z.uuid(),
@@ -33,6 +34,17 @@ export const removeAvailabilityInput = z.object({
 export const meetingLocation = z.string().trim().min(1).max(200);
 
 export const setDefaultLocationInput = z.object({ location: meetingLocation });
+
+export const setCourseRateInput = z
+  .object({ tutorCourseId: z.uuid(), dollars: z.coerce.number() })
+  .transform(({ tutorCourseId, dollars }, ctx) => {
+    const rateMinor = rateMinorFromDollars(dollars);
+    if (rateMinor === null) {
+      ctx.addIssue({ code: "custom", message: RATE_RULE });
+      return z.NEVER;
+    }
+    return { tutorCourseId, rateMinor };
+  });
 
 export type ClaimCourseInput = z.infer<typeof claimCourseInput>;
 export type AddAvailabilityInput = z.infer<typeof addAvailabilityInput>;

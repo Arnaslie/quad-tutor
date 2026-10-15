@@ -26,6 +26,7 @@ import {
 import { reportRatingAction } from "./actions";
 import { ClaimForm } from "./claim-form";
 import { ProofForm } from "./proof-form";
+import { RateForm } from "./rate-form";
 
 export const metadata: Metadata = { title: "Your courses" };
 
@@ -242,6 +243,9 @@ function ClaimCard({ claim, ratings }: { claim: TutorCourseClaim; ratings?: Card
           />
         </div>
       ) : null}
+      {claim.status === "retired" ? null : (
+        <RateForm tutorCourseId={claim.id} rateMinor={claim.sessionRateMinor} />
+      )}
       {claim.status === "rejected" && claim.rejectionReason ? (
         <RejectionNote reason={claim.rejectionReason} />
       ) : null}

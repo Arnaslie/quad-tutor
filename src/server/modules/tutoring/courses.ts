@@ -27,6 +27,7 @@ export type TutorCourseClaim = {
   takenTermName: string;
   professorName: string | null;
   status: (typeof tutorCourse.$inferSelect)["status"];
+  sessionRateMinor: number;
   verifiedAt: Date | null;
   proofKind: ProofKind | null;
   rejectionReason: RejectionReason | null;
@@ -45,6 +46,7 @@ export async function coursesForTutor(tutor: TutorActor): Promise<TutorCourseCla
       takenTermName: term.name,
       professorName: professor.name,
       status: tutorCourse.status,
+      sessionRateMinor: tutorCourse.sessionRateMinor,
       verifiedAt: tutorCourse.verifiedAt,
       proofKind: tutorCourse.proofKind,
       rejectionReason: tutorCourse.rejectionReason,
@@ -142,4 +144,24 @@ export async function claimCourse(params: {
   const already = existing.at(0);
   if (!already) throw new TutoringError("That claim could not be saved.");
   throw new TutoringError("You have already claimed this course.");
+}
+
+export async function setCourseRate(params: {
+  tutor: TutorActor;
+  tutorCourseId: string;
+  rateMinor: number;
+}): Promise<void> {
+  const updated = await db
+    .update(tutorCourse)
+    .set({ sessionRateMinor: params.rateMinor })
+    .where(
+      and(
+        eq(tutorCourse.id, params.tutorCourseId),
+        eq(tutorCourse.tutorProfileId, params.tutor.tutorProfileId),
+        eq(tutorCourse.institutionId, params.tutor.institutionId),
+      ),
+    )
+    .returning({ id: tutorCourse.id });
+
+  if (!updated.at(0)) throw new TutoringError("That course is not one you tutor.");
 }

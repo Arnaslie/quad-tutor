@@ -5,14 +5,25 @@ import { redirect } from "next/navigation";
 
 import { failure } from "@/app/messages/action-state";
 import type { ReportState } from "@/components/report-form";
+import { formatMinor } from "@/server/modules/billing/pricing";
 import { requireTutor } from "@/server/modules/identity/actor";
 import { ratingReportInput } from "@/server/modules/messaging/input";
 import { reportRating } from "@/server/modules/messaging/reports";
-import { TutoringError, claimCourse } from "@/server/modules/tutoring/courses";
-import { claimCourseInput, submitProofInput } from "@/server/modules/tutoring/input";
+import { TutoringError, claimCourse, setCourseRate } from "@/server/modules/tutoring/courses";
+import {
+  claimCourseInput,
+  setCourseRateInput,
+  submitProofInput,
+} from "@/server/modules/tutoring/input";
+import { RATE_RULE } from "@/server/modules/tutoring/rate-rules";
 import { VerificationError, submitProof } from "@/server/modules/tutoring/verification";
 
 export type ClaimState = { status: "idle" } | { status: "error"; message: string };
+
+export type RateState =
+  | { status: "idle" }
+  | { status: "saved"; message: string }
+  | { status: "error"; message: string };
 
 export async function claimCourseAction(
   _previous: ClaimState,
@@ -74,6 +85,32 @@ export async function submitProofAction(
 
   revalidatePath("/tutor/courses");
   redirect("/tutor/courses");
+}
+
+export async function setCourseRateAction(
+  _previous: RateState,
+  formData: FormData,
+): Promise<RateState> {
+  const tutor = await requireTutor();
+
+  const parsed = setCourseRateInput.safeParse({
+    tutorCourseId: formData.get("tutorCourseId"),
+    dollars: formData.get("dollars"),
+  });
+  if (!parsed.success) return { status: "error", message: RATE_RULE };
+
+  try {
+    await setCourseRate({ tutor, ...parsed.data });
+  } catch (error) {
+    if (error instanceof TutoringError) return { status: "error", message: error.message };
+    throw error;
+  }
+
+  revalidatePath("/tutor/courses");
+  return {
+    status: "saved",
+    message: `Saved. New requests and top-ups pay ${formatMinor(parsed.data.rateMinor)} a session. Packages you already agreed to keep their price.`,
+  };
 }
 
 export async function reportRatingAction(
