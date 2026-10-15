@@ -5,6 +5,7 @@ import { courseOffering, engagement, exam, matchRequest } from "../schema";
 import { openPackage, type Target } from "../scenarios/packages";
 import { sessionIdsInOrder } from "../scenarios/sessions";
 
+import { PERSONA_SECTION } from "@/server/modules/billing/fixtures";
 import { formatMinor } from "@/server/modules/billing/pricing";
 import { currentTerm } from "@/server/modules/catalog/courses";
 import { fixturePay } from "@/server/modules/engagements/fixture-pay";
@@ -14,8 +15,8 @@ import { engagementsDueForTermEndRefund } from "@/server/modules/engagements/ter
 import type { Actor } from "@/server/modules/identity/actor";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
-import { createPersona, personaEmail, PERSONA_SECTION, type PersonaCampus, type PersonaSummary } from "./people";
-import { describe } from "./students";
+import { createPersona, personaEmail, type PersonaCampus, type PersonaSummary } from "./people";
+import { describeStudent } from "./students";
 import { claimedTutor, historyTimes, lastEndedTerm, nextSession, teach } from "./tutors";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -104,7 +105,7 @@ async function buildFinals(campus: PersonaCampus): Promise<PersonaSummary[]> {
       key: "student-finals",
       email: personaEmail(campus, "student-finals"),
       role: "student",
-      state: await describe(students[0]),
+      state: await describeStudent(students[0]),
     },
   ];
 }
@@ -139,7 +140,7 @@ async function buildTermOver(campus: PersonaCampus): Promise<PersonaSummary[]> {
       key: "student-term-over",
       email: personaEmail(campus, "student-term-over"),
       role: "student",
-      state: `${await describe(student)}, term ended ${ended.endsOn}, ${formatMinor(due.refundMinor)} refund waiting for the term-end sweep`,
+      state: `${await describeStudent(student)}, term ended ${ended.endsOn}, ${formatMinor(due.refundMinor)} refund waiting for the term-end sweep`,
     },
     {
       key: tutorKey,

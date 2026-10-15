@@ -31,9 +31,7 @@ import {
   verificationFile,
 } from "../schema";
 
-import { PERSONA_PREFIX } from "@/server/modules/billing/fixtures";
-
-import { PERSONA_SECTION } from "./people";
+import { PERSONA_PREFIX, PERSONA_SECTION } from "@/server/modules/billing/fixtures";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
