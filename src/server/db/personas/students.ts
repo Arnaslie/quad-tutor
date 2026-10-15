@@ -77,7 +77,7 @@ export const STUDENT_PERSONAS: readonly StudentPersona[] = [
   },
 ];
 
-async function describe(student: Actor): Promise<string> {
+export async function describeStudent(student: Actor): Promise<string> {
   const [packages, requests, again, board, standing] = await Promise.all([
     packagesForStudent(student),
     requestsForStudent(student),
@@ -96,7 +96,8 @@ async function describe(student: Actor): Promise<string> {
     ...packages.map(
       (pkg) =>
         `${pkg.courseCode} with ${pkg.tutorName}, ${pkg.sessionsDelivered} of ${pkg.sessionsPurchased} done, ` +
-        `${pkg.sessionsRemaining} left to book, paid ${formatMinor(pkg.pricePaidMinor)}`,
+        `${pkg.sessionsRemaining} left to book, paid ${formatMinor(pkg.pricePaidMinor)}` +
+        (pkg.anchorExamName ? `, ${pkg.anchorExamName} on ${pkg.anchorExamOccursOn}` : ""),
     ),
     ...again.map((pair) => `Book again open with ${pair.tutorName} in ${pair.courseCode}`),
     board.upcoming.length > 0 ? `${board.upcoming.length} coming up` : null,
@@ -112,7 +113,7 @@ async function buildStudent(campus: PersonaCampus, persona: StudentPersona): Pro
     key: persona.key,
     email: personaEmail(campus, persona.key),
     role: "student",
-    state: await describe(student),
+    state: await describeStudent(student),
   });
   const { pair } = persona;
   if (!pair) return [await summary()];

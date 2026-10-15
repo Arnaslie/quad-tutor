@@ -12,6 +12,7 @@ import {
   professor,
   term,
 } from "@/server/db/schema";
+import { PERSONA_SECTION } from "@/server/modules/billing/fixtures";
 import type { Actor } from "@/server/modules/identity/actor";
 import { buildDeck } from "@/server/modules/matching/candidates";
 
@@ -141,6 +142,7 @@ export async function offeringsForCourse(params: {
         eq(courseOffering.courseId, params.courseId),
         eq(course.institutionId, params.institutionId),
         sql`current_date between ${term.startsOn} and ${term.endsOn}`,
+        sql`${courseOffering.section} is distinct from ${PERSONA_SECTION}`,
       ),
     )
     .orderBy(courseOffering.section);

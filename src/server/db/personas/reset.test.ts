@@ -4,14 +4,15 @@ import { after, before, test } from "node:test";
 import { and, asc, eq, sql } from "drizzle-orm";
 
 import { db } from "../index";
-import { course, courseCodeAlias, courseOffering, engagement, ledgerEntry, matchRequest, messageThread, term, tutorCourse } from "../schema";
+import { course, courseCodeAlias, courseOffering, engagement, institution, ledgerEntry, matchRequest, messageThread, term, tutorCourse } from "../schema";
 import { actorFor, tutorActorFor } from "../scenarios/people";
 
 import { assertMoneyInvariants } from "@/server/modules/billing/invariants";
+import { offeringsForCourse } from "@/server/modules/catalog/courses";
 import { buyPackage, buyTopUp } from "@/server/modules/engagements/buy-and-pay";
 import { slotsForRequest, slotsForTopUp } from "@/server/modules/engagements/purchase";
-import { bookAgainList, packagesForStudent, sessionBoardForStudent } from "@/server/modules/engagements/reads";
-import { endPackage } from "@/server/modules/engagements/termEnd";
+import { bookAgainList, packagesForStudent, sessionBoardForStudent, sessionBoardForTutor } from "@/server/modules/engagements/reads";
+import { engagementsDueForTermEndRefund, endPackage, runTermEndRefunds } from "@/server/modules/engagements/termEnd";
 import { cleanup, delivered, person, rows, run, world, type World } from "@/server/modules/billing/test-world";
 import { requestsForStudent, requestTutors, standingFor } from "@/server/modules/matching/requests";
 import { cardRatings } from "@/server/modules/ratings/reads";
@@ -20,6 +21,7 @@ import { earningsForTutor, feeCapProgressForTutor } from "@/server/modules/tutor
 import { personaUserId, type PersonaCampus } from "./people";
 import { resetPersonas } from "./reset";
 import { STUDENT_PERSONAS } from "./students";
+import { FINALS_COURSE, TERM_OVER_COURSE } from "./term";
 import { TUTOR_PERSONAS } from "./tutors";
 import { wipePersonas } from "./wipe";
 
@@ -36,7 +38,7 @@ before(async () => {
   w = await world();
   campus = { institutionId: w.institutionId, testRun: run };
   await db.insert(term).values({ institutionId: w.institutionId, name: "Before", startsOn: "2020-01-06", endsOn: "2020-05-01" });
-  const courses = [...TUTOR_PERSONAS.map((persona) => persona.course), ...STUDENT_PERSONAS.flatMap((persona) => persona.pair?.course ?? [])];
+  const courses = [...TUTOR_PERSONAS.map((persona) => persona.course), ...STUDENT_PERSONAS.flatMap((persona) => persona.pair?.course ?? []), FINALS_COURSE, TERM_OVER_COURSE];
   for (const code of new Set(courses)) {
     const [row] = await db.insert(course).values({ institutionId: w.institutionId, title: code, department: "TEST" }).returning({ id: course.id });
     await db.insert(courseCodeAlias).values({ institutionId: w.institutionId, courseId: row.id, code });
@@ -99,6 +101,10 @@ test("tutor personas earn what the real pricing code says, and the money check p
       "student-refund-tutor",
       "student-strikes",
       "student-strikes-tutor",
+      "tutor-finals",
+      "student-finals",
+      "student-term-over",
+      "student-term-over-tutor",
     ],
   );
 
@@ -250,12 +256,94 @@ test("each student persona sees its package, what it paid and whether it can end
 test("running the reset again rebuilds the same personas and leaves everyone else alone", async () => {
   const bystanderLedger = await rows(bystander.engagementId, "tutor_accrued");
   const first = await visibleState();
-  assert.equal(first.length, 39);
+  assert.equal(first.length, 43);
 
   await resetPersonas(campus);
 
   assert.deepEqual(await visibleState(), first);
   assert.deepEqual(await rows(bystander.engagementId, "tutor_accrued"), bystanderLedger);
+  await assertMoneyInvariants(w.institutionId);
+});
+
+test("finals week: three students sit the final in four days, each with a session a day until then", async () => {
+  const [{ finalOn }] = await db.execute<{ finalOn: string }>(sql`select (current_date + 4)::text as "finalOn"`);
+  const finals = await student("student-finals");
+  assert.deepEqual(
+    (await packagesForStudent(finals)).map((pkg) => ({
+      courseCode: pkg.courseCode,
+      section: pkg.section,
+      sessionsDelivered: pkg.sessionsDelivered,
+      sessionsRemaining: pkg.sessionsRemaining,
+      pricePaidMinor: pkg.pricePaidMinor,
+      anchorExamName: pkg.anchorExamName,
+      anchorExamOccursOn: pkg.anchorExamOccursOn,
+    })),
+    [
+      {
+        courseCode: "MATH 125",
+        section: "persona",
+        sessionsDelivered: 1,
+        sessionsRemaining: 0,
+        pricePaidMinor: 18_000,
+        anchorExamName: "Final Exam",
+        anchorExamOccursOn: finalOn,
+      },
+    ],
+  );
+  const [{ timezone }] = await db.select({ timezone: institution.timezone }).from(institution).where(eq(institution.id, w.institutionId));
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: timezone });
+  const days = (await sessionBoardForStudent(finals)).upcoming.map((item) => day.format(item.scheduledAt)).sort();
+  const dayAfter = (date: string, n: number) => new Date(Date.parse(`${date}T12:00:00Z`) + n * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  assert.deepEqual(days, [days[0], dayAfter(days[0], 1), dayAfter(days[0], 2)]);
+  assert.ok(days[2] < finalOn, `${days[2]} is before the final on ${finalOn}`);
+  assert.deepEqual(
+    (await bookAgainList(finals)).map((pair) => pair.tutorName),
+    ["Iris Vance"],
+  );
+  const [math] = await db.select({ courseId: courseCodeAlias.courseId }).from(courseCodeAlias).where(and(eq(courseCodeAlias.institutionId, w.institutionId), eq(courseCodeAlias.code, "MATH 125")));
+  assert.deepEqual(
+    (await offeringsForCourse({ courseId: math.courseId, institutionId: w.institutionId })).map((offering) => offering.section),
+    ["001"],
+  );
+
+  const tutorFinals = await tutor("tutor-finals");
+  const upcoming = (await sessionBoardForTutor(tutorFinals)).upcoming.map((item) => item.scheduledAt.getTime()).sort((a, b) => a - b);
+  assert.equal(upcoming.length, 9);
+  assert.ok(upcoming.at(-1)! - upcoming[0] < 3 * 24 * 60 * 60 * 1000);
+  assert.deepEqual(await earningsForTutor(tutorFinals), {
+    earnedMinor: 12_150,
+    owedMinor: 12_150,
+    transferredMinor: 0,
+    currency: "usd",
+    sessionsDelivered: 3,
+  });
+});
+
+test("term over: the real term-end sweep refunds the two unused sessions", async () => {
+  const termOver = await student("student-term-over");
+  const [pkg] = await packagesForStudent(termOver);
+  assert.deepEqual(await engagementsDueForTermEndRefund(w.institutionId), [
+    {
+      engagementId: pkg.engagementId,
+      studentProfileId: termOver.studentProfileId,
+      sessionsPurchased: 4,
+      sessionsDelivered: 2,
+      refundMinor: 8_000,
+      currency: "usd",
+    },
+  ]);
+  const { refunds, held, failed } = await runTermEndRefunds(w.institutionId);
+
+  assert.deepEqual(
+    { refunded: refunds.map((refund) => [refund.engagementId, refund.refundMinor]), held, failed },
+    { refunded: [[pkg.engagementId, 8_000]], held: 0, failed: 0 },
+  );
+  assert.deepEqual(await packagesForStudent(termOver), []);
+  assert.deepEqual(await engagementsDueForTermEndRefund(w.institutionId), []);
+  assert.deepEqual(
+    (await rows(pkg.engagementId, "refund")).map((row) => [row.amountMinor, row.stripeReference]),
+    [[8_000, null]],
+  );
   await assertMoneyInvariants(w.institutionId);
 });
 

@@ -1,4 +1,5 @@
 export const PERSONA_PREFIX = "persona_";
+export const PERSONA_SECTION = "persona";
 export const FIXTURE_PREFIX = "fixture_";
 export const FIXTURE_PAYMENT_PREFIX = "fixture_pi_";
 export const FIXTURE_TRANSFER_PREFIX = "fixture_tr_";
