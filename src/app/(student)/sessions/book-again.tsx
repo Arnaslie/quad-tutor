@@ -124,6 +124,7 @@ export async function BookAgainStep({
           tutorName={tutor}
           location={pair.tutorLocation}
           currency={pair.currency}
+          rateMinor={pair.sessionRateMinor}
           slots={slots.map((slot) => slot.toISOString())}
         />
       )}

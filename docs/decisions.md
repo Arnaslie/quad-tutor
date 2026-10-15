@@ -76,7 +76,8 @@ The refill books straight into one of the tutor's published open slots, with no
 accept step: the tutor already offered that hour, and one session commits them to
 nothing beyond it. A package needs the tutor's accept (see Renewals).
 
-**Tutors set their own rate for each course they tutor, between $25 and $50 a session.
+**Tutors set their own rate for each course they tutor, in whole dollars, with no
+maximum.
 The take is 10% of each of a tutor's first 10 sessions and 5% after, capped at $100 per
 tutor per term.** The student pays the tutor's rate and nothing on top: a student
 booking fee was rejected because the student is already paying for the tutor. The price

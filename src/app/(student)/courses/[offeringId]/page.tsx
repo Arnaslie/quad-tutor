@@ -55,6 +55,7 @@ export default async function TutorDeckPage(props: PageProps<"/courses/[offering
     gradeEarned: candidate.gradeEarned,
     takenUnderProfessorName: candidate.takenUnderProfessorName,
     takenTermName: candidate.takenTermName,
+    sessionRateMinor: candidate.sessionRateMinor,
     matchesProfessor: candidate.matchesProfessor,
     courseRating: ratings.get(candidate.tutorCourseId)?.courseRating ?? null,
     overallRating: ratings.get(candidate.tutorCourseId)?.overallRating ?? null,

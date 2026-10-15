@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -7,6 +7,7 @@ import {
   courseCodeAlias,
   courseOffering,
   engagement,
+  matchRequest,
   messageThread,
   professor,
   sessionBooking,
@@ -17,6 +18,7 @@ import {
   user,
 } from "@/server/db/schema";
 import type { Actor } from "@/server/modules/identity/actor";
+import { DEFAULT_RATE_MINOR } from "@/server/modules/tutoring/rate-rules";
 
 export class SessionError extends Error {}
 
@@ -25,6 +27,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type Executor = typeof db | Tx;
 
 export const bought = notInArray(engagement.status, ["pending_payment", "cancelled"]);
+
+export const quotedRate = sql<number>`coalesce(${matchRequest.quotedRateMinor}, ${DEFAULT_RATE_MINOR})`.mapWith(Number);
 
 export const liveEngagement = inArray(engagement.status, ["active", "pending_payment"]);
 

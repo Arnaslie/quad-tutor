@@ -25,6 +25,7 @@ export type DeckCard = ScoredCandidate & {
 
   takenUnderProfessorName: string | null;
   takenTermName: string;
+  sessionRateMinor: number;
 };
 
 export type Deck = {
@@ -79,6 +80,7 @@ export async function buildDeck(params: {
       headline: tutorProfile.headline,
       bio: tutorProfile.bio,
       takenUnderProfessorName: professor.name,
+      sessionRateMinor: tutorCourse.sessionRateMinor,
     })
     .from(tutorCourse)
     .innerJoin(term, eq(term.id, tutorCourse.takenTermId))
@@ -120,6 +122,7 @@ export async function buildDeck(params: {
       bio: row.bio,
       takenUnderProfessorName: row.takenUnderProfessorName,
       takenTermName: row.takenTermName,
+      sessionRateMinor: row.sessionRateMinor,
     };
   });
 

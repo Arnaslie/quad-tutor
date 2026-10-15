@@ -299,6 +299,7 @@ type TutorFixture = {
 
     takenUnder: ProfessorName | null;
     status?: "active" | "pending_verification";
+    rateMinor?: number;
   }[];
   availability: readonly { weekday: number; startMinute: number; endMinute: number }[];
 };
@@ -322,7 +323,7 @@ const TUTORS: readonly TutorFixture[] = [
     graduatesOn: "2027-05-08",
     meets: "Gorgas Library, 2nd floor study rooms",
     courses: [
-      { course: "math125", grade: "A", takenTerm: "Fall 2025", takenUnder: "Ellen Whitaker" },
+      { course: "math125", grade: "A", takenTerm: "Fall 2025", takenUnder: "Ellen Whitaker", rateMinor: 4_000 },
       { course: "ec110", grade: "A", takenTerm: "Fall 2024", takenUnder: null },
     ],
     availability: [window_(2, "16:00", "20:00"), window_(4, "16:00", "20:00"), window_(0, "13:00", "17:00")],
@@ -361,7 +362,7 @@ const TUTORS: readonly TutorFixture[] = [
     graduatesOn: "2027-05-08",
     meets: "Gorgas Library, 3rd floor quiet area",
     courses: [
-      { course: "math125", grade: "A+", takenTerm: "Fall 2024", takenUnder: "Priya Raman" },
+      { course: "math125", grade: "A+", takenTerm: "Fall 2024", takenUnder: "Priya Raman", rateMinor: 4_500 },
       { course: "cs201", grade: "A", takenTerm: "Fall 2025", takenUnder: "Jae-Won Park" },
     ],
     availability: [window_(2, "18:00", "21:00"), window_(4, "18:00", "21:00")],
@@ -373,7 +374,7 @@ const TUTORS: readonly TutorFixture[] = [
     bio: "Second-attempt student turned tutor. I know exactly where it goes wrong.",
     graduatesOn: "2028-05-06",
     courses: [
-      { course: "math125", grade: "A", takenTerm: "Spring 2026", takenUnder: null },
+      { course: "math125", grade: "A", takenTerm: "Spring 2026", takenUnder: null, rateMinor: 3_000 },
 
       {
         course: "ph105",
@@ -851,6 +852,7 @@ async function seedTutors(
               takenUnderProfessorId: claim.takenUnder ? professors.get(claim.takenUnder)! : null,
               verifiedAt: status === "active" ? VERIFIED_AT : null,
               status,
+              sessionRateMinor: claim.rateMinor,
             })
             .returning({ id: tutorCourse.id }),
       );

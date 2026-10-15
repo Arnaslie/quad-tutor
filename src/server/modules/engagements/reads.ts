@@ -250,6 +250,7 @@ export type BookAgain = {
   courseTitle: string;
   currency: string;
   termEndsOn: string;
+  sessionRateMinor: number;
   liveRequest: {
     id: string;
     status: "pending" | "accepted";
@@ -363,6 +364,7 @@ async function bookAgainRows(
       courseTitle: course.title,
       currency: sql<string>`min(${engagement.currency})`,
       termEndsOn: term.endsOn,
+      sessionRateMinor: tutorCourse.sessionRateMinor,
     })
     .from(engagement)
     .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
@@ -396,6 +398,7 @@ async function bookAgainRows(
       courseCodeAlias.code,
       course.title,
       term.endsOn,
+      tutorCourse.sessionRateMinor,
     )
     .orderBy(desc(sql`max(${engagement.createdAt})`));
 
@@ -447,6 +450,7 @@ async function bookAgainRows(
       courseTitle: pair.courseTitle,
       currency: pair.currency,
       termEndsOn: pair.termEndsOn,
+      sessionRateMinor: pair.sessionRateMinor,
       liveRequest: request
         ? {
             id: request.id,

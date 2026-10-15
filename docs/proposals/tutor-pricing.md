@@ -1,6 +1,6 @@
 # Proposal: tutor-set rates and a lower take after 10 sessions
 
-Status: **accepted 2026-10-14, build not started.** Written 2026-10-14 against
+Status: **accepted 2026-10-14, built in #77 and #78.** Written 2026-10-14 against
 `origin/main` at `701a296`. The accepted rule is in `docs/decisions.md` (Product,
 "Tutors set their own rate").
 
@@ -9,8 +9,9 @@ Status: **accepted 2026-10-14, build not started.** Written 2026-10-14 against
 Decided by the user on 2026-10-14, and taken as input here:
 
 1. Tutors set their own session rate. The fixed $35 price (`decisions.md`, Product,
-   the take; `SESSION_PRICE_MINOR` in `billing/pricing.ts:1`) goes. Rates fall
-   between $25 and $50 a session.
+   the take; `SESSION_PRICE_MINOR` in `billing/pricing.ts:1`) goes. The user first
+   set $25 to $50, then removed both limits on 2026-10-15: tutors charge what they
+   want and students decide.
 2. The platform's cut drops from 10% to 5% once a tutor has completed 10 sessions.
 
 These two items ship as separate PRs, and rates go first. Both need the
@@ -41,9 +42,11 @@ These two items ship as separate PRs, and rates go first. Both need the
 - **Changing the rate.** A tutor can change a course's rate at any time, mid-term
   included, decided by the user on 2026-10-14. The change applies to new requests
   and new top-ups only.
-- **Bounds.** $25.00 to $50.00, whole dollars only. The rule lives in its own
-  import-free module, shared by the tutor's settings form and the server action
-  (CLAUDE.md, Conventions). The server validates with Zod.
+- **Bounds.** Whole dollars, at least $1, with no maximum, decided by the user on
+  2026-10-15. Stripe cannot charge under $0.50, which sets the floor. The only upper
+  limit is what Stripe can charge for the largest package, about $124,999 a session.
+  The rule lives in its own import-free module, shared by the tutor's settings form
+  and the server action (CLAUDE.md, Conventions). The server validates with Zod.
 - **Packages scale from the rate.** `packageOptions(rateMinor)` and
   `topUpOption(rateMinor)` take the rate as an argument. Exam-anchored is 4 × rate.
   Through-final is 8 × rate less 10%, floored as today. A top-up is 1 × rate.

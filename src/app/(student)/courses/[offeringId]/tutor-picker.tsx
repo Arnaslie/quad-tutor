@@ -7,7 +7,12 @@ import { Card } from "@/components/card";
 import { Icon } from "@/components/icons";
 import { Money } from "@/components/money";
 import { RatingLine } from "@/components/rating";
-import { packageOptions, packageSummary } from "@/server/modules/billing/pricing";
+import {
+  REQUESTABLE_KINDS,
+  packagePriceRange,
+  packageSummary,
+  type PackageKind,
+} from "@/server/modules/billing/pricing";
 import type { PublicRating } from "@/server/modules/ratings/rules";
 
 import { askTutors, type ActionResult } from "../../actions";
@@ -20,6 +25,7 @@ export type TutorCard = {
   gradeEarned: string;
   takenUnderProfessorName: string | null;
   takenTermName: string;
+  sessionRateMinor: number;
   matchesProfessor: boolean;
   courseRating: PublicRating | null;
   overallRating: PublicRating | null;
@@ -33,6 +39,9 @@ function TutorProfile({ tutor }: { tutor: TutorCard }) {
         {tutor.headline ? (
           <p className="text-sm text-muted">{tutor.headline}</p>
         ) : null}
+        <p className="pt-1 text-sm font-medium">
+          <Money minor={tutor.sessionRateMinor} /> a session
+        </p>
       </div>
 
       <dl className="flex flex-col gap-1.5 text-sm">
@@ -101,17 +110,34 @@ function useSelection(room: number) {
   return { selected, toggle, full: selected.length >= room };
 }
 
+function PriceRange({ kind, ratesMinor }: { kind: PackageKind; ratesMinor: number[] }) {
+  const { lowMinor, highMinor } = packagePriceRange(kind, ratesMinor);
+  if (lowMinor === highMinor) {
+    return <Money minor={lowMinor} className="whitespace-nowrap text-muted" />;
+  }
+  return (
+    <span className="whitespace-nowrap text-muted">
+      <Money minor={lowMinor} />–<Money minor={highMinor} />
+    </span>
+  );
+}
+
 function Submit({
   offeringId,
+  tutors,
   selected,
   state,
   pending,
 }: {
   offeringId: string;
+  tutors: TutorCard[];
   selected: string[];
   state: ActionResult | null;
   pending: boolean;
 }) {
+  const chosen = tutors.filter((tutor) => selected.includes(tutor.tutorCourseId));
+  const ratesMinor = (chosen.length > 0 ? chosen : tutors).map((tutor) => tutor.sessionRateMinor);
+
   return (
     <>
       <input type="hidden" name="offeringId" value={offeringId} />
@@ -123,20 +149,20 @@ function Submit({
         <legend className="pb-2 text-sm font-semibold uppercase tracking-wide text-muted">
           What you are asking for
         </legend>
-        {packageOptions().map((option) => (
+        {REQUESTABLE_KINDS.map((kind) => (
           <label
-            key={option.kind}
+            key={kind}
             className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2 text-sm transition-colors hover:bg-surface-sunken has-[:checked]:border-accent has-[:checked]:bg-accent-soft"
           >
             <input
               type="radio"
               name="kind"
-              value={option.kind}
-              defaultChecked={option.kind === "exam_anchored"}
+              value={kind}
+              defaultChecked={kind === "exam_anchored"}
               className="accent-accent"
             />
-            <span className="flex-1 font-medium">{packageSummary(option.kind)}</span>
-            <Money minor={option.priceMinor} className="text-muted" />
+            <span className="flex-1 font-medium">{packageSummary(kind)}</span>
+            <PriceRange kind={kind} ratesMinor={ratesMinor} />
           </label>
         ))}
       </fieldset>
@@ -202,6 +228,7 @@ export function SingleReveal({
 
       <Submit
         offeringId={offeringId}
+        tutors={tutors}
         selected={selected}
         state={state}
         pending={pending}
@@ -298,6 +325,7 @@ export function TutorDeck({
 
       <Submit
         offeringId={offeringId}
+        tutors={tutors}
         selected={selected}
         state={state}
         pending={pending}

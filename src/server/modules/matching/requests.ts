@@ -17,7 +17,7 @@ import {
 } from "@/server/db/schema";
 import { courseCodeAlias } from "@/server/db/schema";
 import { asRequestedKind, type RequestedKind } from "@/server/modules/billing/pricing";
-import { bought, type Executor } from "@/server/modules/engagements/access";
+import { bought, quotedRate, type Executor } from "@/server/modules/engagements/access";
 import { bookAgain } from "@/server/modules/engagements/reads";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
@@ -216,6 +216,7 @@ export async function acceptRequest(params: {
         studentUserId: studentProfile.userId,
         courseOfferingId: matchRequest.courseOfferingId,
         tutorProfileId: tutorCourse.tutorProfileId,
+        sessionRateMinor: tutorCourse.sessionRateMinor,
       })
       .from(matchRequest)
       .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
@@ -262,7 +263,7 @@ export async function acceptRequest(params: {
 
     await tx
       .update(matchRequest)
-      .set({ status: "accepted", resolvedAt: now })
+      .set({ status: "accepted", resolvedAt: now, quotedRateMinor: request.sessionRateMinor })
       .where(eq(matchRequest.id, request.id));
 
     await tx
@@ -314,6 +315,7 @@ export type StudentRequest = {
   section: string | null;
   professorName: string | null;
   requestedKind: RequestedKind | null;
+  rateMinor: number;
 
   expiresInMinutes: number;
 
@@ -338,6 +340,7 @@ export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]
       section: courseOffering.section,
       professorName: professor.name,
       requestedKind: matchRequest.requestedKind,
+      rateMinor: quotedRate,
       engagementId: engagement.id,
       threadId: messageThread.id,
     })

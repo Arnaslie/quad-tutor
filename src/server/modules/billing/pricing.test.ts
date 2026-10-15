@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { bookAgainOpen, packageOption, packageSummary, splitMinor, takeRateBp } from "./pricing";
+import {
+  bookAgainOpen,
+  packageOption,
+  packagePriceRange,
+  packageSummary,
+  splitMinor,
+  takeRateBp,
+} from "./pricing";
 
 test("takes 10% of a session under the cap", () => {
   assert.deepEqual(splitMinor(3_500, { rateBp: 1_000, chargedThisTermMinor: 0 }), { tutorMinor: 3_150, platformMinor: 350 });
@@ -20,7 +27,7 @@ test("takes nothing when the meter is above the cap", () => {
 });
 
 test("a through-final session pays $3.15", () => {
-  const option = packageOption("through_final");
+  const option = packageOption("through_final", 3_500);
   assert.equal(option.perSessionMinor, 3_150);
   assert.deepEqual(splitMinor(option.perSessionMinor, { rateBp: 1_000, chargedThisTermMinor: 0 }), {
     tutorMinor: 2_835,
@@ -79,4 +86,46 @@ test("book again opens mid-term, not only near the end", () => {
 test("a package summary names the sessions the tutor commits to", () => {
   assert.equal(packageSummary("through_final"), "8 sessions, through the final");
   assert.equal(packageSummary("exam_anchored"), "4 sessions, up to the next exam");
+});
+
+test("package prices scale from the tutor's rate", () => {
+  const priced = [2_500, 3_500, 5_000].map((rate) => ({
+    rate,
+    exam: packageOption("exam_anchored", rate).priceMinor,
+    final: packageOption("through_final", rate).priceMinor,
+    topUp: packageOption("top_up", rate).priceMinor,
+  }));
+  assert.deepEqual(priced, [
+    { rate: 2_500, exam: 10_000, final: 18_000, topUp: 2_500 },
+    { rate: 3_500, exam: 14_000, final: 25_200, topUp: 3_500 },
+    { rate: 5_000, exam: 20_000, final: 36_000, topUp: 5_000 },
+  ]);
+});
+
+test("through the final shows its saving against eight single sessions", () => {
+  assert.deepEqual(packageOption("through_final", 2_500), {
+    kind: "through_final",
+    sessions: 8,
+    priceMinor: 18_000,
+    perSessionMinor: 2_250,
+    savingsMinor: 2_000,
+  });
+});
+
+test("a package price spans the cheapest to the dearest tutor", () => {
+  assert.deepEqual(packagePriceRange("exam_anchored", [3_500, 2_500, 5_000]), {
+    lowMinor: 10_000,
+    highMinor: 20_000,
+  });
+  assert.deepEqual(packagePriceRange("through_final", [2_500, 5_000]), {
+    lowMinor: 18_000,
+    highMinor: 36_000,
+  });
+});
+
+test("tutors at one rate give one package price", () => {
+  assert.deepEqual(packagePriceRange("through_final", [3_500, 3_500]), {
+    lowMinor: 25_200,
+    highMinor: 25_200,
+  });
 });

@@ -93,8 +93,8 @@ package for real, then ends it.
 ## The personas
 
 Each persona is one state. Amounts follow `docs/proposals/tutor-pricing.md` (10% of
-the first 10 sessions, then 5%, capped at $100 per term), and rates vary across
-$25–$50 per course. Every amount is computed by the real pricing code when the persona
+the first 10 sessions, then 5%, capped at $100 per term), and rates vary by course,
+from $25 to $50 for realism. Every amount is computed by the real pricing code when the persona
 is built, not hard-coded.
 
 **Tutors**
