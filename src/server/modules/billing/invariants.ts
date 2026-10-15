@@ -10,7 +10,7 @@ import {
   tutorCourse,
 } from "@/server/db/schema";
 
-import { TAKE_RATE_BP, TERM_FEE_CAP_MINOR } from "./pricing";
+import { FULL_TAKE_SESSIONS, LOWER_TAKE_RATE_BP, TAKE_RATE_BP, TERM_FEE_CAP_MINOR } from "./pricing";
 import { FORFEITED_PREFIX, MANUAL_PREFIX } from "./discrepancy";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -38,7 +38,7 @@ export type MoneyFacts = {
     totals: Totals;
     references?: Partial<Record<LedgerType, (string | null)[]>>;
   }[];
-  sessions: { id: string; totals: Totals }[];
+  sessions: { id: string; tutorProfileId: string; totals: Totals }[];
   tutorTerms: { tutorProfileId: string; termId: string; feeMinor: number }[];
 };
 
@@ -96,6 +96,7 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
     }
   }
 
+  const fullTakeSessions = new Map<string, number>();
   for (const s of facts.sessions) {
     const subject = `session ${s.id}`;
     const earned = minor(s.totals, EARNED);
@@ -105,6 +106,14 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
     if (rows(s.totals, EARNED) > 1) flag("one recognition per session", subject, `${rows(s.totals, EARNED)} earned rows`);
     if (earned !== split) flag("earned = accrued + fee", subject, `earned ${earned}, split ${split}`);
     if (fee > maxFee) flag("fee <= take rate", subject, `fee ${fee}, max ${maxFee}`);
+    if (fee > Math.floor((earned * LOWER_TAKE_RATE_BP) / 10_000)) {
+      fullTakeSessions.set(s.tutorProfileId, (fullTakeSessions.get(s.tutorProfileId) ?? 0) + 1);
+    }
+  }
+  for (const [tutorProfileId, count] of fullTakeSessions) {
+    if (count > FULL_TAKE_SESSIONS) {
+      flag(`full take on at most ${FULL_TAKE_SESSIONS} sessions`, `tutor ${tutorProfileId}`, `${count} sessions above the lower rate`);
+    }
   }
 
   for (const t of facts.tutorTerms) {
@@ -151,10 +160,18 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
       .where(eq(ledgerEntry.institutionId, institutionId))
       .groupBy(ledgerEntry.engagementId, ledgerEntry.type),
     tx
-      .select({ key: ledgerEntry.sessionId, type: ledgerEntry.type, minor: total, rows: count })
+      .select({
+        key: ledgerEntry.sessionId,
+        tutorProfileId: tutorCourse.tutorProfileId,
+        type: ledgerEntry.type,
+        minor: total,
+        rows: count,
+      })
       .from(ledgerEntry)
+      .innerJoin(engagement, eq(engagement.id, ledgerEntry.engagementId))
+      .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
       .where(and(eq(ledgerEntry.institutionId, institutionId), isNotNull(ledgerEntry.sessionId)))
-      .groupBy(ledgerEntry.sessionId, ledgerEntry.type),
+      .groupBy(ledgerEntry.sessionId, tutorCourse.tutorProfileId, ledgerEntry.type),
     tx
       .select({ tutorProfileId: tutorCourse.tutorProfileId, termId: courseOffering.termId, feeMinor: total })
       .from(ledgerEntry)
@@ -175,6 +192,9 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
   ]);
 
   const ledger = collect(byEngagement);
+  const sessionTotals = collect(bySession);
+  const tutorOf = new Map<string, string>();
+  for (const row of bySession) if (row.key) tutorOf.set(row.key, row.tutorProfileId);
   const references = new Map<string, Partial<Record<LedgerType, (string | null)[]>>>();
   for (const row of referenceRows) {
     const byType = references.get(row.engagementId) ?? {};
@@ -187,7 +207,7 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
       totals: ledger.get(e.id) ?? {},
       references: references.get(e.id) ?? {},
     })),
-    sessions: [...collect(bySession)].map(([id, totals]) => ({ id, totals })),
+    sessions: [...tutorOf].map(([id, tutorProfileId]) => ({ id, tutorProfileId, totals: sessionTotals.get(id) ?? {} })),
     tutorTerms,
   };
 }

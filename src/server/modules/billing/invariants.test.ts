@@ -17,7 +17,7 @@ const healthy: MoneyFacts = {
     },
     { id: "untouched", status: "active", pricePaidMinor: 3_500, totals: { package_purchase: t(3_500) } },
   ],
-  sessions: [{ id: "s1", totals: { session_earned: t(3_500), tutor_accrued: t(3_150), platform_fee: t(350) } }],
+  sessions: [{ id: "s1", tutorProfileId: "tp", totals: { session_earned: t(3_500), tutor_accrued: t(3_150), platform_fee: t(350) } }],
   tutorTerms: [{ tutorProfileId: "tp", termId: "term", feeMinor: 10_000 }],
 };
 
@@ -59,19 +59,30 @@ test("a closed package with money left deferred is flagged, refunded or not", ()
 });
 
 test("a session recognised twice is flagged", () => {
-  const sessions = [{ id: "s", totals: { session_earned: t(7_000, 2), tutor_accrued: t(6_300, 2), platform_fee: t(700, 2) } }];
+  const sessions = [{ id: "s", tutorProfileId: "tp", totals: { session_earned: t(7_000, 2), tutor_accrued: t(6_300, 2), platform_fee: t(700, 2) } }];
   assert.deepEqual(invariants({ ...healthy, sessions }), ["one recognition per session"]);
 });
 
 test("a fee above the take rate is flagged, and the floor is allowed", () => {
-  const over = [{ id: "s", totals: { session_earned: t(3_500), tutor_accrued: t(3_100), platform_fee: t(400) } }];
+  const over = [{ id: "s", tutorProfileId: "tp", totals: { session_earned: t(3_500), tutor_accrued: t(3_100), platform_fee: t(400) } }];
   assert.deepEqual(invariants({ ...healthy, sessions: over }), ["fee <= take rate"]);
-  const floored = [{ id: "s", totals: { session_earned: t(3_155), tutor_accrued: t(2_840), platform_fee: t(315) } }];
+  const floored = [{ id: "s", tutorProfileId: "tp", totals: { session_earned: t(3_155), tutor_accrued: t(2_840), platform_fee: t(315) } }];
   assert.deepEqual(invariants({ ...healthy, sessions: floored }), []);
 });
 
+test("an 11th session at the full take is flagged, and the lower take is allowed", () => {
+  const session = (i: number, fee: number) => ({
+    id: `s${i}`,
+    tutorProfileId: "tp",
+    totals: { session_earned: t(3_500), tutor_accrued: t(3_500 - fee), platform_fee: t(fee) },
+  });
+  const ten = Array.from({ length: 10 }, (_, i) => session(i, 350));
+  assert.deepEqual(invariants({ ...healthy, sessions: [...ten, session(10, 175)] }), []);
+  assert.deepEqual(invariants({ ...healthy, sessions: [...ten, session(10, 350)] }), ["full take on at most 10 sessions"]);
+});
+
 test("a session whose split does not add up to what was earned is flagged", () => {
-  const sessions = [{ id: "s", totals: { session_earned: t(3_500), tutor_accrued: t(2_730) } }];
+  const sessions = [{ id: "s", tutorProfileId: "tp", totals: { session_earned: t(3_500), tutor_accrued: t(2_730) } }];
   assert.deepEqual(invariants({ ...healthy, sessions }), ["earned = accrued + fee"]);
 });
 
