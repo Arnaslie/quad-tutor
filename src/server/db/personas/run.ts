@@ -14,7 +14,7 @@ async function main(): Promise<void> {
   const built = await resetPersonas({ institutionId: campus.id });
   console.log(`\nreset ${built.length} personas on ${CAMPUS_SLUG}\n`);
   for (const persona of built) {
-    console.log(`  ${persona.key.padEnd(16)} ${persona.email.padEnd(40)} ${persona.role}: ${persona.state}`);
+    console.log(`  ${persona.key.padEnd(22)} ${persona.email.padEnd(48)} ${persona.role}: ${persona.state}`);
   }
 }
 

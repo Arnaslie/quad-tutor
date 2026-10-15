@@ -177,7 +177,13 @@ async function lastEndedTerm(institutionId: string): Promise<string> {
   return row.id;
 }
 
-async function claim(campus: PersonaCampus, tutor: TutorActor, persona: TutorPersona, rateMinor: number): Promise<Target> {
+export async function claimedTutor(
+  campus: PersonaCampus,
+  persona: Omit<TutorPersona, "packs">,
+): Promise<{ tutor: TutorActor; target: Target; rateMinor: number }> {
+  const rateMinor = rateMinorFromDollars(persona.rateDollars);
+  if (rateMinor === null) throw new Error(`${persona.key}: $${persona.rateDollars} is not a rate a tutor can set.`);
+  const tutor = await createTutorPersona(campus, persona);
   const offering = await offeringFor(campus.institutionId, persona.course);
   const { tutorCourseId } = await claimCourse({
     tutor,
@@ -197,10 +203,15 @@ async function claim(campus: PersonaCampus, tutor: TutorActor, persona: TutorPer
   }
   await setDefaultLocation({ tutor, location: LOCATION });
 
-  return { courseOfferingId: offering.id, tutorCourseIds: [tutorCourseId], accepterTutorCourseId: tutorCourseId };
+  return {
+    tutor,
+    target: { courseOfferingId: offering.id, tutorCourseIds: [tutorCourseId], accepterTutorCourseId: tutorCourseId },
+    rateMinor,
+  };
 }
 
-async function historyTimes(institutionId: string, count: number): Promise<Date[]> {
+export async function historyTimes(institutionId: string, count: number): Promise<Date[]> {
+  if (count === 0) return [];
   const current = await currentTerm(institutionId);
   if (!current) throw new Error("No term is running today, so there is no term to give the personas a history in.");
   const from = new Date(`${current.startsOn}T00:00:00Z`).getTime() + DAY;
@@ -216,7 +227,7 @@ async function historyTimes(institutionId: string, count: number): Promise<Date[
   });
 }
 
-async function teach(params: {
+export async function teach(params: {
   student: Actor;
   tutor: TutorActor;
   engagementId: string;
@@ -235,17 +246,14 @@ async function teach(params: {
   await backdateLedger({ engagementId, sessionId, at: new Date(params.taughtAt.getTime() + HOUR) });
 }
 
-async function nextSession(actor: Actor, engagementId: string): Promise<string> {
+export async function nextSession(actor: Actor, engagementId: string): Promise<string> {
   const [slotStartsAt] = await slotsForEngagement({ actor, engagementId });
   const { sessionId } = await bookSession({ actor, engagementId, slotStartsAt });
   return sessionId;
 }
 
 async function buildTutor(campus: PersonaCampus, persona: TutorPersona): Promise<PersonaSummary> {
-  const rateMinor = rateMinorFromDollars(persona.rateDollars);
-  if (rateMinor === null) throw new Error(`${persona.key}: $${persona.rateDollars} is not a rate a tutor can set.`);
-  const tutor = await createTutorPersona(campus, persona);
-  const target = await claim(campus, tutor, persona, rateMinor);
+  const { tutor, target, rateMinor } = await claimedTutor(campus, persona);
   const times = await historyTimes(
     campus.institutionId,
     persona.packs.reduce((sum, pack) => sum + pack.delivered, 0),

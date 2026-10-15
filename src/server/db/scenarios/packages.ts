@@ -113,9 +113,22 @@ export async function renewPackage(params: Purchase & { target: Target }) {
   return acceptAndBuy(params, params.target.accepterTutorCourseId, params.target.courseOfferingId);
 }
 
-async function acceptAndBuy(params: Purchase, tutorCourseId: string, courseOfferingId: string) {
-  const { student, tutor, slotsNeeded } = params;
+export async function acceptedRequest(params: {
+  student: Actor;
+  tutor: TutorActor;
+  target: Target;
+  kind: RequestedKind;
+}): Promise<string> {
+  await requestTutors({
+    actor: params.student,
+    courseOfferingId: params.target.courseOfferingId,
+    tutorCourseIds: [params.target.accepterTutorCourseId],
+    kind: params.kind,
+  });
+  return acceptPending(params.student, params.tutor, params.target.accepterTutorCourseId);
+}
 
+async function acceptPending(student: Actor, tutor: TutorActor, tutorCourseId: string): Promise<string> {
   const pending = await db
     .select({ id: matchRequest.id })
     .from(matchRequest)
@@ -132,6 +145,12 @@ async function acceptAndBuy(params: Purchase, tutorCourseId: string, courseOffer
   if (!requestId) throw new Error(`no pending request for ${tutor.userId}`);
 
   await acceptRequest({ tutor, requestId });
+  return requestId;
+}
+
+async function acceptAndBuy(params: Purchase, tutorCourseId: string, courseOfferingId: string) {
+  const { student, tutor, slotsNeeded } = params;
+  const requestId = await acceptPending(student, tutor, tutorCourseId);
 
   const slots = await slotsForRequest({ actor: student, requestId });
   if (slots.length < slotsNeeded) {
