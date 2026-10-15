@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { AppShell } from "@/components/app-shell";
-import { testPersonasOn } from "@/server/db/personas/ops";
+import { testPersonasOn } from "@/server/db/personas/lock";
 import { requireOperator } from "@/server/modules/identity/actor";
 
 export default async function OpsLayout({ children }: { children: ReactNode }) {

@@ -14,12 +14,13 @@ import { buyPackage, buyTopUp } from "@/server/modules/engagements/buy-and-pay";
 import { slotsForRequest, slotsForTopUp } from "@/server/modules/engagements/purchase";
 import { bookAgainList, packagesForStudent, sessionBoardForStudent, sessionBoardForTutor } from "@/server/modules/engagements/reads";
 import { engagementsDueForTermEndRefund, endPackage, runTermEndRefunds } from "@/server/modules/engagements/termEnd";
-import { cleanup, delivered, person, rows, run, world, type World } from "@/server/modules/billing/test-world";
+import { cleanup, delivered, operator, person, rows, run, world, type World } from "@/server/modules/billing/test-world";
 import { requestsForStudent, requestTutors, standingFor } from "@/server/modules/matching/requests";
 import { runNotifications } from "@/server/modules/notifications/dispatch";
 import { cardRatings } from "@/server/modules/ratings/reads";
 import { earningsForTutor, feeCapProgressForTutor } from "@/server/modules/tutoring/earnings";
 
+import { resetTestUsers } from "./ops";
 import { personaUserId, type PersonaCampus } from "./people";
 import { resetPersonas } from "./reset";
 import { STUDENT_PERSONAS } from "./students";
@@ -386,7 +387,11 @@ test("the reset refuses to delete a request a real student sent a persona tutor"
   await requestTutors({ actor: student, courseOfferingId: claim.offeringId, tutorCourseIds: [claim.id], kind: "exam_anchored" });
   const before = await visibleState();
 
-  await assert.rejects(resetPersonas(campus), /pair a test user with a real account/);
+  await assert.rejects(resetPersonas(campus), /A real account shares these rows with a test user/);
+  process.env.TEST_PERSONAS = "on";
+  const refused = await resetTestUsers(await operator(w.institutionId));
+  assert.equal(refused.status, "refused");
+  assert.match(refused.status === "refused" ? refused.message : "", /^Nothing was reset\. A real account shares these rows with a test user\./);
   assert.deepEqual(await visibleState(), before);
   assert.equal(
     (await db.select({ id: matchRequest.id }).from(matchRequest).where(eq(matchRequest.studentProfileId, student.studentProfileId))).length,
@@ -398,6 +403,7 @@ test("the reset refuses to delete a request a real student sent a persona tutor"
 });
 
 test("while a reset runs, the email sweep sends nothing and a second reset is refused", async () => {
+  process.env.TEST_PERSONAS = "on";
   let finished = false;
   const resetting = resetPersonas(campus).finally(() => (finished = true));
   const midway = async () =>

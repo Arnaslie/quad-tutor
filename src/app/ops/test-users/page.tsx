@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
-import { testPersonasOn } from "@/server/db/personas/ops";
+import { testPersonasOn } from "@/server/db/personas/lock";
 import { requireOperator } from "@/server/modules/identity/actor";
 
 import { ResetForm } from "./reset-form";
