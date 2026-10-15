@@ -108,13 +108,20 @@ export function unusedRefundMinor(engagement: {
   );
 }
 
+export const LOWER_TAKE_RATE_BP = 500;
+export const FULL_TAKE_SESSIONS = 10;
+
+export function takeRateBp(sessionsEarnedBefore: number): number {
+  return sessionsEarnedBefore < FULL_TAKE_SESSIONS ? TAKE_RATE_BP : LOWER_TAKE_RATE_BP;
+}
+
 export function splitMinor(
   sessionMinor: number,
-  feeChargedThisTermMinor: number,
+  take: { rateBp: number; chargedThisTermMinor: number },
 ): { tutorMinor: number; platformMinor: number } {
   const platformMinor = Math.min(
-    Math.floor((sessionMinor * TAKE_RATE_BP) / 10_000),
-    Math.max(0, TERM_FEE_CAP_MINOR - feeChargedThisTermMinor),
+    Math.floor((sessionMinor * take.rateBp) / 10_000),
+    Math.max(0, TERM_FEE_CAP_MINOR - take.chargedThisTermMinor),
   );
   return { tutorMinor: sessionMinor - platformMinor, platformMinor };
 }

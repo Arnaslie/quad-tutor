@@ -33,6 +33,26 @@ export async function feeChargedThisTermMinor(
   return rows.at(0)?.total ?? 0;
 }
 
+export async function sessionsEarned(
+  exec: typeof db | Tx,
+  scope: { tutorProfileId: string; institutionId: string },
+): Promise<number> {
+  const rows = await exec
+    .select({ n: sql<number>`count(*)::int` })
+    .from(ledgerEntry)
+    .innerJoin(engagement, eq(engagement.id, ledgerEntry.engagementId))
+    .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
+    .where(
+      and(
+        eq(ledgerEntry.type, "session_earned"),
+        eq(ledgerEntry.institutionId, scope.institutionId),
+        eq(tutorCourse.tutorProfileId, scope.tutorProfileId),
+      ),
+    );
+
+  return rows.at(0)?.n ?? 0;
+}
+
 export type LedgerWrite = {
   engagementId: string;
   institutionId: string;

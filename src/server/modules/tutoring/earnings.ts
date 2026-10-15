@@ -8,8 +8,8 @@ import {
   tutorProfile,
 } from "@/server/db/schema";
 import { FORFEITED_PREFIX, MANUAL_PREFIX } from "@/server/modules/billing/discrepancy";
-import { feeChargedThisTermMinor } from "@/server/modules/billing/ledger";
-import { TERM_FEE_CAP_MINOR } from "@/server/modules/billing/pricing";
+import { feeChargedThisTermMinor, sessionsEarned } from "@/server/modules/billing/ledger";
+import { TERM_FEE_CAP_MINOR, takeRateBp } from "@/server/modules/billing/pricing";
 import { currentTerm } from "@/server/modules/catalog/courses";
 import type { TutorActor } from "@/server/modules/identity/actor";
 
@@ -74,17 +74,32 @@ export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings
   };
 }
 
-export type FeeCapProgress = { chargedMinor: number; capMinor: number; termName: string };
+export type FeeCapProgress = {
+  chargedMinor: number;
+  capMinor: number;
+  termName: string;
+  sessionsEarned: number;
+  rateBp: number;
+};
 
 export async function feeCapProgressForTutor(tutor: TutorActor): Promise<FeeCapProgress | null> {
   const current = await currentTerm(tutor.institutionId);
   if (!current) return null;
 
-  const chargedMinor = await feeChargedThisTermMinor(db, {
-    tutorProfileId: tutor.tutorProfileId,
-    termId: current.id,
-    institutionId: tutor.institutionId,
-  });
+  const [chargedMinor, earned] = await Promise.all([
+    feeChargedThisTermMinor(db, {
+      tutorProfileId: tutor.tutorProfileId,
+      termId: current.id,
+      institutionId: tutor.institutionId,
+    }),
+    sessionsEarned(db, tutor),
+  ]);
 
-  return { chargedMinor, capMinor: TERM_FEE_CAP_MINOR, termName: current.name };
+  return {
+    chargedMinor,
+    capMinor: TERM_FEE_CAP_MINOR,
+    termName: current.name,
+    sessionsEarned: earned,
+    rateBp: takeRateBp(earned),
+  };
 }
