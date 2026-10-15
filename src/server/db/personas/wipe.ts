@@ -47,7 +47,6 @@ const touching = (
     or(inArray(table.studentProfileId, people.studentIds), inArray(table.tutorCourseId, people.tutorCourseIds)),
   );
 
-/** A row with a persona on one side and a real account on the other is not the reset's to delete. */
 async function refuseMixed(tx: Tx, institutionId: string, people: People): Promise<void> {
   const students = new Set(people.studentIds);
   const tutorCourses = new Set(people.tutorCourseIds);
@@ -87,7 +86,6 @@ async function refuseMixed(tx: Tx, institutionId: string, people: People): Promi
   }
 }
 
-/** Deletes every persona on the campus and everything that hangs off them, and nothing else. */
 export async function wipePersonas(institutionId: string): Promise<{ users: number }> {
   return db.transaction(async (tx) => {
     const people = await tx
@@ -101,23 +99,21 @@ export async function wipePersonas(institutionId: string): Promise<{ users: numb
     const userIds = ids(people);
     const studentIds = people.map((row) => row.studentProfileId);
     const tutorIds = people.flatMap((row) => (row.tutorProfileId ? [row.tutorProfileId] : []));
-    const tutorCourseIds = tutorIds.length
-      ? ids(
-          await tx
-            .select({ id: tutorCourse.id })
-            .from(tutorCourse)
-            .where(and(eq(tutorCourse.institutionId, institutionId), inArray(tutorCourse.tutorProfileId, tutorIds))),
-        )
-      : [];
+    const tutorCourseIds = ids(
+      await tx
+        .select({ id: tutorCourse.id })
+        .from(tutorCourse)
+        .where(and(eq(tutorCourse.institutionId, institutionId), inArray(tutorCourse.tutorProfileId, tutorIds))),
+    );
 
     const scope: People = { userIds, studentIds, tutorCourseIds };
     await refuseMixed(tx, institutionId, scope);
     const ofPersonas = (table: Parameters<typeof touching>[0]) => touching(table, institutionId, scope);
 
     const engagementIds = ids(await tx.select({ id: engagement.id }).from(engagement).where(ofPersonas(engagement)));
-    const sessionIds = engagementIds.length
-      ? ids(await tx.select({ id: sessionBooking.id }).from(sessionBooking).where(inArray(sessionBooking.engagementId, engagementIds)))
-      : [];
+    const sessionIds = ids(
+      await tx.select({ id: sessionBooking.id }).from(sessionBooking).where(inArray(sessionBooking.engagementId, engagementIds)),
+    );
     const threadIds = ids(await tx.select({ id: messageThread.id }).from(messageThread).where(ofPersonas(messageThread)));
     const ratingIds = ids(await tx.select({ id: sessionRating.id }).from(sessionRating).where(ofPersonas(sessionRating)));
     const reportIds = ids(
@@ -154,17 +150,15 @@ export async function wipePersonas(institutionId: string): Promise<{ users: numb
           or(inArray(reliabilityEvent.userId, userIds), inArray(reliabilityEvent.sessionId, sessionIds)),
         ),
       );
-    if (engagementIds.length > 0) {
-      await tx
-        .delete(moneyDiscrepancy)
-        .where(and(eq(moneyDiscrepancy.institutionId, institutionId), inArray(moneyDiscrepancy.engagementId, engagementIds)));
-      await tx
-        .delete(paymentDispute)
-        .where(and(eq(paymentDispute.institutionId, institutionId), inArray(paymentDispute.engagementId, engagementIds)));
-      await tx.delete(ledgerEntry).where(inArray(ledgerEntry.engagementId, engagementIds));
-      await tx.delete(sessionBooking).where(inArray(sessionBooking.engagementId, engagementIds));
-      await tx.delete(engagement).where(inArray(engagement.id, engagementIds));
-    }
+    await tx
+      .delete(moneyDiscrepancy)
+      .where(and(eq(moneyDiscrepancy.institutionId, institutionId), inArray(moneyDiscrepancy.engagementId, engagementIds)));
+    await tx
+      .delete(paymentDispute)
+      .where(and(eq(paymentDispute.institutionId, institutionId), inArray(paymentDispute.engagementId, engagementIds)));
+    await tx.delete(ledgerEntry).where(inArray(ledgerEntry.engagementId, engagementIds));
+    await tx.delete(sessionBooking).where(inArray(sessionBooking.engagementId, engagementIds));
+    await tx.delete(engagement).where(inArray(engagement.id, engagementIds));
     await tx.delete(matchRequest).where(ofPersonas(matchRequest));
     await tx.delete(demandSignal).where(inArray(demandSignal.studentProfileId, studentIds));
     await tx.delete(enrollment).where(inArray(enrollment.studentProfileId, studentIds));

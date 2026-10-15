@@ -45,7 +45,6 @@ type TutorPersona = {
 
 const four = (pack: Omit<Pack, "delivered"> = {}): Pack => ({ delivered: 4, ...pack });
 
-/** Each pair is a first package and the same student's "Book again". */
 const renewing = (pairs: number, pack: Omit<Pack, "delivered" | "renews"> = {}): Pack[] =>
   Array.from({ length: pairs }, () => [four(pack), four({ ...pack, renews: true })]).flat();
 
@@ -203,7 +202,6 @@ async function claim(campus: PersonaCampus, tutor: TutorActor, persona: TutorPer
   return { courseOfferingId: offering.id, tutorCourseIds: [tutorCourseId], accepterTutorCourseId: tutorCourseId };
 }
 
-/** Evenly spaced from the start of the term to eight days ago, so every rating window has closed. */
 async function historyTimes(institutionId: string, count: number): Promise<Date[]> {
   const current = await currentTerm(institutionId);
   if (!current) throw new Error("No current term — run db:catalog first.");

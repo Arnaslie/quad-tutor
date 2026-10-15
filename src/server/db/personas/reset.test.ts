@@ -27,10 +27,9 @@ after(async () => {
   await cleanup();
 });
 
-/** A campus carrying every course a tutor persona teaches, plus a real tutor and student who are not personas. */
 before(async () => {
   w = await world();
-  campus = { institutionId: w.institutionId, tag: run };
+  campus = { institutionId: w.institutionId, testRun: run };
   await db.insert(term).values({ institutionId: w.institutionId, name: "Before", startsOn: "2020-01-06", endsOn: "2020-05-01" });
   for (const code of new Set(TUTOR_PERSONAS.map((persona) => persona.course))) {
     const [row] = await db.insert(course).values({ institutionId: w.institutionId, title: code, department: "TEST" }).returning({ id: course.id });
@@ -54,8 +53,7 @@ async function fees(key: string): Promise<number[]> {
   return found.map((row) => row.amountMinor);
 }
 
-/** Everything a tester could see, with ids and timestamps left out. */
-async function contents() {
+async function visibleState() {
   const found = await db.execute(sql`
     select tutor.user_id as tutor, student.user_id as student, e.kind, e.status, e.price_paid_minor,
       (select string_agg(s.status || '/' || coalesce(s.resolution::text, '-'), ' ' order by s.scheduled_at)
@@ -135,12 +133,12 @@ test("a $25 through-final package pays 2_250 a session, and the 11th session tak
 
 test("running the reset again rebuilds the same personas and leaves everyone else alone", async () => {
   const bystanderLedger = await rows(bystander.engagementId, "tutor_accrued");
-  const first = await contents();
+  const first = await visibleState();
   assert.equal(first.length, 35);
 
   await resetPersonas(campus);
 
-  assert.deepEqual(await contents(), first);
+  assert.deepEqual(await visibleState(), first);
   assert.deepEqual(await rows(bystander.engagementId, "tutor_accrued"), bystanderLedger);
   await assertMoneyInvariants(w.institutionId);
 });
@@ -154,10 +152,10 @@ test("the reset refuses to delete a request a real student sent a persona tutor"
     .where(eq(tutorCourse.tutorProfileId, tutorProfileId));
   const student = await person(w.institutionId);
   await requestTutors({ actor: student, courseOfferingId: claim.offeringId, tutorCourseIds: [claim.id], kind: "exam_anchored" });
-  const before = await contents();
+  const before = await visibleState();
 
   await assert.rejects(resetPersonas(campus), /pair a persona with a real account/);
-  assert.deepEqual(await contents(), before);
+  assert.deepEqual(await visibleState(), before);
   assert.equal(
     (await db.select({ id: matchRequest.id }).from(matchRequest).where(eq(matchRequest.studentProfileId, student.studentProfileId))).length,
     1,

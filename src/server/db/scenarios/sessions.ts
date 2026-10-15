@@ -57,7 +57,6 @@ export async function moveIntoPast(params: {
     );
 }
 
-/** Dates a recognised session's ledger rows to when it was taught, so its rating window closed as an old one's would. */
 export async function backdateLedger(params: {
   engagementId: string;
   sessionId: string;

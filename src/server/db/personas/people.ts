@@ -7,13 +7,12 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
 const INBOX = { local: "arnutislie12", domain: "gmail.com" };
 
-/** `tag` keeps a test's personas apart from the ones `db:personas` built in the same database. */
-export type PersonaCampus = { institutionId: string; tag?: string };
+export type PersonaCampus = { institutionId: string; testRun?: string };
 
 export type PersonaSummary = { key: string; email: string; role: "tutor" | "student"; state: string };
 
 function handle(campus: PersonaCampus, key: string): string {
-  return campus.tag ? `${key}.${campus.tag}` : key;
+  return campus.testRun ? `${key}.${campus.testRun}` : key;
 }
 
 export function personaUserId(campus: PersonaCampus, key: string): string {
@@ -24,7 +23,6 @@ export function personaEmail(campus: PersonaCampus, key: string): string {
   return `${INBOX.local}+${handle(campus, key)}@${INBOX.domain}`;
 }
 
-/** Listed in `institution_email`, so a magic link to the plus-alias signs in on this campus. */
 export async function createPersona(campus: PersonaCampus, key: string, name: string): Promise<Actor> {
   const userId = personaUserId(campus, key);
   const email = personaEmail(campus, key);

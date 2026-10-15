@@ -16,7 +16,6 @@ const BUILDERS: readonly ((campus: PersonaCampus) => Promise<PersonaSummary[]>)[
 
 const stamp = (column: AnyColumn) => sql`coalesce(${column}, now())`;
 
-/** History is not news: marks every persona row as already notified, so the email sweep never mails it. */
 async function silenceHistory(institutionId: string): Promise<void> {
   const personaStudents = db
     .select({ id: studentProfile.id })
@@ -52,7 +51,6 @@ async function silenceHistory(institutionId: string): Promise<void> {
     .where(and(eq(tutorCourse.institutionId, institutionId), inArray(tutorCourse.tutorProfileId, personaTutors)));
 }
 
-/** Deletes every persona on the campus and rebuilds them all, so running it twice gives the same state. */
 export async function resetPersonas(campus: PersonaCampus): Promise<PersonaSummary[]> {
   await wipePersonas(campus.institutionId);
   const built: PersonaSummary[] = [];

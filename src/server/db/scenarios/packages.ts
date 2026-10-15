@@ -104,7 +104,6 @@ export async function openPackage(params: Purchase & { target: Target }) {
   return { ...bought, asked };
 }
 
-/** "Book again" with the same tutor once the student's last package with them has nothing left to book. */
 export async function renewPackage(params: Purchase & { target: Target }) {
   await requestRenewal({
     actor: params.student,
