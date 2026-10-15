@@ -29,7 +29,9 @@ test("log transport refuses to run on a Vercel production deploy", async () => {
 test("log transport prints instead of sending under a production build with a key set", async (t) => {
   Object.assign(env, { EMAIL_TRANSPORT: "log", NODE_ENV: "production", RESEND_API_KEY: "re_test" });
   delete env.VERCEL_ENV;
-  const fetch = t.mock.method(globalThis, "fetch");
+  const fetch = t.mock.method(globalThis, "fetch", () => {
+    throw new Error("log transport must not call Resend");
+  });
   const log = t.mock.method(console, "log", () => {});
 
   await sendEmail(message);

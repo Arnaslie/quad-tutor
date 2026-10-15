@@ -86,7 +86,7 @@ async function refuseMixed(tx: Tx, institutionId: string, people: People): Promi
   }
 
   if (mixed.length > 0) {
-    throw new Error(`Refusing to reset personas: these rows pair a persona with a real account. Clear them by hand first.\n${mixed.join("\n")}`);
+    throw new Error(`Refusing to wipe: these rows pair a persona with a real account. Clear them by hand first.\n${mixed.join("\n")}`);
   }
 }
 
