@@ -13,6 +13,7 @@ import {
   recordRefundFailure,
   type Ids,
 } from "./discrepancy";
+import { refuseFixture } from "./fixtures";
 import { GatewayError, errorFacts, isLiveRefund, stripeGateway, type NewRefund, type Refund } from "./stripe";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -213,6 +214,7 @@ export async function neverCharged(row: Ids): Promise<boolean> {
  * `pi_test_…` ids), is flagged rather than retried forever. A paid one is never flagged on a 404.
  */
 async function issue(row: RefundRow, retry: boolean): Promise<RefundOutcome> {
+  refuseFixture(row.paymentIntentId);
   try {
     return await attempt(row, retry);
   } catch (error) {

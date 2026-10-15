@@ -1,6 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
+import { escapeLike } from "@/server/db/like";
 import {
   engagement,
   ledgerEntry,
@@ -8,6 +9,7 @@ import {
   tutorProfile,
 } from "@/server/db/schema";
 import { FORFEITED_PREFIX, MANUAL_PREFIX } from "@/server/modules/billing/discrepancy";
+import { FIXTURE_TRANSFER_PREFIX } from "@/server/modules/billing/fixtures";
 import { feeChargedThisTermMinor, sessionsEarned } from "@/server/modules/billing/ledger";
 import { TERM_FEE_CAP_MINOR, takeRateBp } from "@/server/modules/billing/pricing";
 import { currentTerm } from "@/server/modules/catalog/courses";
@@ -32,8 +34,9 @@ export const NO_EARNINGS: TutorEarnings = {
 };
 
 /**
- * Transferred counts what Stripe confirmed (a stamped `tr_…`) or ops paid by hand (`manual:…`), less what ops
- * reversed. Pay ops wrote off (`forfeited:…`) is neither transferred nor owed.
+ * Transferred counts what Stripe confirmed (a stamped `tr_…`), ops paid by hand (`manual:…`) or a persona's
+ * history recorded (`fixture_tr_…`), less what ops reversed. Pay ops wrote off (`forfeited:…`) is neither
+ * transferred nor owed.
  */
 export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings> {
   const accrued = sql`${ledgerEntry.type} = 'tutor_accrued'`;
@@ -43,7 +46,7 @@ export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings
     .select({
       earnedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${accrued}), 0)::int`,
       transferredMinor: sql<number>`(
-        coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${transfer("tr\\_")} or ${transfer(MANUAL_PREFIX)}), 0)
+        coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${transfer("tr\\_")} or ${transfer(MANUAL_PREFIX)} or ${transfer(escapeLike(FIXTURE_TRANSFER_PREFIX))}), 0)
         - coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${ledgerEntry.type} = 'transfer_reversal'), 0)
       )::int`,
       forfeitedMinor: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}) filter (where ${transfer(FORFEITED_PREFIX)}), 0)::int`,
