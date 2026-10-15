@@ -44,7 +44,7 @@ These two items ship as separate PRs, and rates go first. Both need the
   and new top-ups only.
 - **Bounds.** Whole dollars, $1 to $200 a session, decided by the user on 2026-10-15.
   Stripe cannot charge under $0.50, which sets the floor. The ceiling is not a market
-  limit: no honest tutor charges $200 a session, and without one a stolen card and a
+  limit: no honest tutor charges more than $200 a session, and without one a stolen card and a
   colluding "tutor" could move large sums through payouts.
   The rule lives in its own import-free module, shared by the tutor's settings form
   and the server action (CLAUDE.md, Conventions). The server validates with Zod.
