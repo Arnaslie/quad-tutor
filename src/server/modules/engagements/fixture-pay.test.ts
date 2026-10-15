@@ -120,16 +120,20 @@ test("ending a fixture package books its refund and never sends it to Stripe", a
   assert.deepEqual(await checkMoneyInvariants(w.institutionId), []);
 });
 
-test("the money check rejects a fixture reference on an engagement that is not between personas", async () => {
-  const w = await world();
-  const { engagementId } = await delivered(w);
-  await db
-    .update(ledgerEntry)
-    .set({ stripeReference: sql`'fixture_pi_' || ${ledgerEntry.id}` })
-    .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, "package_purchase")));
+test("the money check rejects a fixture reference unless both the student and the tutor are personas", async () => {
+  for (const [tutorPrefix, studentPrefix] of [["test_money", "test_money"], [PERSONA, "test_money"], ["test_money", PERSONA]]) {
+    const w = await world(tutorPrefix);
+    const { actor, buy } = await accepted(w, studentPrefix);
+    const { engagementId } = await pay(await buy());
+    await firstSessionDelivered(w, actor, engagementId);
+    await db
+      .update(ledgerEntry)
+      .set({ stripeReference: sql`'fixture_pi_' || ${ledgerEntry.id}` })
+      .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, "package_purchase")));
 
-  assert.deepEqual(
-    (await checkMoneyInvariants(w.institutionId)).map((v) => [v.invariant, v.subject]),
-    [["fixture reference only between personas", `engagement ${engagementId}`]],
-  );
+    assert.deepEqual(
+      (await checkMoneyInvariants(w.institutionId)).map((v) => [v.invariant, v.subject]),
+      [["fixture reference only between personas", `engagement ${engagementId}`]],
+    );
+  }
 });
