@@ -5,32 +5,33 @@ import { and, desc, eq, gt, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { verification } from "@/server/db/auth-schema";
-import { personaEmail, type PersonaCampus } from "@/server/db/personas/people";
+import { campusBySlug, personaEmail, type PersonaCampus } from "@/server/db/personas/people";
 import { claimedTutor } from "@/server/db/personas/tutors";
-import { institution, institutionEmail } from "@/server/db/schema";
+import { courseOffering, institutionEmail, professor } from "@/server/db/schema";
 
 import { env } from "./env";
 
 export type Person = { name: string; email: string };
 
-export const EC110 = { code: "EC 110", section: "001", professor: "Carla Nunez" };
+export type TestCampus = Required<PersonaCampus>;
 
-export async function testCampus(): Promise<PersonaCampus> {
-  const [campus] = await db.select({ id: institution.id }).from(institution).where(eq(institution.slug, "ua"));
-  if (!campus) throw new Error('No campus "ua" — run npm run db:catalog first.');
-  return { institutionId: campus.id, testRun: randomUUID().slice(0, 8) };
+export async function testCampus(): Promise<TestCampus> {
+  return { ...(await campusBySlug("ua")), testRun: randomUUID().slice(0, 8) };
 }
 
 /** Allowed to sign in, but no account yet, so the first sign-in lands on /welcome. */
-export async function newcomer(campus: PersonaCampus, key: string, name: string): Promise<Person> {
+export async function newcomer(campus: TestCampus, key: string, name: string): Promise<Person> {
   const email = personaEmail(campus, key);
   await db.insert(institutionEmail).values({ email, institutionId: campus.institutionId });
   return { name: `${name} ${campus.testRun}`, email };
 }
 
-export async function tutorFor(campus: PersonaCampus, course: string): Promise<Person> {
+export async function tutorFor(
+  campus: TestCampus,
+  course: string,
+): Promise<Person & { section: string; professor: string }> {
   const name = `Tutor ${campus.testRun}`;
-  const { tutor } = await claimedTutor(campus, {
+  const { tutor, target } = await claimedTutor(campus, {
     key: "tutor",
     name,
     headline: `${course} tutor`,
@@ -38,7 +39,13 @@ export async function tutorFor(campus: PersonaCampus, course: string): Promise<P
     rateDollars: 40,
     kyc: "not_started",
   });
-  return { name, email: tutor.email };
+  const [offering] = await db
+    .select({ section: courseOffering.section, professor: professor.name })
+    .from(courseOffering)
+    .innerJoin(professor, eq(professor.id, courseOffering.professorId))
+    .where(eq(courseOffering.id, target.courseOfferingId));
+  if (!offering?.section) throw new Error(`${course}: the claimed offering has no section`);
+  return { name, email: tutor.email, section: offering.section, professor: offering.professor };
 }
 
 // Better Auth's magic-link plugin stores the token plain in `identifier` and the
@@ -50,7 +57,6 @@ async function latestSignInToken(person: Person): Promise<string> {
     .where(
       and(
         sql`${verification.value}::jsonb ->> 'email' = ${person.email}`,
-        sql`${verification.value}::jsonb ->> 'name' = ${person.name}`,
         gt(verification.expiresAt, new Date()),
       ),
     )

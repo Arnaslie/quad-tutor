@@ -7,7 +7,6 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 15_000 },
   forbidOnly: Boolean(process.env.CI),
-  retries: 0,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: env.BETTER_AUTH_URL,
@@ -17,6 +16,7 @@ export default defineConfig({
     command: `npm run start -- --port ${new URL(env.BETTER_AUTH_URL).port || 3000}`,
     url: env.BETTER_AUTH_URL,
     env: { STRIPE_FAKE: "1", EMAIL_TRANSPORT: "log" },
+    stdout: "pipe",
     timeout: 120_000,
   },
 });

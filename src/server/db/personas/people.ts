@@ -1,5 +1,8 @@
+import { eq } from "drizzle-orm";
+
 import { db } from "../index";
-import { institutionEmail, studentProfile, tutorProfile, user } from "../schema";
+import { escapeLike } from "../like";
+import { institution, institutionEmail, studentProfile, tutorProfile, user } from "../schema";
 
 import type { KycStatus } from "@/server/modules/billing/kyc";
 import { PERSONA_PREFIX } from "@/server/modules/billing/fixtures";
@@ -15,12 +18,22 @@ function handle(campus: PersonaCampus, key: string): string {
   return campus.testRun ? `${key}.${campus.testRun}` : key;
 }
 
+export async function campusBySlug(slug: string): Promise<PersonaCampus> {
+  const [campus] = await db.select({ id: institution.id }).from(institution).where(eq(institution.slug, slug));
+  if (!campus) throw new Error(`No campus "${slug}" — run npm run db:catalog first.`);
+  return { institutionId: campus.id };
+}
+
 export function personaUserId(campus: PersonaCampus, key: string): string {
   return `${PERSONA_PREFIX}${handle(campus, key)}`;
 }
 
 export function personaEmail(campus: PersonaCampus, key: string): string {
   return `${INBOX.local}+${handle(campus, key)}@${INBOX.domain}`;
+}
+
+export function testRunEmails(testRun: string): string {
+  return `${escapeLike(INBOX.local)}+%.${escapeLike(testRun)}@${escapeLike(INBOX.domain)}`;
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];

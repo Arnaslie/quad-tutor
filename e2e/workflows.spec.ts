@@ -1,16 +1,26 @@
-import { expect, test } from "@playwright/test";
+import { expect, test as base } from "@playwright/test";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/server/db";
+import { wipeTestRun } from "@/server/db/personas/wipe";
 import { moveIntoPast } from "@/server/db/scenarios/sessions";
 import { sessionBooking } from "@/server/db/schema";
 
 import { env } from "./env";
-import { EC110, newcomer, openAs, testCampus, tutorFor } from "./people";
+import { newcomer, openAs, testCampus, tutorFor, type TestCampus } from "./people";
 
-test("a new student books a tutor and both confirm the session", async ({ browser }) => {
-  const campus = await testCampus();
-  const tutor = await tutorFor(campus, EC110.code);
+const EC110 = "EC 110";
+
+const test = base.extend<{ campus: TestCampus }>({
+  campus: async ({}, provide) => {
+    const campus = await testCampus();
+    await provide(campus);
+    await wipeTestRun(campus);
+  },
+});
+
+test("a new student books a tutor and both confirm the session", async ({ browser, campus }) => {
+  const tutor = await tutorFor(campus, EC110);
   const student = await newcomer(campus, "student", "Student");
 
   const studentPage = await openAs(browser, student);
@@ -20,10 +30,10 @@ test("a new student books a tutor and both confirm the session", async ({ browse
   await expect(studentPage.getByRole("heading", { name: "What are you stuck in?" })).toBeVisible();
 
   await test.step("the student asks the tutor", async () => {
-    await studentPage.getByRole("searchbox", { name: "Course" }).fill(EC110.code);
+    await studentPage.getByRole("searchbox", { name: "Course" }).fill(EC110);
     await studentPage.waitForURL(/[?&]q=/);
-    await studentPage.getByRole("link", { name: EC110.code }).click();
-    await studentPage.getByRole("link", { name: `${EC110.professor} Section ${EC110.section}` }).click();
+    await studentPage.getByRole("link", { name: EC110 }).click();
+    await studentPage.getByRole("link", { name: `${tutor.professor} Section ${tutor.section}` }).click();
 
     const name = studentPage.getByRole("heading", { name: tutor.name, level: 3 });
     const next = studentPage.getByRole("button", { name: "Next tutor" });
@@ -56,12 +66,13 @@ test("a new student books a tutor and both confirm the session", async ({ browse
 
     const session = studentPage.getByRole("region", { name: "Coming up" }).getByRole("link").first();
     await expect(session).toContainText(`With ${tutor.name}`);
-    return (await session.getAttribute("href"))!.split("/").at(-1)!;
+    await expect(session).toHaveAttribute("href", /^\/sessions\/[\w-]+$/);
+    return (await session.getAttribute("href"))?.slice("/sessions/".length) ?? "";
   });
 
   await tutorPage.goto("/tutor/sessions");
   const booked = tutorPage.getByRole("listitem").filter({ hasText: student.name });
-  await expect(booked).toContainText(EC110.code);
+  await expect(booked).toContainText(EC110);
   await expect(booked.getByText("Did this session happen?")).toHaveCount(0);
 
   await test.step("both sides confirm attendance", async () => {
@@ -90,6 +101,8 @@ test("a new student books a tutor and both confirm the session", async ({ browse
     await studentPage.goto("/sessions");
     await expect(studentPage.getByText("3 of 4 left to book")).toBeVisible();
     await studentPage.getByRole("link", { name: "Book the next one" }).click();
+    await studentPage.getByRole("button", { name: /^Show all \d+ times$/ }).click();
+    await studentPage.getByRole("group", { name: `When ${tutor.name} is free` }).getByRole("button").last().click();
     await studentPage.getByRole("button", { name: "Book this session" }).click();
     await expect(studentPage.getByRole("status")).toContainText(`confirmed on ${tutor.name}’s calendar`);
 
@@ -97,7 +110,7 @@ test("a new student books a tutor and both confirm the session", async ({ browse
     await expect(studentPage.getByText("2 of 4 left to book")).toBeVisible();
     await studentPage.getByRole("region", { name: "Coming up" }).getByRole("link").first().click();
     await studentPage.getByRole("button", { name: "Cancel this session" }).click();
-    await studentPage.getByRole("button", { name: /^Cancel (it|anyway)$/ }).click();
+    await studentPage.getByRole("button", { name: "Cancel it", exact: true }).click();
     await expect(studentPage.getByRole("definition").filter({ hasText: "Cancelled" })).toBeVisible();
 
     await studentPage.goto("/sessions");
@@ -105,8 +118,8 @@ test("a new student books a tutor and both confirm the session", async ({ browse
   });
 });
 
-test("a new user starts tutoring in one click", async ({ browser }) => {
-  const page = await openAs(browser, await newcomer(await testCampus(), "new-tutor", "Tutor"));
+test("a new user starts tutoring in one click", async ({ browser, campus }) => {
+  const page = await openAs(browser, await newcomer(campus, "new-tutor", "Tutor"));
   await expect(page).toHaveURL(/\/welcome$/);
   await page.getByRole("button", { name: /I'm a tutor/ }).click();
   await page.waitForURL("**/tutor");
