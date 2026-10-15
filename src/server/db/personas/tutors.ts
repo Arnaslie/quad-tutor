@@ -25,9 +25,7 @@ import { createPersona, createTutorPersona, personaEmail, type PersonaCampus, ty
 type Pack = {
   kind?: RequestedKind;
   delivered: number;
-
   stars?: readonly Stars[];
-
   renews?: true;
   disputed?: true;
   paidOut?: true;
@@ -204,9 +202,13 @@ async function claim(campus: PersonaCampus, tutor: TutorActor, persona: TutorPer
 
 async function historyTimes(institutionId: string, count: number): Promise<Date[]> {
   const current = await currentTerm(institutionId);
-  if (!current) throw new Error("No current term — run db:catalog first.");
+  if (!current) throw new Error("No term is running today, so there is no term to give the personas a history in.");
   const from = new Date(`${current.startsOn}T00:00:00Z`).getTime() + DAY;
-  const step = Math.max(HOUR, (Date.now() - RATINGS_CLOSED - from) / Math.max(1, count));
+  const span = Date.now() - RATINGS_CLOSED - from;
+  if (span < count * HOUR) {
+    throw new Error(`${current.name} started too recently to hold ${count} sessions whose rating windows have closed.`);
+  }
+  const step = span / Math.max(1, count);
   return Array.from({ length: count }, (_, i) => {
     const at = new Date(from + i * step);
     at.setUTCMinutes(0, 0, 0);
