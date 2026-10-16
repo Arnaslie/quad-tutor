@@ -28,8 +28,9 @@ export async function actorFor(userId: string): Promise<Actor> {
 
 export async function tutorActorFor(userId: string): Promise<TutorActor> {
   const actor = await actorFor(userId);
-  if (!actor.tutorProfileId) throw new Error(`${userId} has no tutor profile`);
-  return actor as TutorActor;
+  const { tutorProfileId } = actor;
+  if (!tutorProfileId) throw new Error(`${userId} has no tutor profile`);
+  return { ...actor, tutorProfileId };
 }
 
 export async function userIdByEmail(email: string): Promise<string> {
