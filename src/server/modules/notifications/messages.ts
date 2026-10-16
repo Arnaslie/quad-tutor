@@ -16,7 +16,6 @@ export function signInLink(params: { to: string; link: string }): Email {
   return {
     to: params.to,
     subject: "Quad Tutor sign-in link",
-    credential: true,
     text: [
       "Sign in to Quad Tutor:",
       "",
