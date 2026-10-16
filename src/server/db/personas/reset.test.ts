@@ -18,7 +18,7 @@ import { cleanup, delivered, operator, person, rows, run, world, type World } fr
 import { requestsForStudent, requestTutors, standingFor } from "@/server/modules/matching/requests";
 import { runNotifications } from "@/server/modules/notifications/dispatch";
 import { cardRatings } from "@/server/modules/ratings/reads";
-import { earningsForTutor, feeCapProgressForTutor } from "@/server/modules/tutoring/earnings";
+import { earningsForTutor, feeToDateForTutor } from "@/server/modules/tutoring/earnings";
 
 import { resetTestUsers } from "./ops";
 import { personaUserId, type PersonaCampus } from "./people";
@@ -126,16 +126,23 @@ test("tutor personas earn what the real pricing code says, and the money check p
     sessionsDelivered: 10,
   });
   assert.deepEqual(await earningsForTutor(await tutor("tutor-32")), {
-    earnedMinor: 104_650,
-    owedMinor: 39_900,
-    transferredMinor: 64_750,
+    earnedMinor: 101_400,
+    owedMinor: 38_400,
+    transferredMinor: 63_000,
     currency: "usd",
     sessionsDelivered: 32,
   });
-  assert.deepEqual(await fees("tutor-32"), [...Array(10).fill(350), ...Array(22).fill(175)]);
+  assert.deepEqual(await fees("tutor-32"), [...Array(28).fill(350), 275, 175, 175, 175]);
 
-  assert.deepEqual(await fees("tutor-capped"), [...Array(10).fill(500), ...Array(20).fill(250), 0, 0]);
-  assert.equal((await feeCapProgressForTutor(await tutor("tutor-capped")))?.chargedMinor, 10_000);
+  assert.deepEqual(await fees("tutor-past-100"), [...Array(20).fill(500), ...Array(12).fill(250)]);
+  assert.equal(await feeToDateForTutor(await tutor("tutor-past-100")), 13_000);
+  assert.deepEqual(await earningsForTutor(await tutor("tutor-past-100")), {
+    earnedMinor: 147_000,
+    owedMinor: 19_000,
+    transferredMinor: 128_000,
+    currency: "usd",
+    sessionsDelivered: 32,
+  });
 
   const ten = await tutor("tutor-10");
   const nine = await tutor("tutor-9");
@@ -151,11 +158,11 @@ test("tutor personas earn what the real pricing code says, and the money check p
   await assertMoneyInvariants(w.institutionId);
 });
 
-test("a $25 through-final package pays 2_250 a session, and the 11th session takes the lower fee", async () => {
-  assert.deepEqual(await fees("tutor-held"), [...Array(10).fill(225), 112]);
+test("a $25 through-final package pays 2_250 a session, and 11 sessions stay at 10% below $100", async () => {
+  assert.deepEqual(await fees("tutor-held"), Array(11).fill(225));
   assert.deepEqual(await earningsForTutor(await tutor("tutor-held")), {
-    earnedMinor: 22_388,
-    owedMinor: 22_388,
+    earnedMinor: 22_275,
+    owedMinor: 22_275,
     transferredMinor: 0,
     currency: "usd",
     sessionsDelivered: 11,

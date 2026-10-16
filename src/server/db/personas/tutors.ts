@@ -106,9 +106,9 @@ export const TUTOR_PERSONAS: readonly TutorPersona[] = [
     packs: renewing(4).map((pack, i) => (i < 5 ? { ...pack, paidOut: true as const } : pack)),
   },
   {
-    key: "tutor-capped",
+    key: "tutor-past-100",
     name: "Hana Sato",
-    headline: "Stats, booked solid all term",
+    headline: "Stats, past $100 in fees and on 5% for good",
     course: "ST 260",
     rateDollars: 50,
     kyc: "verified",

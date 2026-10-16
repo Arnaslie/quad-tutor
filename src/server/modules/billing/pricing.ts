@@ -1,5 +1,6 @@
 export const TAKE_RATE_BP = 1_000;
-export const TERM_FEE_CAP_MINOR = 10_000;
+export const LOWER_TAKE_RATE_BP = 500;
+export const FEE_MILESTONE_MINOR = 10_000;
 
 export const EXAM_ANCHORED_SESSIONS = 4;
 
@@ -101,21 +102,26 @@ export function unusedRefundMinor(engagement: {
   );
 }
 
-export const LOWER_TAKE_RATE_BP = 500;
-export const FULL_TAKE_SESSIONS = 10;
+export function milestoneReached(feeToDateMinor: number): boolean {
+  return feeToDateMinor >= FEE_MILESTONE_MINOR;
+}
 
-export function takeRateBp(sessionsEarnedBefore: number): number {
-  return sessionsEarnedBefore < FULL_TAKE_SESSIONS ? TAKE_RATE_BP : LOWER_TAKE_RATE_BP;
+const feeAt = (minor: number, rateBp: number) => Math.floor((minor * rateBp) / 10_000);
+
+function platformFeeMinor(sessionMinor: number, feeToDateMinor: number): number {
+  if (milestoneReached(feeToDateMinor)) return feeAt(sessionMinor, LOWER_TAKE_RATE_BP);
+  const toLineMinor = FEE_MILESTONE_MINOR - feeToDateMinor;
+  const fullFeeMinor = feeAt(sessionMinor, TAKE_RATE_BP);
+  if (fullFeeMinor <= toLineMinor) return fullFeeMinor;
+  const belowLineMinor = (toLineMinor * 10_000) / TAKE_RATE_BP;
+  return toLineMinor + feeAt(sessionMinor - belowLineMinor, LOWER_TAKE_RATE_BP);
 }
 
 export function splitMinor(
   sessionMinor: number,
-  take: { rateBp: number; chargedThisTermMinor: number },
+  meter: { feeToDateMinor: number },
 ): { tutorMinor: number; platformMinor: number } {
-  const platformMinor = Math.min(
-    Math.floor((sessionMinor * take.rateBp) / 10_000),
-    Math.max(0, TERM_FEE_CAP_MINOR - take.chargedThisTermMinor),
-  );
+  const platformMinor = platformFeeMinor(sessionMinor, meter.feeToDateMinor);
   return { tutorMinor: sessionMinor - platformMinor, platformMinor };
 }
 

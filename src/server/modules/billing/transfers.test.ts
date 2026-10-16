@@ -71,18 +71,18 @@ test("a confirmed session's pay is transferred once, from the student's charge, 
   assert.equal((await stripeGateway().listTransfers(engagementId)).length, 1);
 });
 
-test("past the term's fee cap the tutor is sent the full session price", async () => {
+test("past the $100 fee milestone the tutor is sent 95% of the session price", async () => {
   const w = await world();
   const { engagementId } = await delivered(w);
   await db.insert(ledgerEntry).values({ engagementId, institutionId: w.institutionId, type: "platform_fee", amountMinor: 10_000 - 350 });
 
-  const { engagementId: capped } = await delivered(w);
-  assert.deepEqual((await rows(capped, "tutor_accrued")).map((r) => r.amountMinor), [3_500]);
+  const { engagementId: past } = await delivered(w);
+  assert.deepEqual((await rows(past, "tutor_accrued")).map((r) => r.amountMinor), [3_325]);
   assert.deepEqual(await sweep(w), { ...nothing, sent: 2 });
-  assert.deepEqual((await rows(capped, "tutor_transfer")).map((r) => r.amountMinor), [3_500]);
+  assert.deepEqual((await rows(past, "tutor_transfer")).map((r) => r.amountMinor), [3_325]);
   assert.deepEqual((await rows(engagementId, "tutor_transfer")).map((r) => r.amountMinor), [3_150]);
-  const [sent] = await rows(capped, "tutor_transfer");
-  assert.equal((await stripeGateway().retrieveTransfer(sent.stripeReference!)).amountMinor, 3_500);
+  const [sent] = await rows(past, "tutor_transfer");
+  assert.equal((await stripeGateway().retrieveTransfer(sent.stripeReference!)).amountMinor, 3_325);
 });
 
 test("a transfer whose response was lost is stamped by a later run from its metadata, never sent twice", async () => {

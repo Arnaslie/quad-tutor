@@ -3,69 +3,64 @@ import { test } from "node:test";
 
 import {
   bookAgainOpen,
+  milestoneReached,
   packageOption,
   packagePriceRange,
   packageSummary,
   splitMinor,
-  takeRateBp,
 } from "./pricing";
 
-test("takes 10% of a session under the cap", () => {
-  assert.deepEqual(splitMinor(3_500, { rateBp: 1_000, chargedThisTermMinor: 0 }), { tutorMinor: 3_150, platformMinor: 350 });
+test("takes 10% of a session below the $100 milestone", () => {
+  assert.deepEqual(splitMinor(3_500, { feeToDateMinor: 0 }), { tutorMinor: 3_150, platformMinor: 350 });
 });
 
-test("the crossing session takes only what is left under the cap", () => {
-  assert.deepEqual(splitMinor(3_500, { rateBp: 1_000, chargedThisTermMinor: 9_800 }), { tutorMinor: 3_300, platformMinor: 200 });
+test("the crossing session takes 10% up to the $100 line and 5% on the rest", () => {
+  assert.deepEqual(splitMinor(3_500, { feeToDateMinor: 9_800 }), { tutorMinor: 3_225, platformMinor: 275 });
 });
 
-test("takes nothing once the cap is reached", () => {
-  assert.deepEqual(splitMinor(3_500, { rateBp: 1_000, chargedThisTermMinor: 10_000 }), { tutorMinor: 3_500, platformMinor: 0 });
+test("a session whose full fee lands exactly on $100 takes the full 10%", () => {
+  assert.deepEqual(splitMinor(5_000, { feeToDateMinor: 9_500 }), { tutorMinor: 4_500, platformMinor: 500 });
 });
 
-test("takes nothing when the meter is above the cap", () => {
-  assert.deepEqual(splitMinor(3_500, { rateBp: 1_000, chargedThisTermMinor: 10_350 }), { tutorMinor: 3_500, platformMinor: 0 });
+test("takes 5% from the milestone on, and never nothing", () => {
+  assert.deepEqual(splitMinor(3_500, { feeToDateMinor: 10_000 }), { tutorMinor: 3_325, platformMinor: 175 });
+  assert.deepEqual(splitMinor(3_500, { feeToDateMinor: 50_000 }), { tutorMinor: 3_325, platformMinor: 175 });
 });
 
-test("a through-final session pays $3.15", () => {
+test("a through-final session pays $3.15, then $1.57 past the milestone", () => {
   const option = packageOption("through_final", 3_500);
   assert.equal(option.perSessionMinor, 3_150);
-  assert.deepEqual(splitMinor(option.perSessionMinor, { rateBp: 1_000, chargedThisTermMinor: 0 }), {
-    tutorMinor: 2_835,
-    platformMinor: 315,
-  });
+  assert.deepEqual(splitMinor(option.perSessionMinor, { feeToDateMinor: 0 }), { tutorMinor: 2_835, platformMinor: 315 });
+  assert.deepEqual(splitMinor(option.perSessionMinor, { feeToDateMinor: 10_000 }), { tutorMinor: 2_993, platformMinor: 157 });
 });
 
-function firstTerm(sessions: number, sessionMinor = 3_500) {
-  let chargedThisTermMinor = 0;
+test("the milestone is reached at exactly $100 in fees", () => {
+  assert.equal(milestoneReached(9_999), false);
+  assert.equal(milestoneReached(10_000), true);
+});
+
+function lifetime(sessions: number, sessionMinor = 3_500) {
+  let feeToDateMinor = 0;
   let tutorMinor = 0;
   const fees: number[] = [];
-  for (let earnedBefore = 0; earnedBefore < sessions; earnedBefore += 1) {
-    const split = splitMinor(sessionMinor, { rateBp: takeRateBp(earnedBefore), chargedThisTermMinor });
-    chargedThisTermMinor += split.platformMinor;
+  for (let i = 0; i < sessions; i += 1) {
+    const split = splitMinor(sessionMinor, { feeToDateMinor });
+    feeToDateMinor += split.platformMinor;
     tutorMinor += split.tutorMinor;
     fees.push(split.platformMinor);
   }
-  return { fees, tutorMinor, platformMinor: chargedThisTermMinor };
+  return { fees, tutorMinor, platformMinor: feeToDateMinor };
 }
 
-test("the 10th session at $35 takes $3.50 and the 11th takes $1.75", () => {
-  const { fees } = firstTerm(11);
-  assert.equal(fees[9], 350);
-  assert.equal(fees[10], 175);
+test("at $35 the 29th session crosses $100 and every later one takes $1.75", () => {
+  const { fees } = lifetime(32);
+  assert.deepEqual(fees, [...Array(28).fill(350), 275, 175, 175, 175]);
 });
 
-test("the 48th session at $35 in a first term pays $0.25 and lands the meter on $100", () => {
-  const { fees, platformMinor } = firstTerm(49);
-  assert.equal(fees[46], 175);
-  assert.equal(fees[47], 25);
-  assert.equal(fees[48], 0);
-  assert.equal(platformMinor, 10_000);
-});
-
-test("32 sessions at $35 pay the tutor $1,046.50 and the platform $73.50", () => {
-  const { tutorMinor, platformMinor } = firstTerm(32);
-  assert.equal(tutorMinor, 104_650);
-  assert.equal(platformMinor, 7_350);
+test("32 sessions at $35 pay the tutor $1,014.00 and the platform $106.00", () => {
+  const { tutorMinor, platformMinor } = lifetime(32);
+  assert.equal(tutorMinor, 101_400);
+  assert.equal(platformMinor, 10_600);
 });
 
 const day = 86_400_000;

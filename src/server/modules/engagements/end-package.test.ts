@@ -30,8 +30,8 @@ import { notifyCancelledSessions } from "@/server/modules/notifications/dispatch
 import { refreshScores } from "@/server/modules/scoring/stats";
 
 import { assertMoneyInvariants } from "@/server/modules/billing/invariants";
-import { feeChargedThisTermMinor, sessionsEarned } from "@/server/modules/billing/ledger";
-import { perSessionMinor, splitMinor, takeRateBp } from "@/server/modules/billing/pricing";
+import { feesToDate } from "@/server/modules/billing/ledger";
+import { perSessionMinor, splitMinor } from "@/server/modules/billing/pricing";
 
 import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
@@ -138,18 +138,13 @@ async function delivered(engagementId: string, at: Date): Promise<void> {
       pricePaidMinor: engagement.pricePaidMinor,
       sessionsPurchased: engagement.sessionsPurchased,
       tutorProfileId: tutorCourse.tutorProfileId,
-      termId: courseOffering.termId,
     })
     .from(engagement)
     .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
-    .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
     .where(eq(engagement.id, engagementId));
   const sessionMinor = perSessionMinor(pkgRow);
-  const scope = { ...pkgRow, institutionId: home.institutionId };
-  const { tutorMinor, platformMinor } = splitMinor(sessionMinor, {
-    rateBp: takeRateBp(await sessionsEarned(db, scope)),
-    chargedThisTermMinor: await feeChargedThisTermMinor(db, scope),
-  });
+  const fees = await feesToDate(db, home.institutionId, [pkgRow.tutorProfileId]);
+  const { tutorMinor, platformMinor } = splitMinor(sessionMinor, { feeToDateMinor: fees.get(pkgRow.tutorProfileId) ?? 0 });
   const row = { engagementId, sessionId, institutionId: home.institutionId };
   await db.insert(ledgerEntry).values([
     { ...row, type: "session_earned", amountMinor: sessionMinor },

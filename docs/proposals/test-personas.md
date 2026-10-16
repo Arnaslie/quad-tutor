@@ -86,14 +86,14 @@ package for real, then ends it.
 - **The same scenarios run locally** through `npm run db:personas`, against the fake
   Stripe.
 - **The page lists each persona**: its email, its role, and the state it is in, in one
-  line ("Tutor, 32 sessions, $1,046.50 earned, close to the term cap").
+  line ("Tutor, 32 sessions, $1,014.00 earned, past $100 in fees").
 - **Turning it off.** At launch, `TEST_PERSONAS` is removed and the wipe runs. The
   button and the fixture payment step then refuse to run.
 
 ## The personas
 
-Each persona is one state. Amounts follow `docs/proposals/tutor-pricing.md` (10% of
-the first 10 sessions, then 5%, capped at $100 per term), and rates vary by course,
+Each persona is one state. Amounts follow the pricing rule in `docs/decisions.md` (10%
+until a tutor has paid $100 in fees, then 5% for good), and rates vary by course,
 from $25 to $50 for realism. Every amount is computed by the real pricing code when the persona
 is built, not hard-coded.
 
@@ -103,11 +103,11 @@ is built, not hard-coded.
 |---|---|
 | `tutor-new` | Approved for a course, 0 sessions, no rating, waiting for a first request |
 | `tutor-1` | 1 session at $50; earned $45.00 |
-| `tutor-9` | 9 sessions; one away from a public rating and from the lower take |
+| `tutor-9` | 9 sessions; one away from a public rating |
 | `tutor-10` | 10 sessions at $35, 5 released ratings, rating public; earned $315.00 |
 | `tutor-ranked` | 20+ rated sessions in one course, so the ranking's star and renewal terms count |
-| `tutor-32` | 32 sessions at $35 in one term; earned $1,046.50, some paid out and some owed |
-| `tutor-capped` | Past the $100 term cap at $50 a session; keeps 100% |
+| `tutor-32` | 32 sessions at $35 in one term; the 29th crosses $100 in fees; earned $1,014.00, some paid out and some owed |
+| `tutor-past-100` | 32 sessions at $50; the 20th lands on $100 in fees, and the 12 after it pay 5% |
 | `tutor-held` | Earned, but pay held: KYC not finished |
 | `tutor-disputed` | One session disputed, so that engagement's pay is paused |
 | `tutor-finals` | Several students with exams this week, a full calendar |

@@ -15,12 +15,14 @@ import {
 import { LATE_CANCEL_HOURS } from "@/server/modules/engagements/attendance";
 import { deliveredIfUnanswered, lapseCopy } from "@/server/modules/engagements/answer-outcome";
 import { payoutsFor, payoutsOf } from "@/server/modules/billing/connect";
-import { formatMinor, FULL_TAKE_SESSIONS, LOWER_TAKE_RATE_BP } from "@/server/modules/billing/pricing";
 import {
-  earningsForTutor,
-  feeCapProgressForTutor,
-  type FeeCapProgress,
-} from "@/server/modules/tutoring/earnings";
+  FEE_MILESTONE_MINOR,
+  formatMinor,
+  LOWER_TAKE_RATE_BP,
+  milestoneReached,
+  TAKE_RATE_BP,
+} from "@/server/modules/billing/pricing";
+import { earningsForTutor, feeToDateForTutor } from "@/server/modules/tutoring/earnings";
 import { defaultLocationFor } from "@/server/modules/tutoring/location";
 
 import { displayName } from "@/server/modules/identity/display-name";
@@ -35,10 +37,10 @@ export const metadata: Metadata = { title: "Sessions" };
 
 export default async function TutorSessionsPage() {
   const tutor = await requireTutor();
-  const [board, earnings, feeCap, location, stored] = await Promise.all([
+  const [board, earnings, feeToDateMinor, location, stored] = await Promise.all([
     sessionBoardForTutor(tutor),
     earningsForTutor(tutor),
-    feeCapProgressForTutor(tutor),
+    feeToDateForTutor(tutor),
     defaultLocationFor(tutor),
     payoutsOf(tutor),
   ]);
@@ -78,7 +80,7 @@ export default async function TutorSessionsPage() {
         </ButtonLink>
       </Card>
 
-      {feeCap ? <FeeCapCard progress={feeCap} /> : null}
+      <FeeMilestoneCard feeToDateMinor={feeToDateMinor} />
 
       {total === 0 ? (
         <EmptyState
@@ -103,47 +105,47 @@ export default async function TutorSessionsPage() {
   );
 }
 
-function FeeCapCard({ progress }: { progress: FeeCapProgress }) {
-  const { chargedMinor, capMinor, termName, sessionsEarned, rateBp } = progress;
-  const capped = chargedMinor >= capMinor;
-  const percent = Math.min(100, Math.round((chargedMinor / capMinor) * 100));
-  const cap = formatMinor(capMinor);
+function FeeMilestoneCard({ feeToDateMinor }: { feeToDateMinor: number }) {
+  const milestone = formatMinor(FEE_MILESTONE_MINOR);
+  const lower = `${LOWER_TAKE_RATE_BP / 100}%`;
 
+  if (milestoneReached(feeToDateMinor)) {
+    return (
+      <Card className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium text-foreground">Platform share</h2>
+        <p className="text-sm text-muted">
+          You&apos;ve passed {milestone}. We take {lower} of every session from now on.
+        </p>
+      </Card>
+    );
+  }
+
+  const percent = Math.round((feeToDateMinor / FEE_MILESTONE_MINOR) * 100);
   return (
     <Card className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 id="fee-cap-label" className="text-sm font-medium text-foreground">
+        <h2 id="fee-milestone-label" className="text-sm font-medium text-foreground">
           Platform share
         </h2>
         <p className="text-sm text-muted">
-          <span className="font-semibold text-foreground">{formatMinor(chargedMinor)}</span> of{" "}
-          {cap} this term
+          <span className="font-semibold text-foreground">{formatMinor(feeToDateMinor)}</span> of {milestone}
         </p>
       </div>
       <div
         role="progressbar"
-        aria-labelledby="fee-cap-label"
+        aria-labelledby="fee-milestone-label"
         aria-valuemin={0}
-        aria-valuemax={capMinor / 100}
-        aria-valuenow={Math.min(chargedMinor, capMinor) / 100}
-        aria-valuetext={`${formatMinor(chargedMinor)} of ${cap}`}
+        aria-valuemax={FEE_MILESTONE_MINOR / 100}
+        aria-valuenow={feeToDateMinor / 100}
+        aria-valuetext={`${formatMinor(feeToDateMinor)} of ${milestone}`}
         className="h-2 overflow-hidden rounded-full bg-surface-sunken"
       >
         <div className="h-full rounded-full bg-accent" style={{ width: `${percent}%` }} />
       </div>
       <p className="text-sm text-muted">
-        {capped
-          ? `You've hit the cap — you keep 100% for the rest of ${termName}.`
-          : `We take ${rateBp / 100}% of each session until we've taken ${cap} this term. After that, you keep 100%.`}
+        We take {TAKE_RATE_BP / 100}% of each session until we&apos;ve taken {milestone} in total. After that we
+        take {lower}, for good.
       </p>
-      {sessionsEarned < FULL_TAKE_SESSIONS ? (
-        <p className="text-sm text-muted">
-          <span className="font-semibold text-foreground">
-            {sessionsEarned} of {FULL_TAKE_SESSIONS}
-          </span>{" "}
-          sessions to a lower fee. After your {FULL_TAKE_SESSIONS}th, we take {LOWER_TAKE_RATE_BP / 100}%.
-        </p>
-      ) : null}
     </Card>
   );
 }

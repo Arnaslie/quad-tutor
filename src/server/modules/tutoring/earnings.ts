@@ -10,9 +10,7 @@ import {
 } from "@/server/db/schema";
 import { FORFEITED_PREFIX, MANUAL_PREFIX } from "@/server/modules/billing/discrepancy";
 import { FIXTURE_TRANSFER_PREFIX } from "@/server/modules/billing/fixtures";
-import { feeChargedThisTermMinor, sessionsEarned } from "@/server/modules/billing/ledger";
-import { TERM_FEE_CAP_MINOR, takeRateBp } from "@/server/modules/billing/pricing";
-import { currentTerm } from "@/server/modules/catalog/courses";
+import { feesToDate } from "@/server/modules/billing/ledger";
 import type { TutorActor } from "@/server/modules/identity/actor";
 
 export type TutorEarnings = {
@@ -77,32 +75,8 @@ export async function earningsForTutor(tutor: TutorActor): Promise<TutorEarnings
   };
 }
 
-export type FeeCapProgress = {
-  chargedMinor: number;
-  capMinor: number;
-  termName: string;
-  sessionsEarned: number;
-  rateBp: number;
-};
-
-export async function feeCapProgressForTutor(tutor: TutorActor): Promise<FeeCapProgress | null> {
-  const current = await currentTerm(tutor.institutionId);
-  if (!current) return null;
-
-  const [chargedMinor, earned] = await Promise.all([
-    feeChargedThisTermMinor(db, {
-      tutorProfileId: tutor.tutorProfileId,
-      termId: current.id,
-      institutionId: tutor.institutionId,
-    }),
-    sessionsEarned(db, tutor),
-  ]);
-
-  return {
-    chargedMinor,
-    capMinor: TERM_FEE_CAP_MINOR,
-    termName: current.name,
-    sessionsEarned: earned,
-    rateBp: takeRateBp(earned),
-  };
+/** The tutor's own fee meter, for their own card. Never part of a student-facing shape. */
+export async function feeToDateForTutor(tutor: TutorActor): Promise<number> {
+  const fees = await feesToDate(db, tutor.institutionId, [tutor.tutorProfileId]);
+  return fees.get(tutor.tutorProfileId) ?? 0;
 }

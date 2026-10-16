@@ -1,8 +1,7 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
-  courseOffering,
   engagement,
   ledgerEntry,
   ledgerEntryType,
@@ -11,46 +10,31 @@ import {
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export async function feeChargedThisTermMinor(
+/** Lifetime platform fees per tutor on one campus. A tutor with none is absent from the map. */
+export async function feesToDate(
   exec: typeof db | Tx,
-  scope: { tutorProfileId: string; termId: string; institutionId: string },
-): Promise<number> {
+  institutionId: string,
+  tutorProfileIds: readonly string[],
+): Promise<Map<string, number>> {
+  if (tutorProfileIds.length === 0) return new Map();
   const rows = await exec
-    .select({ total: sql<number>`coalesce(sum(${ledgerEntry.amountMinor}), 0)::int` })
+    .select({
+      tutorProfileId: tutorCourse.tutorProfileId,
+      feeMinor: sql<number>`sum(${ledgerEntry.amountMinor})::bigint`.mapWith(Number),
+    })
     .from(ledgerEntry)
     .innerJoin(engagement, eq(engagement.id, ledgerEntry.engagementId))
     .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
-    .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
     .where(
       and(
         eq(ledgerEntry.type, "platform_fee"),
-        eq(ledgerEntry.institutionId, scope.institutionId),
-        eq(tutorCourse.tutorProfileId, scope.tutorProfileId),
-        eq(courseOffering.termId, scope.termId),
+        eq(ledgerEntry.institutionId, institutionId),
+        inArray(tutorCourse.tutorProfileId, [...tutorProfileIds]),
       ),
-    );
+    )
+    .groupBy(tutorCourse.tutorProfileId);
 
-  return rows.at(0)?.total ?? 0;
-}
-
-export async function sessionsEarned(
-  exec: typeof db | Tx,
-  scope: { tutorProfileId: string; institutionId: string },
-): Promise<number> {
-  const rows = await exec
-    .select({ n: sql<number>`count(*)::int` })
-    .from(ledgerEntry)
-    .innerJoin(engagement, eq(engagement.id, ledgerEntry.engagementId))
-    .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
-    .where(
-      and(
-        eq(ledgerEntry.type, "session_earned"),
-        eq(ledgerEntry.institutionId, scope.institutionId),
-        eq(tutorCourse.tutorProfileId, scope.tutorProfileId),
-      ),
-    );
-
-  return rows.at(0)?.n ?? 0;
+  return new Map(rows.map((row) => [row.tutorProfileId, row.feeMinor]));
 }
 
 export type LedgerWrite = {
