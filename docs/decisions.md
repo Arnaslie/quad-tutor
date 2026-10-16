@@ -822,7 +822,7 @@ money never reaches Stripe: the transfer sweep and refunds refuse `fixture_`
 references, and the money check accepts them only between personas. Everything a
 tester does is real Stripe test-mode money. At launch, `TEST_PERSONAS` is removed and
 every `persona_` user is deleted. This is not a legacy carve-out: like the pre-Stripe
-rows, it is gone at launch. Testers sign in through the one inbox. Decided
+rows, it is gone at launch. Sign-in links go to the one inbox. Decided
 by the user on 2026-10-14.
 Every email to a persona is also copied (bcc) to `jmgucius@crimson.ua.edu`, so the
 second tester reads persona mail without the shared inbox. `jmgucius@crimson.ua.edu`
