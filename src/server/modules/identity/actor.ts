@@ -13,7 +13,6 @@ export type Actor = {
   email: string;
   institutionId: string;
   studentProfileId: string;
-
   tutorProfileId: string | null;
 };
 
@@ -51,8 +50,9 @@ export async function requireActor(): Promise<Actor> {
 
 export async function requireTutor(): Promise<TutorActor> {
   const actor = await requireActor();
-  if (!actor.tutorProfileId) redirect("/tutor/start");
-  return actor as TutorActor;
+  const { tutorProfileId } = actor;
+  if (!tutorProfileId) redirect("/tutor/start");
+  return { ...actor, tutorProfileId };
 }
 
 export const currentOperator = cache(async (): Promise<OperatorActor | null> => {
