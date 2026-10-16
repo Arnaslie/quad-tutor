@@ -5,12 +5,12 @@ import {
   course,
   courseCodeAlias,
   engagement,
-  ledgerEntry,
   messageReport,
   sessionBooking,
   sessionRating,
   tutorCourse,
 } from "@/server/db/schema";
+import { feesToDate } from "@/server/modules/billing/ledger";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { courseLabel } from "@/server/modules/messaging/threads";
 
@@ -36,7 +36,7 @@ export async function cardRatings(
   const tutors = [...new Set(claims.map((claim) => claim.tutorProfileId))];
   if (tutors.length === 0) return result;
 
-  const [perCourse, delivered] = await Promise.all([
+  const [perCourse, fees] = await Promise.all([
     db
       .select({
         tutorProfileId: tutorCourse.tutorProfileId,
@@ -54,22 +54,9 @@ export async function cardRatings(
         ),
       )
       .groupBy(tutorCourse.tutorProfileId, sessionRating.tutorCourseId),
-    db
-      .select({ tutorProfileId: tutorCourse.tutorProfileId, sessions: sql<number>`count(*)::int` })
-      .from(ledgerEntry)
-      .innerJoin(engagement, eq(engagement.id, ledgerEntry.engagementId))
-      .innerJoin(tutorCourse, eq(tutorCourse.id, engagement.tutorCourseId))
-      .where(
-        and(
-          eq(ledgerEntry.institutionId, institutionId),
-          eq(ledgerEntry.type, "session_earned"),
-          inArray(tutorCourse.tutorProfileId, tutors),
-        ),
-      )
-      .groupBy(tutorCourse.tutorProfileId),
+    feesToDate(db, institutionId, tutors),
   ]);
 
-  const sessions = new Map(delivered.map((row) => [row.tutorProfileId, row.sessions]));
   const overall = new Map<string, { sum: number; count: number }>();
   for (const row of perCourse) {
     if (row.count < MIN_RATINGS) continue;
@@ -79,12 +66,12 @@ export async function cardRatings(
   const byCourse = new Map(perCourse.map((row) => [row.tutorCourseId, row]));
 
   for (const claim of claims) {
-    const delivered = sessions.get(claim.tutorProfileId) ?? 0;
+    const fee = fees.get(claim.tutorProfileId) ?? 0;
     const own = byCourse.get(claim.id);
     const all = overall.get(claim.tutorProfileId);
     result.set(claim.id, {
-      courseRating: publicRating(own?.sum ?? 0, own?.count ?? 0, delivered),
-      overallRating: publicRating(all?.sum ?? 0, all?.count ?? 0, delivered),
+      courseRating: publicRating(own?.sum ?? 0, own?.count ?? 0, fee),
+      overallRating: publicRating(all?.sum ?? 0, all?.count ?? 0, fee),
     });
   }
   return result;

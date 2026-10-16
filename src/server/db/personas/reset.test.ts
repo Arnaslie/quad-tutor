@@ -119,8 +119,8 @@ test("tutor personas earn what the real pricing code says, and the money check p
     sessionsDelivered: 1,
   });
   assert.deepEqual(await earningsForTutor(await tutor("tutor-10")), {
-    earnedMinor: 31_500,
-    owedMinor: 31_500,
+    earnedMinor: 90_000,
+    owedMinor: 90_000,
     transferredMinor: 0,
     currency: "usd",
     sessionsDelivered: 10,
@@ -146,6 +146,8 @@ test("tutor personas earn what the real pricing code says, and the money check p
 
   const ten = await tutor("tutor-10");
   const nine = await tutor("tutor-9");
+  assert.equal(await feeToDateForTutor(ten), 10_000);
+  assert.equal(await feeToDateForTutor(nine), 9_000);
   const claims = await db
     .select({ id: tutorCourse.id, tutorProfileId: tutorCourse.tutorProfileId })
     .from(tutorCourse)

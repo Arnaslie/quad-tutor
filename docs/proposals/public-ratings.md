@@ -1,5 +1,8 @@
 # Brief: public ratings and the renewal signal
 
+The 10-session gate below is superseded by the $100 fee milestone
+(`lifetime-fee-milestone.md`, 2026-10-16). The rest stands as history.
+
 Status: **build brief, not started.** The rules are settled in `docs/decisions.md`
 (Ratings, Renewals). This file is how to build them. Written 2026-10-05 against
 `origin/docs/take-rate-cap` at `36ffa09`. Code refs are the same on `origin/main` at

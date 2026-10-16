@@ -366,12 +366,16 @@ stays rejected.
 Calc I and weak in Organic, so the course rating is the one that matters on a course's
 deck, and the overall rating sits beside it.
 
-- **No rating is public until the tutor has 10 delivered paid sessions**, in any
-  course or courses. That holds for both the overall rating and every course rating.
-- **Overall** shows when the tutor has at least 10 sessions *and* at least 5 ratings.
+- **No rating is public until the platform has taken $100 in fees from the tutor**,
+  in any course or courses: the same fee milestone that lowers the take (Product).
+  That holds for both the overall rating and every course rating. Settled 2026-10-16
+  (`docs/proposals/lifetime-fee-milestone.md`); it replaces a 10-session gate. Price
+  decides how fast a tutor is rated: after the 29th session at $35, the 67th at $15,
+  the 10th at $100 and the 5th at $200.
+- **Overall** shows when the tutor is past the milestone *and* has at least 5 ratings.
   It averages the ratings in those of the tutor's courses whose own rating is public
   (see the aggregates rules below).
-- **Course** shows when the tutor has at least 10 sessions *and* that `tutor_course`
+- **Course** shows when the tutor is past the milestone *and* that `tutor_course`
   has at least 5 ratings. The threshold counts ratings, not sessions in the course:
   five sessions can carry one rating, and "5.0 · 1 rating" is the number this
   threshold exists to prevent.
@@ -420,11 +424,12 @@ grounds for removal.
 **What the aggregates count.** Settled 2026-10-06, from the ratings code review.
 
 - **The gate, restated.** No rating, overall or course, is public until the tutor has
-  10 delivered paid sessions. After that, a course rating needs at least 5 ratings in
+  paid $100 in fees. After that, a course rating needs at least 5 ratings in
   that course, and the overall rating needs at least one course whose rating is
-  public. The 10 sessions are confirmed by the user. The gate is independent of the
-  fee milestone: 10 sessions at $35 is about $35 of platform fee, and the $100
-  milestone is crossed on the 29th session. Neither threshold reads the other.
+  public. `publicRating()` asks the same `milestoneReached()` that sets the take, so
+  the two cannot drift apart. The fee number never leaves the server. Only its effect
+  crosses, a rating or "New tutor", as with the 10-session gate before it, and
+  `score.ts` does not read fees.
 - **Only released ratings are counted** (batches decided by the user, 2026-10-06).
   This replaces "only ratings whose window has closed". A rating's 7-day window must
   close before it can be released, and released is what counts. That applies to:
@@ -516,7 +521,7 @@ reports and a human, never for an average.
 **The old objections, answered honestly:**
 
 - *The absence of a rating is itself a signal.* Accepted, because of the threshold.
-  "New tutor" means fewer than 10 sessions or fewer than five ratings, and "New in
+  "New tutor" means under $100 in fees or fewer than five ratings, and "New in
   this course" means either of those or fewer than five ratings in the course. All of
   them are volume facts, not quality judgements, and the ranker scores
   them at the prior, so on the deck "new" is not "bad". A student may still prefer the
