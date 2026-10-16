@@ -7,8 +7,8 @@ in production carry fixture money until launch").
 ## The problem
 
 Two people test the product in production. Most of what they need to judge only
-shows up after weeks of use: a tutor's rating going public after 10 sessions, the
-lower take after 10 sessions (`docs/proposals/tutor-pricing.md`), a ranking that
+shows up after weeks of use: a tutor's rating going public, the
+lower take after $100 in fees (`docs/proposals/lifetime-fee-milestone.md`), a ranking that
 counts, a term of earnings, a package used up, finals week, term end. Waiting for real
 time to pass makes those states untestable before launch.
 

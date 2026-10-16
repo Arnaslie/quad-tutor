@@ -81,8 +81,9 @@ Fees written under the old rule stay in the ledger and must keep passing.
 - Added, per tutor: take the fees charged above 5%. Flag when their sum minus the
   largest of them is $100 or more. Fees only grow, so the last of those sessions saw
   a meter of at least that much. The crossing session's blended fee counts in that set,
-  and the check still holds. It needs no row order and no rule date, and old rows pass
-  it.
+  and the check still holds. It needs no row order and no rule date. Old rows pass it
+  unless a tutor paid more than $100 at 10% across terms under the old cap (over about
+  $111 a session); the prod check-money run before merge rules that out.
 
 The other direction (5% charged too early) is not checked in the database, because old
 rows break it by design. Tests prove it instead.

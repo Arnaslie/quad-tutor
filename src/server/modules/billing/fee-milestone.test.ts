@@ -14,7 +14,7 @@ import { anotherSessionDelivered, cleanup, delivered, world } from "./test-world
 
 after(cleanup);
 
-test("at $95 the 11th session splits at the $100 line, the 12th takes 5%, and earlier fees stay as written", async () => {
+test("at $95 the 11th session splits at the $100 line, and the 12th takes 5%", async () => {
   const w = await world();
   await setCourseRate({ tutor: w.tutor, tutorCourseId: w.tutorCourseId, rateMinor: 9_500 });
 

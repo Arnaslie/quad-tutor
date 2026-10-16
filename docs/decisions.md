@@ -160,9 +160,12 @@ drift:
 - **`db:check-money` guards the tutor's side.** Each fee is at most 10% of its session.
   Per tutor, take the fees charged above 5%; their sum minus the largest of them must
   stay under $100. The meter only grows, so the last of those sessions saw at least
-  that much. The check needs no row order and old rows pass it. The other direction,
-  5% charged too early, is left to the tests, because rows written under the old cap
-  break it by design.
+  that much. The check needs no row order. Old rows pass it unless a tutor paid more
+  than $100 at 10% across terms under the old cap, which only a tutor charging over
+  about $111 a session could do; the prod check-money run before this shipped is what
+  rules that out. It catches repeated overcharges, not a single 10% fee smaller than
+  the largest earlier one. The other direction, 5% charged too early, is left to the
+  tests, because rows written under the old cap break it by design.
 - **The platform absorbs card processing.** At Stripe's standard US card rate a $140
   four-pack costs about $4.36 to collect, roughly $1.10 a session: a third of the $3.50
   fee below the milestone and about two thirds of the $1.75 after, plus Connect's

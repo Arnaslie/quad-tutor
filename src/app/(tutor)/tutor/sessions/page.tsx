@@ -120,7 +120,7 @@ function FeeMilestoneCard({ feeToDateMinor }: { feeToDateMinor: number }) {
     );
   }
 
-  const percent = Math.round((feeToDateMinor / FEE_MILESTONE_MINOR) * 100);
+  const percent = Math.floor((feeToDateMinor / FEE_MILESTONE_MINOR) * 100);
   return (
     <Card className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between gap-3">
