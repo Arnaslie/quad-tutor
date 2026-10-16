@@ -45,12 +45,10 @@ export type Email = {
   subject: string;
   text: string;
   idempotencyKey?: string;
-  // Never copied to PERSONA_MAIL_READER: a copied sign-in link signs the reader in as that persona, +ops included.
-  credential?: true;
 };
 
 function copies(message: Email): string[] {
-  return isPersonaEmail(message.to) && !message.credential ? [PERSONA_MAIL_READER] : [];
+  return isPersonaEmail(message.to) ? [PERSONA_MAIL_READER] : [];
 }
 
 function sender(): string {

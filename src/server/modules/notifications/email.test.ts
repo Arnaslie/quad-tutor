@@ -71,12 +71,12 @@ test("a real user's notification is not copied", async (t) => {
   assert.equal("bcc" in body, false);
 });
 
-test("a persona's sign-in link is not copied", async (t) => {
+test("a persona's sign-in link is copied to the test reader", async (t) => {
   const body = await resendBody(t, signInLink({ to: "arnutislie12+ops@gmail.com", link: "http://localhost:3000/sign-in/verify?token=x" }));
 
   assert.deepEqual(body.to, ["arnutislie12+ops@gmail.com"]);
   assert.equal(body.subject, "Quad Tutor sign-in link");
-  assert.equal("bcc" in body, false);
+  assert.deepEqual(body.bcc, ["jmgucius@crimson.ua.edu"]);
 });
 
 test("log transport shows the persona copy", async (t) => {
