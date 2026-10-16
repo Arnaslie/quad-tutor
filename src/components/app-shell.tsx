@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import type { Actor } from "@/server/modules/identity/actor";
 import { MessagesLink } from "./messages-link";
-import { NAV, type Surface } from "./nav-items";
+import { NAV, type NavItem, type Surface } from "./nav-items";
 import { NavLink } from "./nav-link";
 import { ProfileMenu } from "./profile-menu";
 import { SurfaceSwitch } from "./surface-switch";
@@ -21,6 +21,7 @@ export function AppShell({
   view = surface,
   actor,
   nav = true,
+  more = [],
   unread,
   children,
 }: {
@@ -29,10 +30,11 @@ export function AppShell({
   actor: Actor;
 
   nav?: boolean;
+  more?: NavItem[];
   unread?: number;
   children: ReactNode;
 }) {
-  const items = nav ? NAV[surface] : [];
+  const items = nav ? [...NAV[surface], ...more] : [];
   const home = HOME[surface];
 
   return (

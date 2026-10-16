@@ -8,11 +8,12 @@ import { PERSONA_PREFIX } from "@/server/modules/billing/fixtures";
 import { releaseRatings } from "@/server/modules/ratings/release";
 import { refreshScores } from "@/server/modules/scoring/stats";
 
+import { holdingPersonas } from "./lock";
 import type { PersonaCampus, PersonaSummary } from "./people";
 import { buildStudentPersonas } from "./students";
 import { buildTermPersonas } from "./term";
 import { buildTutorPersonas } from "./tutors";
-import { wipePersonas } from "./wipe";
+import { ResetRefused, wipePersonas } from "./wipe";
 
 const BUILDERS: readonly ((campus: PersonaCampus) => Promise<PersonaSummary[]>)[] = [
   buildTutorPersonas,
@@ -58,11 +59,15 @@ async function silenceHistory(institutionId: string): Promise<void> {
 }
 
 export async function resetPersonas(campus: PersonaCampus): Promise<PersonaSummary[]> {
-  await wipePersonas(campus.institutionId);
-  const built: PersonaSummary[] = [];
-  for (const build of BUILDERS) built.push(...(await build(campus)));
-  await releaseRatings(campus.institutionId);
-  await refreshScores(campus.institutionId);
-  await silenceHistory(campus.institutionId);
+  const built = await holdingPersonas(campus.institutionId, "reset", async () => {
+    await wipePersonas(campus.institutionId);
+    const summaries: PersonaSummary[] = [];
+    for (const build of BUILDERS) summaries.push(...(await build(campus)));
+    await releaseRatings(campus.institutionId);
+    await refreshScores(campus.institutionId);
+    await silenceHistory(campus.institutionId);
+    return summaries;
+  });
+  if (!built) throw new ResetRefused("Test users are already being reset, or email is going out right now. Try again in a minute.");
   return built;
 }
