@@ -1,0 +1,77 @@
+# Once a day, builds a throwaway copy of the app against a Postgres service
+# container and drives the real user workflows through a browser. It never
+# touches production or Neon, so it needs no repository secrets: Stripe is the
+# fake driver, mail is printed, and the secrets are generated here.
+name: workflows
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflows
+  cancel-in-progress: true
+
+jobs:
+  drive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tutor_finder
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tutor_finder
+      BETTER_AUTH_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Generate secrets
+        run: |
+          set -euo pipefail
+          for name in BETTER_AUTH_SECRET CRON_SECRET STRIPE_WEBHOOK_SECRET; do
+            value=$(openssl rand -hex 32)
+            echo "::add-mask::${value}"
+            echo "${name}=${value}" >> "${GITHUB_ENV}"
+          done
+
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npm run db:catalog
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+      - name: Keep the evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-run
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

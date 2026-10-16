@@ -17,6 +17,7 @@
     "db:catalog": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/seed.ts --catalog",
     "db:demo": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/demo.ts",
     "db:personas": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/personas/run.ts",
+    "test:e2e": "node --env-file-if-exists=.env.local ./node_modules/@playwright/test/cli.js test",
     "db:studio": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs studio",
     "merge-gate": "node ./scripts/merge-gate.mjs",
     "stripe:smoke": "node --env-file-if-exists=.env.local --import tsx ./scripts/stripe-smoke.ts"
@@ -33,6 +34,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

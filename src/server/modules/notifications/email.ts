@@ -51,12 +51,17 @@ function sender(): string {
 
 export async function sendEmail(message: Email): Promise<void> {
   const key = process.env.RESEND_API_KEY;
+  const logOnly = process.env.EMAIL_TRANSPORT === "log";
 
-  if (!key) {
-    if (process.env.NODE_ENV === "production") {
-      throw new EmailError("RESEND_API_KEY is not set — refusing to drop mail silently.");
-    }
+  if (logOnly && process.env.VERCEL_ENV === "production") {
+    throw new EmailError("EMAIL_TRANSPORT=log is set in production — refusing to drop mail silently.");
+  }
 
+  if (!key && !logOnly && process.env.NODE_ENV === "production") {
+    throw new EmailError("RESEND_API_KEY is not set — refusing to drop mail silently.");
+  }
+
+  if (!key || logOnly) {
     console.log(`\n[email] to: ${message.to}`);
     console.log(`[email] subject: ${message.subject}`);
     if (message.idempotencyKey) console.log(`[email] idempotency-key: ${message.idempotencyKey}`);
