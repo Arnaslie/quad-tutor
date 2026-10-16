@@ -303,8 +303,6 @@ async function buildTutor(campus: PersonaCampus, persona: TutorPersona): Promise
   };
 }
 
-export async function buildTutorPersonas(campus: PersonaCampus): Promise<PersonaSummary[]> {
-  const built: PersonaSummary[] = [];
-  for (const persona of TUTOR_PERSONAS) built.push(await buildTutor(campus, persona));
-  return built;
+export function buildTutorPersonas(campus: PersonaCampus): Promise<PersonaSummary[]> {
+  return Promise.all(TUTOR_PERSONAS.map((persona) => buildTutor(campus, persona)));
 }

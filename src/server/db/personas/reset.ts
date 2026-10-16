@@ -61,8 +61,7 @@ async function silenceHistory(institutionId: string): Promise<void> {
 export async function resetPersonas(campus: PersonaCampus): Promise<PersonaSummary[]> {
   const built = await holdingPersonas(campus.institutionId, "reset", async () => {
     await wipePersonas(campus.institutionId);
-    const summaries: PersonaSummary[] = [];
-    for (const build of BUILDERS) summaries.push(...(await build(campus)));
+    const summaries = (await Promise.all(BUILDERS.map((build) => build(campus)))).flat();
     await releaseRatings(campus.institutionId);
     await refreshScores(campus.institutionId);
     await silenceHistory(campus.institutionId);
