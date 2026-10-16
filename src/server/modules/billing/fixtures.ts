@@ -9,10 +9,6 @@ export const FIXTURE_TRANSFER_PREFIX = "fixture_tr_";
 export type FixtureTransferReference = `${typeof FIXTURE_TRANSFER_PREFIX}${string}`;
 
 export const isPersona = (userId: string) => userId.startsWith(PERSONA_PREFIX);
-export const isPersonaEmail = (address: string) => {
-  const lower = address.toLowerCase();
-  return lower.startsWith(`${PERSONA_INBOX.local}+`) && lower.endsWith(`@${PERSONA_INBOX.domain}`);
-};
 export const isFixture = (reference: string | null) => reference?.startsWith(FIXTURE_PREFIX) ?? false;
 
 export function refuseFixture(reference: string): void {
