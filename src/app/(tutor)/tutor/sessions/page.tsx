@@ -116,7 +116,7 @@ function FeeMilestoneCard({ feeToDateMinor }: { feeToDateMinor: number }) {
         <h2 className="text-sm font-medium text-foreground">Platform share</h2>
         <p className="text-sm text-muted">
           You&apos;ve passed {milestone}. We take {lower} of every session from now on, and your ratings
-          show once a course has {MIN_RATINGS}.
+          show once a course has {MIN_RATINGS} ratings.
         </p>
       </Card>
     );
