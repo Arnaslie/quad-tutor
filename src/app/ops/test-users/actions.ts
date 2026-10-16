@@ -1,6 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
+import { z } from "zod";
 
 import {
   resetTestUsers,
@@ -15,5 +16,7 @@ export async function resetTestUsersAction(): Promise<ResetResult> {
 }
 
 export async function sendSignInLinkAction(email: string): Promise<SignInLinkResult> {
-  return sendTestUserSignInLink(await currentOperator(), email, await headers());
+  const parsed = z.email().safeParse(email);
+  if (!parsed.success) return { status: "refused", message: "That is not a test user on your campus." };
+  return sendTestUserSignInLink(await currentOperator(), parsed.data, await headers());
 }
