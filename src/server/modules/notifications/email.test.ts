@@ -102,10 +102,10 @@ async function resendBody(t: TestContext, email: Email): Promise<Record<string, 
 const accepted = (to: string) =>
   requestAccepted({ to, studentName: "Sam", tutorName: "Riley", courseLabel: "MATH 125" });
 
-test("a persona's notification is copied to the test reader", async (t) => {
-  const body = await resendBody(t, accepted("arnutislie12+student-new@gmail.com"));
+test("a persona's notification is copied to the test reader, whatever the address case", async (t) => {
+  const body = await resendBody(t, accepted("Arnutislie12+Student-New@Gmail.com"));
 
-  assert.deepEqual(body.to, ["arnutislie12+student-new@gmail.com"]);
+  assert.deepEqual(body.to, ["Arnutislie12+Student-New@Gmail.com"]);
   assert.deepEqual(body.bcc, ["jmgucius@crimson.ua.edu"]);
 });
 
@@ -116,10 +116,10 @@ test("a real user's notification is not copied", async (t) => {
   assert.equal("bcc" in body, false);
 });
 
-test("a persona's sign-in link is copied to the test reader, whatever the address case", async (t) => {
-  const body = await resendBody(t, signInLink({ to: "Arnutislie12+Student-New@Gmail.com", link: "http://localhost:3000/sign-in/verify?token=x" }));
+test("a persona's sign-in link is copied to the test reader", async (t) => {
+  const body = await resendBody(t, signInLink({ to: "arnutislie12+student-new@gmail.com", link: "http://localhost:3000/sign-in/verify?token=x" }));
 
-  assert.deepEqual(body.to, ["Arnutislie12+Student-New@Gmail.com"]);
+  assert.deepEqual(body.to, ["arnutislie12+student-new@gmail.com"]);
   assert.equal(body.subject, "Quad Tutor sign-in link");
   assert.deepEqual(body.bcc, ["jmgucius@crimson.ua.edu"]);
 });
