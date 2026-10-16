@@ -18,7 +18,6 @@ const healthy: MoneyFacts = {
     { id: "untouched", status: "active", pricePaidMinor: 3_500, totals: { package_purchase: t(3_500) } },
   ],
   sessions: [{ id: "s1", tutorProfileId: "tp", totals: { session_earned: t(3_500), tutor_accrued: t(3_150), platform_fee: t(350) } }],
-  tutorTerms: [{ tutorProfileId: "tp", termId: "term", feeMinor: 10_000 }],
 };
 
 const invariants = (facts: MoneyFacts) => moneyViolations(facts).map((v) => v.invariant);
@@ -70,15 +69,29 @@ test("a fee above the take rate is flagged, and the floor is allowed", () => {
   assert.deepEqual(invariants({ ...healthy, sessions: floored }), []);
 });
 
-test("an 11th session at the full take is flagged, and the lower take is allowed", () => {
-  const session = (i: number, fee: number) => ({
+const feeHistory = (sessionMinor: number, fees: number[]) =>
+  fees.map((fee, i) => ({
     id: `s${i}`,
     tutorProfileId: "tp",
-    totals: { session_earned: t(3_500), tutor_accrued: t(3_500 - fee), platform_fee: t(fee) },
-  });
-  const ten = Array.from({ length: 10 }, (_, i) => session(i, 350));
-  assert.deepEqual(invariants({ ...healthy, sessions: [...ten, session(10, 175)] }), []);
-  assert.deepEqual(invariants({ ...healthy, sessions: [...ten, session(10, 350)] }), ["full take on at most 10 sessions"]);
+    totals: { session_earned: t(sessionMinor), tutor_accrued: t(sessionMinor - fee), platform_fee: t(fee) },
+  }));
+const times = (n: number, fee: number) => Array<number>(n).fill(fee);
+
+test("a full take after $100 in fees is flagged, and the lower take is allowed", () => {
+  assert.deepEqual(invariants({ ...healthy, sessions: feeHistory(5_000, [...times(20, 500), 250]) }), []);
+  assert.deepEqual(invariants({ ...healthy, sessions: feeHistory(5_000, times(21, 500)) }), ["full take only below the fee milestone"]);
+});
+
+test("the session that crosses $100 may take more than 5%, and the one after may not", () => {
+  assert.deepEqual(invariants({ ...healthy, sessions: feeHistory(3_500, [...times(28, 350), 275, 175]) }), []);
+  assert.deepEqual(invariants({ ...healthy, sessions: feeHistory(3_500, [...times(28, 350), 275, 350]) }), [
+    "full take only below the fee milestone",
+  ]);
+});
+
+test("fees written under the term cap and the 10-session step still pass", () => {
+  assert.deepEqual(invariants({ ...healthy, sessions: feeHistory(5_000, [...times(10, 500), ...times(20, 250), 0, 0]) }), []);
+  assert.deepEqual(invariants({ ...healthy, sessions: feeHistory(3_500, [...times(10, 350), ...times(22, 175)]) }), []);
 });
 
 test("a session whose split does not add up to what was earned is flagged", () => {
@@ -97,10 +110,6 @@ test("transfers net of reversals may not exceed what the tutor accrued", () => {
     invariants({ ...healthy, engagements: [{ ...base, totals: { ...accrued, tutor_transfer: t(6_300, 2), transfer_reversal: t(3_150) } }] }),
     [],
   );
-});
-
-test("a tutor's fees past the term cap are flagged", () => {
-  assert.deepEqual(invariants({ ...healthy, tutorTerms: [{ tutorProfileId: "tp", termId: "term", feeMinor: 10_001 }] }), ["fee <= term cap"]);
 });
 
 test("a second refund row on one engagement is flagged", () => {

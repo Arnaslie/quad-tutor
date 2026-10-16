@@ -44,7 +44,7 @@ guarantee as the way out of a bad fit. Ending runs the term-end refund on demand
 - The package closes as `completed` if anything was delivered, otherwise as
   `refunded`.
 
-It moves only deferred money: no fee, no payout, and the cap meter is not touched.
+It moves only deferred money: no fee, no payout, and the fee meter is not touched.
 Ending writes no reliability fact. It is refused while a session is inside the
 late-cancel window, past its start and unconfirmed, or disputed. A late cancel stays
 something only the cancel action records, and a session that may have happened is
@@ -77,49 +77,51 @@ accept step: the tutor already offered that hour, and one session commits them t
 nothing beyond it. A package needs the tutor's accept (see Renewals).
 
 **Tutors set their own rate for each course they tutor, in whole dollars from $1 to
-$200 a session. The take is 10% of each of a tutor's first 10 sessions and 5% after,
-capped at $100 per tutor per term.** The student pays the tutor's rate and nothing on top: a student
+$200 a session. The take is 10% of each session until the platform has taken $100 in
+fees from a tutor, counted over the tutor's whole life on one campus, and 5% of every
+session after that, for good.** Settled 2026-10-16 (`docs/proposals/lifetime-fee-milestone.md`).
+It replaces the 10-session step from 10% to 5% and the $100-per-term cap, and applies to
+existing tutors with no grandfathering. The student pays the tutor's rate and nothing on top: a student
 booking fee was rejected because the student is already paying for the tutor. The price
 is fixed when the tutor accepts the request, or when a top-up's checkout is created, and
-a later rate change never re-prices it. Once a tutor's platform share for a term reaches
-$100, they keep 100% for the rest of that term. This replaces the flat 22%, which was
-too high, and the fixed $35 price. At $35 a session the cap is reached on the 48th
-session of a tutor's first term, and the 58th of a later one. The 10-session count is
-lifetime, across all courses, and is read from the ledger at recognition. The rate is
-shown to students and is never a ranking input. The $200 ceiling is a fraud guard, not
-a market limit: without it, a stolen card and a colluding tutor could move large sums
-through payouts. The most the platform can earn is 100 tutors × $100 × 3
-terms ≈ $30k a year, before processing. Details and worked figures:
-`docs/proposals/tutor-pricing.md`.
+a later rate change never re-prices it. The meter never resets at term end, and there
+is no 0% rate. The rate is shown to students and is never a ranking input. The $200
+ceiling is a fraud guard, not a market limit: without it, a stolen card and a colluding
+tutor could move large sums through payouts.
 
-The cap is the disintermediation lever, not just a discount. The tutor with the most
-to gain from cash is the busy one, and past the cap that tutor's on-app sessions cost
-them nothing. It supersedes a lower take on renewals only (question 4 in
-`docs/proposals/off-platform-payment.md`).
+Price decides when a tutor crosses $100: the 29th session at $35, the 67th at $15, the
+10th at $100 and the 5th at $200. Busy tutors pay 5% for good instead of 0% past a
+term cap. The cap was the main reason a busy tutor had nothing to gain from moving
+students to cash. The user accepted losing that lever on 2026-10-16, and the lower
+rate is the one that is left. The old cap and its worked figures are in
+`docs/proposals/tutor-pricing.md`, kept as history.
 
-Each rule below keeps the cap a sum over the ledger rather than a counter that can
+Each rule below keeps the meter a sum over the ledger rather than a counter that can
 drift:
 
-- **Scope.** One meter per `tutor_profile` per `term`, across all of that tutor's
-  courses and students. The term is the engagement's (`course_offering.term_id`), not
-  the date the session settles, so a dispute resolved after term end counts against
-  the term it was taught in.
+- **Scope.** One meter per `tutor_profile`, across all of that tutor's courses,
+  students and terms. A `tutor_profile` belongs to one campus, so the meter is per
+  campus. `milestoneReached()` in `billing/pricing.ts` is the only place "$100
+  reached" is decided, and `feesToDate()` in `billing/ledger.ts` is the only read of
+  the meter. Nothing stores the answer.
 - **Charged at recognition, never at purchase.** A package is deferred revenue, and its
   split is unknown until each session is delivered. The fee is fixed in `recognise()`
   (`engagements/confirmation.ts`), the one place a session becomes revenue — two
   confirmations, auto-release, or a dispute resolved as attended. It is written as a
   `platform_fee` row beside `session_earned` and `tutor_accrued`, so every delivered
   session satisfies `session_earned = tutor_accrued + platform_fee`, and the meter is
-  the sum of `platform_fee` for that tutor and term.
+  the sum of `platform_fee` for that tutor.
 - **Fixed once written.** A session's fee never changes after recognition. Nothing is
-  re-priced retroactively, in either direction.
+  re-priced retroactively, in either direction. Fees written under the old cap and
+  step stay as they are. If `FEE_MILESTONE_MINOR` is raised later, tutors between the
+  old and the new line go back to 10% (accepted 2026-10-16).
 - **Reversals follow the tutor's pay.** A term-end refund, and a package the student
   ends early, return only undelivered sessions, which never charged a fee, so
   neither touches the meter. A disputed session charges nothing while it holds;
   resolved as attended, it is charged at resolution against the meter as it stands
   then; resolved as not attended, never. Nothing today reverses a recognised session.
   If something ever does, and takes the tutor's pay back with it, it reverses the fee
-  row too and the room returns.
+  row too and the meter drops by that fee.
 - **Concurrency.** `recognise()` locks the `tutor_profile` row before reading the
   meter, so two sessions for one tutor recognised at the same moment serialise and the
   second sees the first's fee. Lock order, per path:
@@ -145,27 +147,37 @@ drift:
     engagement after the tutor.
   - Nothing holds the tutor while waiting on an engagement for update, or on a
     session. `setDefaultLocation` (`tutoring/location.ts`) also takes the tutor first.
-- **Rounding.** Integer minor units only:
-  `fee = min(floor(session × rateBp / 10000), max(0, 10000 − meter))`, where `rateBp`
-  is 1000 for a tutor's first 10 sessions and 500 after. Floor rounds in the tutor's
-  favour, and the session that crosses the line takes a partial fee (the 48th at $35
-  pays $0.25), so the meter lands on exactly $100.00 and never over. A through-final
-  session at $35 ($31.50) pays $3.15, then $1.57, and caps on the 54th.
-- **The platform absorbs card processing, before and after the cap.** "Keep 100%" is
-  literally true. At Stripe's standard US card rate a $140 four-pack costs about $4.36
-  to collect, roughly $1.10 a session: a third of the $3.50 fee in a tutor's first 10
-  sessions, about two thirds of the $1.75 after, and a straight loss past the cap, plus
-  Connect's per-payout charge. Passing processing through to capped tutors was the
-  alternative, and was rejected to keep the promise simple. Low rates lose money too: a
+- **Rounding.** Integer minor units only, and floor rounds in the tutor's favour.
+  Below the line a session pays `floor(session × 10%)`, and past it
+  `floor(session × 5%)`. The session that crosses the line is split at it, like a tax
+  bracket: 10% on the part whose fee fills the meter to exactly $100, and 5% on the
+  rest, so no fee above $100 is charged at 10%:
+  `fee = toLine + floor((session − toLine × 10) × 5%)`, where `toLine = 10000 − meter`.
+  With $98 already taken, a $35 session pays $2.00 on its first $20 and $0.75 on the
+  other $15, a $2.75 fee, and the meter ends at $100.75. It is still one `platform_fee`
+  row and one payment, since the split is recomputable from the session amount and the
+  meter before it. A through-final session at $35 ($31.50) pays $3.15, then $1.57.
+- **`db:check-money` guards the tutor's side.** Each fee is at most 10% of its session.
+  Per tutor, take the fees charged above 5%; their sum minus the largest of them must
+  stay under $100. The meter only grows, so the last of those sessions saw at least
+  that much. The check needs no row order. Old rows pass it unless a tutor paid more
+  than $100 at 10% across terms under the old cap, which only a tutor charging over
+  about $111 a session could do; the prod check-money run before this shipped is what
+  rules that out. It catches repeated overcharges, not a single 10% fee smaller than
+  the largest earlier one. The other direction, 5% charged too early, is left to the
+  tests, because rows written under the old cap break it by design.
+- **The platform absorbs card processing.** At Stripe's standard US card rate a $140
+  four-pack costs about $4.36 to collect, roughly $1.10 a session: a third of the $3.50
+  fee below the milestone and about two thirds of the $1.75 after, plus Connect's
+  per-payout charge. Passing processing through to tutors was rejected to keep the
+  price simple. Low rates lose money too: a
   single session pays for itself at about $4.25 a session at 10% and $14.30 at 5%, and a
   four-pack at about $1.05 and $3.60. Below that, the platform pays to collect. The user
   accepted this on 2026-10-15 rather than raise the $1 floor, since rates that low will be
   rare.
-- **The tutor sees their own meter; no student ever does.** The earnings page shows
-  progress toward the cap ("$64 of $100 this term"), because the incentive only works
-  if a busy tutor knows how close they are. Whether a tutor is capped says how busy
-  they are, which is an ordering, so it never reaches a student-facing shape or
-  `score.ts`.
+- **The tutor sees their own meter; no student ever does.** The sessions page shows
+  progress toward the milestone ("$64.00 of $100.00"), then that 5% applies for good.
+  The fee number never reaches a student-facing shape or `score.ts`.
 
 **Seed ~10–30 weed-out courses. Not the full catalog.** Concentration buys patience;
 a full catalog is vanity work.
@@ -411,8 +423,8 @@ grounds for removal.
   10 delivered paid sessions. After that, a course rating needs at least 5 ratings in
   that course, and the overall rating needs at least one course whose rating is
   public. The 10 sessions are confirmed by the user. The gate is independent of the
-  take cap: 10 sessions at $35 is about $35 of platform fee, and the $100 cap is
-  reached on the 48th session of a tutor's first term. Neither threshold reads the other.
+  fee milestone: 10 sessions at $35 is about $35 of platform fee, and the $100
+  milestone is crossed on the 29th session. Neither threshold reads the other.
 - **Only released ratings are counted** (batches decided by the user, 2026-10-06).
   This replaces "only ratings whose window has closed". A rating's 7-day window must
   close before it can be released, and released is what counts. That applies to:
@@ -976,8 +988,8 @@ paying, not non-consumers.**
 **3. Get the real course codes and the CAS peer-tutor pay rate** from the UA contact.
 Known wage floor: UA on-campus ~$10/hr, America Reads/Counts $12/hr, athletics tutoring
 $10–17.50. Target roughly 2×: **$25–30/hr to the tutor, $30–40 session price.** The
-20–25% take this originally targeted is superseded by 10%, then 5% after a tutor's 10th
-session, capped at $100 per tutor per term (see Product) — well under Wyzant (~34%) and
+20–25% take this originally targeted is superseded by 10%, then 5% once a tutor has
+paid $100 in fees (see Product) — well under Wyzant (~34%) and
 Preply (~33%).
 
 **4. Clear pre-Stripe test data from production before launch.** Every account is a

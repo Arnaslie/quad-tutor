@@ -1,6 +1,8 @@
 # Proposal: tutor-set rates and a lower take after 10 sessions
 
-Status: **accepted 2026-10-14, built in #77 and #78.** Written 2026-10-14 against
+Status: **accepted 2026-10-14, built in #77 and #78. The 10-session step and the term
+cap are superseded by the lifetime $100 fee milestone (`lifetime-fee-milestone.md`,
+2026-10-16).** Written 2026-10-14 against
 `origin/main` at `701a296`. The accepted rule is in `docs/decisions.md` (Product,
 "Tutors set their own rate").
 

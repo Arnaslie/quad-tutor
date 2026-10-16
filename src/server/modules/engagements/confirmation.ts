@@ -8,8 +8,8 @@ import {
   tutorProfile,
 } from "@/server/db/schema";
 import type { Actor } from "@/server/modules/identity/actor";
-import { feeChargedThisTermMinor, record, sessionsEarned } from "@/server/modules/billing/ledger";
-import { perSessionMinor, splitMinor, takeRateBp } from "@/server/modules/billing/pricing";
+import { feesToDate, record } from "@/server/modules/billing/ledger";
+import { perSessionMinor, splitMinor } from "@/server/modules/billing/pricing";
 
 import {
   SessionError,
@@ -33,7 +33,6 @@ async function recognise(
     | "sessionsPurchased"
     | "currency"
     | "tutorProfileId"
-    | "termId"
   >,
 ): Promise<void> {
   await tx
@@ -43,13 +42,9 @@ async function recognise(
     .for("no key update");
 
   const sessionMinor = perSessionMinor(session);
-  const [chargedThisTermMinor, earnedBefore] = await Promise.all([
-    feeChargedThisTermMinor(tx, session),
-    sessionsEarned(tx, session),
-  ]);
+  const fees = await feesToDate(tx, session.institutionId, [session.tutorProfileId]);
   const { tutorMinor, platformMinor } = splitMinor(sessionMinor, {
-    rateBp: takeRateBp(earnedBefore),
-    chargedThisTermMinor,
+    feeToDateMinor: fees.get(session.tutorProfileId) ?? 0,
   });
 
   await record(tx, [
