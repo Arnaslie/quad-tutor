@@ -1,3 +1,9 @@
+import { sql } from "drizzle-orm";
+
+import { db } from "@/server/db";
+import { user } from "@/server/db/schema";
+import { isPersona, PERSONA_MAIL_READER } from "@/server/modules/billing/fixtures";
+
 export class EmailError extends Error {
   constructor(
     message: string,
@@ -45,6 +51,15 @@ export type Email = {
   idempotencyKey?: string;
 };
 
+async function copies(message: Email): Promise<string[]> {
+  const [recipient] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(sql`lower(${user.email}) = ${message.to.trim().toLowerCase()}`)
+    .limit(1);
+  return recipient && isPersona(recipient.id) ? [PERSONA_MAIL_READER] : [];
+}
+
 function sender(): string {
   return process.env.EMAIL_FROM ?? "Quad Tutor <onboarding@resend.dev>";
 }
@@ -61,8 +76,11 @@ export async function sendEmail(message: Email): Promise<void> {
     throw new EmailError("RESEND_API_KEY is not set — refusing to drop mail silently.");
   }
 
+  const bcc = await copies(message);
+
   if (!key || logOnly) {
     console.log(`\n[email] to: ${message.to}`);
+    if (bcc.length > 0) console.log(`[email] bcc: ${bcc.join(", ")}`);
     console.log(`[email] subject: ${message.subject}`);
     if (message.idempotencyKey) console.log(`[email] idempotency-key: ${message.idempotencyKey}`);
     console.log(`${message.text}\n`);
@@ -79,6 +97,7 @@ export async function sendEmail(message: Email): Promise<void> {
     body: JSON.stringify({
       from: sender(),
       to: [message.to],
+      ...(bcc.length > 0 ? { bcc } : {}),
       subject: message.subject,
       text: message.text,
     }),

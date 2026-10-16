@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "./db";
 import { sendEmail } from "./modules/notifications/email";
+import { signInLink } from "./modules/notifications/messages";
 import * as schema from "./db/schema";
 import { institution, institutionEmail, studentProfile } from "./db/schema";
 
@@ -81,18 +82,7 @@ export const auth = betterAuth({
         const link = new URL(url);
         link.pathname = "/sign-in/verify";
 
-        await sendEmail({
-          to: email,
-          subject: "Quad Tutor sign-in link",
-          text: [
-            "Sign in to Quad Tutor:",
-            "",
-            link.toString(),
-            "",
-            "The link works once and expires shortly.",
-            "If you did not ask for it, ignore this — nobody can sign in without it.",
-          ].join("\n"),
-        });
+        await sendEmail(signInLink({ to: email, link: link.toString() }));
       },
     }),
   ],

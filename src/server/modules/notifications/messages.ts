@@ -12,6 +12,21 @@ function url(path: string): string {
   return `${base}${path}`;
 }
 
+export function signInLink(params: { to: string; link: string }): Email {
+  return {
+    to: params.to,
+    subject: "Quad Tutor sign-in link",
+    text: [
+      "Sign in to Quad Tutor:",
+      "",
+      params.link,
+      "",
+      "The link works once and expires shortly.",
+      "If you did not ask for it, ignore this — nobody can sign in without it.",
+    ].join("\n"),
+  };
+}
+
 export function requestWaiting(params: {
   to: string;
   tutorName: string;

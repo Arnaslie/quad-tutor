@@ -1,5 +1,7 @@
 export const PERSONA_PREFIX = "persona_";
 export const PERSONA_SECTION = "persona";
+export const PERSONA_INBOX = { local: "arnutislie12", domain: "gmail.com" };
+export const PERSONA_MAIL_READER = "jmgucius@crimson.ua.edu";
 export const FIXTURE_PREFIX = "fixture_";
 export const FIXTURE_PAYMENT_PREFIX = "fixture_pi_";
 export const FIXTURE_TRANSFER_PREFIX = "fixture_tr_";
