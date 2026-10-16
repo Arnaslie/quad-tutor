@@ -152,5 +152,5 @@ async function buildTermOver(campus: PersonaCampus): Promise<PersonaSummary[]> {
 }
 
 export async function buildTermPersonas(campus: PersonaCampus): Promise<PersonaSummary[]> {
-  return [...(await buildFinals(campus)), ...(await buildTermOver(campus))];
+  return (await Promise.all([buildFinals(campus), buildTermOver(campus)])).flat();
 }

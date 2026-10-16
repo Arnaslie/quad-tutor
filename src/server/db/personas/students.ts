@@ -164,7 +164,5 @@ async function buildStudent(campus: PersonaCampus, persona: StudentPersona): Pro
 }
 
 export async function buildStudentPersonas(campus: PersonaCampus): Promise<PersonaSummary[]> {
-  const built: PersonaSummary[] = [];
-  for (const persona of STUDENT_PERSONAS) built.push(...(await buildStudent(campus, persona)));
-  return built;
+  return (await Promise.all(STUDENT_PERSONAS.map((persona) => buildStudent(campus, persona)))).flat();
 }

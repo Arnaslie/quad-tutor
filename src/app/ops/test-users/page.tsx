@@ -9,7 +9,7 @@ import { ResetForm } from "./reset-form";
 
 export const metadata: Metadata = { title: "Test users" };
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export default async function TestUsersPage() {
   await requireOperator();
