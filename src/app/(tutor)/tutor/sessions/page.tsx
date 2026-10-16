@@ -22,6 +22,7 @@ import {
   milestoneReached,
   TAKE_RATE_BP,
 } from "@/server/modules/billing/pricing";
+import { MIN_RATINGS } from "@/server/modules/ratings/rules";
 import { earningsForTutor, feeToDateForTutor } from "@/server/modules/tutoring/earnings";
 import { defaultLocationFor } from "@/server/modules/tutoring/location";
 
@@ -114,7 +115,8 @@ function FeeMilestoneCard({ feeToDateMinor }: { feeToDateMinor: number }) {
       <Card className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-foreground">Platform share</h2>
         <p className="text-sm text-muted">
-          You&apos;ve passed {milestone}. We take {lower} of every session from now on.
+          You&apos;ve passed {milestone}. We take {lower} of every session from now on, and your ratings
+          show once a course has {MIN_RATINGS} ratings.
         </p>
       </Card>
     );
@@ -144,7 +146,7 @@ function FeeMilestoneCard({ feeToDateMinor }: { feeToDateMinor: number }) {
       </div>
       <p className="text-sm text-muted">
         We take {TAKE_RATE_BP / 100}% of each session until we&apos;ve taken {milestone} in total. After that we
-        take {lower}, for good.
+        take {lower}, for good, and your ratings can show to students.
       </p>
     </Card>
   );

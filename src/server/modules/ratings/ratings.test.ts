@@ -144,7 +144,9 @@ async function delivered(params: {
   count: number;
   rate?: { tutorCourseId: string; stars: number[] };
   recognisedDaysAgo?: number;
+  feeMinor?: number;
 }) {
+  const feeMinor = params.feeMinor ?? 1_000;
   for (let index = 0; index < params.count; index += 1) {
     const [session] = await db
       .insert(sessionBooking)
@@ -156,14 +158,17 @@ async function delivered(params: {
         resolution: "both_confirmed",
       })
       .returning({ id: sessionBooking.id });
-    await db.insert(ledgerEntry).values({
+    const recognised = {
       engagementId: params.engagementId,
       institutionId: home.institutionId,
       sessionId: session.id,
-      type: "session_earned",
-      amountMinor: 2500,
       occurredAt: new Date(Date.now() - (params.recognisedDaysAgo ?? WINDOW_DAYS + 6) * 86_400_000),
-    });
+    };
+    await db.insert(ledgerEntry).values([
+      { ...recognised, type: "session_earned", amountMinor: feeMinor * 10 },
+      { ...recognised, type: "tutor_accrued", amountMinor: feeMinor * 9 },
+      { ...recognised, type: "platform_fee", amountMinor: feeMinor },
+    ]);
     const stars = params.rate?.stars[index];
     if (params.rate && stars) {
       await db.insert(sessionRating).values({
@@ -361,10 +366,10 @@ test("the first 5 closed ratings release together, and the note reaches the tuto
 
   assert.equal(await releaseRatings(home.institutionId), 5);
   assert.deepEqual(await releaseStamps(tutorCourseId), { released: 5, stamps: 1, pending: 0 });
-  const nine = await cardRatings(home.institutionId, [tutorCourseId]);
-  assert.deepEqual(nine.get(tutorCourseId), { courseRating: null, overallRating: null }, "9 sessions, 5 released ratings");
+  const under = await cardRatings(home.institutionId, [tutorCourseId]);
+  assert.deepEqual(under.get(tutorCourseId), { courseRating: null, overallRating: null }, "$82.50 in fees, 5 released ratings");
 
-  await delivered({ engagementId: b.id, count: 1 });
+  await delivered({ engagementId: b.id, count: 1, feeMinor: 1_750 });
   const rated = await cardRatings(home.institutionId, [tutorCourseId, tcB]);
   const publicA = { average: "4.2", count: 5 };
   assert.deepEqual(rated.get(tutorCourseId), { courseRating: publicA, overallRating: publicA }, "B's lone rating stays out of overall");
@@ -399,7 +404,7 @@ test("after the first release, ratings release in batches of 3, and an open-wind
   assert.equal(await releaseRatings(home.institutionId), 0, "the open-window rating stays unreleased");
 });
 
-test("open-window ratings stay out of the course count but their sessions count, and overall sums every public course", async () => {
+test("open-window ratings stay out of the course count but their fees count, and overall sums every public course", async () => {
   const edge = await tutorFor("edge-tutor", home.institutionId);
   const tcA = await claim(edge, home.a.courseId);
   const tcB = await claim(edge, home.b.courseId);
@@ -413,7 +418,7 @@ test("open-window ratings stay out of the course count but their sessions count,
 
   const gated = await cardRatings(home.institutionId, [tcA, tcB]);
   const publicB = { average: "3.0", count: 5 };
-  assert.deepEqual(gated.get(tcA), { courseRating: null, overallRating: publicB }, "4 closed and 1 open rating; 9 closed and 1 open session");
+  assert.deepEqual(gated.get(tcA), { courseRating: null, overallRating: publicB }, "4 closed and 1 open rating; $100 in fees, $10 of it from the open session");
   assert.deepEqual(gated.get(tcB), { courseRating: publicB, overallRating: publicB });
 
   await delivered({ engagementId: a.id, count: 1, rate: { tutorCourseId: tcA, stars: [4] } });
@@ -422,6 +427,20 @@ test("open-window ratings stay out of the course count but their sessions count,
   const overall = { average: "3.7", count: 10 };
   assert.deepEqual(both.get(tcA), { courseRating: { average: "4.4", count: 5 }, overallRating: overall });
   assert.deepEqual(both.get(tcB), { courseRating: publicB, overallRating: overall });
+});
+
+test("ten sessions at $35 keep the rating hidden until the fees reach $100", async () => {
+  const cheap = await tutorFor("cheap-tutor", home.institutionId);
+  const tc = await claim(cheap, home.a.courseId);
+  const e = await engagementFor(tc, home.a.offeringId);
+
+  await delivered({ engagementId: e.id, count: 10, feeMinor: 350, rate: { tutorCourseId: tc, stars: [5, 5, 4, 5, 5] } });
+  assert.equal(await releaseRatings(home.institutionId), 5);
+  assert.deepEqual((await cardRatings(home.institutionId, [tc])).get(tc), { courseRating: null, overallRating: null }, "$35 in fees");
+
+  await delivered({ engagementId: e.id, count: 19, feeMinor: 350 });
+  const rating = { average: "4.8", count: 5 };
+  assert.deepEqual((await cardRatings(home.institutionId, [tc])).get(tc), { courseRating: rating, overallRating: rating }, "$101.50 in fees");
 });
 
 test("overlapping sweeps release a batch once and don't error", async () => {

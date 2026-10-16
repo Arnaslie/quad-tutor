@@ -94,7 +94,7 @@ package for real, then ends it.
 
 Each persona is one state. Amounts follow the pricing rule in `docs/decisions.md` (10%
 until a tutor has paid $100 in fees, then 5% for good), and rates vary by course,
-from $25 to $50 for realism. Every amount is computed by the real pricing code when the persona
+from $25 to $100 for realism. Every amount is computed by the real pricing code when the persona
 is built, not hard-coded.
 
 **Tutors**
@@ -103,8 +103,8 @@ is built, not hard-coded.
 |---|---|
 | `tutor-new` | Approved for a course, 0 sessions, no rating, waiting for a first request |
 | `tutor-1` | 1 session at $50; earned $45.00 |
-| `tutor-9` | 9 sessions; one away from a public rating |
-| `tutor-10` | 10 sessions at $35, 5 released ratings, rating public; earned $315.00 |
+| `tutor-9` | 9 sessions at $100, so $90 in fees; one session from a public rating |
+| `tutor-10` | 10 sessions at $100, exactly $100 in fees, 5 released ratings, rating public; earned $900.00 |
 | `tutor-ranked` | 20+ rated sessions in one course, so the ranking's star and renewal terms count |
 | `tutor-32` | 32 sessions at $35 in one term; the 29th crosses $100 in fees; earned $1,014.00, some paid out and some owed |
 | `tutor-past-100` | 32 sessions at $50; the 20th lands on $100 in fees, and the 12 after it pay 5% |
