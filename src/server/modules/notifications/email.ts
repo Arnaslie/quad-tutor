@@ -1,3 +1,5 @@
+import { isPersonaEmail, PERSONA_MAIL_READER } from "@/server/modules/billing/fixtures";
+
 export class EmailError extends Error {
   constructor(
     message: string,
@@ -43,7 +45,13 @@ export type Email = {
   subject: string;
   text: string;
   idempotencyKey?: string;
+  // Never copied to PERSONA_MAIL_READER: a copied sign-in link signs the reader in as that persona, +ops included.
+  credential?: true;
 };
+
+function copies(message: Email): string[] {
+  return isPersonaEmail(message.to) && !message.credential ? [PERSONA_MAIL_READER] : [];
+}
 
 function sender(): string {
   return process.env.EMAIL_FROM ?? "Quad Tutor <onboarding@resend.dev>";
@@ -61,8 +69,11 @@ export async function sendEmail(message: Email): Promise<void> {
     throw new EmailError("RESEND_API_KEY is not set — refusing to drop mail silently.");
   }
 
+  const bcc = copies(message);
+
   if (!key || logOnly) {
     console.log(`\n[email] to: ${message.to}`);
+    if (bcc.length > 0) console.log(`[email] bcc: ${bcc.join(", ")}`);
     console.log(`[email] subject: ${message.subject}`);
     if (message.idempotencyKey) console.log(`[email] idempotency-key: ${message.idempotencyKey}`);
     console.log(`${message.text}\n`);
@@ -79,6 +90,7 @@ export async function sendEmail(message: Email): Promise<void> {
     body: JSON.stringify({
       from: sender(),
       to: [message.to],
+      ...(bcc.length > 0 ? { bcc } : {}),
       subject: message.subject,
       text: message.text,
     }),

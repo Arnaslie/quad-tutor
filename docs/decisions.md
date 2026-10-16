@@ -824,6 +824,11 @@ tester does is real Stripe test-mode money. At launch, `TEST_PERSONAS` is remove
 every `persona_` user is deleted. This is not a legacy carve-out: like the pre-Stripe
 rows, it is gone at launch. Both testers sign in through the one inbox. Decided
 by the user on 2026-10-14.
+Every notification to a persona is also copied (bcc) to `jmgucius@crimson.ua.edu`, so
+the second tester reads persona mail without the shared inbox. Sign-in links are not
+copied: a copied link would sign the reader in as any persona, `+ops` included. That
+address is a reader, not a fixture person, so the rule that fixture people are
+plus-aliases of `SEED_INBOX` still holds.
 
 **Campus membership is gated on `crimson.ua.edu`**, the UA *student* domain, matched
 against `institution.email_domain`. One domain per institution: supporting several

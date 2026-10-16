@@ -5,10 +5,8 @@ import { escapeLike } from "../like";
 import { institution, institutionEmail, studentProfile, tutorProfile, user } from "../schema";
 
 import type { KycStatus } from "@/server/modules/billing/kyc";
-import { PERSONA_PREFIX } from "@/server/modules/billing/fixtures";
+import { PERSONA_INBOX, PERSONA_PREFIX } from "@/server/modules/billing/fixtures";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
-
-const INBOX = { local: "arnutislie12", domain: "gmail.com" };
 
 export type PersonaCampus = { institutionId: string; testRun?: string };
 
@@ -29,11 +27,11 @@ export function personaUserId(campus: PersonaCampus, key: string): string {
 }
 
 export function personaEmail(campus: PersonaCampus, key: string): string {
-  return `${INBOX.local}+${handle(campus, key)}@${INBOX.domain}`;
+  return `${PERSONA_INBOX.local}+${handle(campus, key)}@${PERSONA_INBOX.domain}`;
 }
 
 export function testRunEmails(testRun: string): string {
-  return `${escapeLike(INBOX.local)}+%.${escapeLike(testRun)}@${escapeLike(INBOX.domain)}`;
+  return `${escapeLike(PERSONA_INBOX.local)}+%.${escapeLike(testRun)}@${escapeLike(PERSONA_INBOX.domain)}`;
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
