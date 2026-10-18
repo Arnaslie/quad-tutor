@@ -54,6 +54,12 @@ after(() => new Promise<void>((resolve) => server.close(() => resolve())));
 const scheduleOf = (body: URLSearchParams) =>
   Object.fromEntries([...body].filter(([key]) => key.startsWith("settings[payouts][schedule]")));
 
+const WEEKLY = {
+  "settings[payouts][schedule][interval]": "weekly",
+  "settings[payouts][schedule][weekly_anchor]": "friday",
+  "settings[payouts][schedule][weekly_payout_days][0]": "friday",
+};
+
 test("a new Connect account is created to pay out weekly on Fridays", async () => {
   sent.length = 0;
   reply = account({ interval: "weekly", weekly_anchor: "friday" });
@@ -61,10 +67,7 @@ test("a new Connect account is created to pay out weekly on Fridays", async () =
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].path, "/v1/accounts");
-  assert.deepEqual(scheduleOf(sent[0].body), {
-    "settings[payouts][schedule][interval]": "weekly",
-    "settings[payouts][schedule][weekly_anchor]": "friday",
-  });
+  assert.deepEqual(scheduleOf(sent[0].body), WEEKLY);
   assert.equal(sent[0].idempotencyKey, "connect-account:tp_1");
   assert.equal(created.payoutSpeed, "weekly");
 });
@@ -80,11 +83,7 @@ test("setting a speed sends exactly that schedule to the account", async () => {
     sent.map(({ method, path, body }) => [method, path, scheduleOf(body)]),
     [
       ["POST", "/v1/accounts/acct_local", { "settings[payouts][schedule][interval]": "daily" }],
-      [
-        "POST",
-        "/v1/accounts/acct_local",
-        { "settings[payouts][schedule][interval]": "weekly", "settings[payouts][schedule][weekly_anchor]": "friday" },
-      ],
+      ["POST", "/v1/accounts/acct_local", WEEKLY],
     ],
   );
   assert.deepEqual([daily.payoutSpeed, weekly.payoutSpeed], ["daily", "weekly"]);
@@ -104,4 +103,20 @@ test("a schedule this app doesn't offer reads as no speed, so a sync replaces it
     speeds.push((await driver.retrieveAccount("acct_local")).payoutSpeed);
   }
   assert.deepEqual(speeds, [null, null, null, null, "weekly", "weekly"]);
+});
+
+test("an account paid out Mondays and Fridays is set to Fridays only, and then reads as weekly", async () => {
+  sent.length = 0;
+  reply = account({ interval: "weekly", weekly_anchor: "friday", weekly_payout_days: ["monday", "friday"] });
+  assert.equal((await driver.retrieveAccount("acct_local")).payoutSpeed, null);
+  reply = account({ interval: "weekly", weekly_anchor: "friday", weekly_payout_days: ["friday"] });
+  assert.equal((await driver.setPayoutSpeed("acct_local", "weekly")).payoutSpeed, "weekly");
+
+  assert.deepEqual(
+    sent.map(({ method, path, body }) => [method, path, scheduleOf(body)]),
+    [
+      ["GET", "/v1/accounts/acct_local", {}],
+      ["POST", "/v1/accounts/acct_local", WEEKLY],
+    ],
+  );
 });

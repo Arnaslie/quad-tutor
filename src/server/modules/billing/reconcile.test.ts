@@ -472,6 +472,31 @@ test("a Connect account no tutor holds is flagged once, and the scan runs once a
   assert.deepEqual(resolved, { note: "Reconciliation: a tutor on this campus now holds this account.", by: null });
 });
 
+test("the daily pass puts every held account on its tutor's stored speed, and leaves the rest alone", async () => {
+  const w = await world();
+  await fakeStripe.setPayoutSchedule(w.accountId, "daily");
+  const chose = await person(w.institutionId);
+  const daily = await stripeGateway().createAccount({ tutorProfileId: randomUUID(), institutionId: w.institutionId, email: "daily@example.test" });
+  await db.insert(tutorProfile).values({ userId: chose.userId, institutionId: w.institutionId, stripeAccountId: daily.id, payoutSpeed: "daily" });
+  await fakeStripe.setPayoutSchedule(daily.id, "daily");
+  const stray = await stripeGateway().createAccount({ tutorProfileId: randomUUID(), institutionId: w.institutionId, email: "stray@example.test" });
+  await fakeStripe.setPayoutSchedule(stray.id, null);
+
+  const calls: [string, string][] = [];
+  const real = stripeGateway().setPayoutSpeed;
+  await patched("setPayoutSpeed", (accountId, speed) => {
+    calls.push([accountId, speed]);
+    return real(accountId, speed);
+  }, async () => {
+    assert.deepEqual(await reconcile(w), counts(0, 1));
+    await aDayLater(w);
+    assert.deepEqual(await reconcile(w), counts(0));
+  });
+  assert.deepEqual(calls, [[w.accountId, "weekly"]]);
+  const speeds = await Promise.all([w.accountId, daily.id, stray.id].map(async (id) => (await stripeGateway().retrieveAccount(id)).payoutSpeed));
+  assert.deepEqual(speeds, ["weekly", "daily", null]);
+});
+
 test("an orphaned account's flag that resolved itself reopens once no tutor holds the account again, and one ops resolved stays resolved", async () => {
   const w = await world();
   const ops = await operator(w.institutionId);

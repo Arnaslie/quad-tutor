@@ -7,6 +7,7 @@ import { db } from "@/server/db";
 import { engagement, ledgerEntry, moneyDiscrepancy, paymentDispute, tutorProfile } from "@/server/db/schema";
 
 import { syncCheckout } from "./checkout-session";
+import { convergeSpeeds } from "./connect";
 import { ledgerRowBlocker, recordDiscrepancy, type Ids } from "./discrepancy";
 import { handleDisputeEvent } from "./disputes";
 import { claim, release, withLease } from "./lease";
@@ -448,6 +449,10 @@ async function reconcileCampus(
         counts.resolved += await resolveHeldAccounts(id);
         await flagOrphanedAccounts(id, await accounts());
         return null;
+      })) &&
+      (await each([institutionId], (id) => `payout speed sync of ${id}`, async (id) => {
+        await convergeSpeeds(id, await accounts());
+        return null;
       }))
     );
   };
@@ -467,7 +472,8 @@ async function reconcileCampus(
 
 /**
  * Compares each engagement active in the last week with Stripe once a day, spread over the cron runs, and once a
- * day settles the flags Stripe can now answer, refreshes open disputes and looks for Connect accounts no tutor holds.
+ * day settles the flags Stripe can now answer, refreshes open disputes, looks for Connect accounts no tutor holds and
+ * puts each held account back on its tutor's payout speed.
  * It never corrects the ledger: a divergence becomes a discrepancy, which pauses the engagement's transfers.
  */
 export async function runReconciliation(

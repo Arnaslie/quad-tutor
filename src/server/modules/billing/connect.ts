@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/server/db";
@@ -62,6 +62,29 @@ async function convergeSpeed(account: ConnectAccount, speed: PayoutSpeed): Promi
     }
   } catch (error) {
     console.error("[connect] payout speed sync failed", errorFacts(error));
+  }
+}
+
+/** Puts every account this campus holds on its tutor's stored speed, so one nobody reads still moves. */
+export async function convergeSpeeds(institutionId: string, accounts: ConnectAccount[]): Promise<void> {
+  const ours = accounts.filter((account) => account.institutionId === institutionId);
+  if (ours.length === 0) return;
+  const held = await db
+    .select({ accountId: tutorProfile.stripeAccountId, speed: tutorProfile.payoutSpeed })
+    .from(tutorProfile)
+    .where(
+      and(
+        eq(tutorProfile.institutionId, institutionId),
+        inArray(
+          tutorProfile.stripeAccountId,
+          ours.map((account) => account.id),
+        ),
+      ),
+    );
+  const speeds = new Map(held.map((row) => [row.accountId, row.speed]));
+  for (const account of ours) {
+    const speed = speeds.get(account.id);
+    if (speed) await convergeSpeed(account, speed);
   }
 }
 

@@ -782,16 +782,19 @@ a week more than weekly. The paid, faster tier is an instant cash-out, built sep
 The stored speed is the truth and Stripe is made to match it, never the reverse. Every
 read of the account does it: each `account.updated`, each view of `/tutor/payouts` (and of
 `/tutor/sessions` while payouts are blocked), each pick, and the transfer sweep's KYC
-re-check, so the cron now writes to Connect accounts too. Each compares the schedule with
-the stored speed and calls Stripe only when they differ. An update whose answer still does
-not read as the stored speed is logged as "did not take", so an account that never settles
-shows up rather than retrying silently. No row lock is held across that call. Accounts
-made while payouts were daily move to weekly this way, with no script. A schedule this app
-does not offer, such as `manual` set in a Dashboard, reads as no speed and is put back.
-The update carries no fixed idempotency key: it sets an absolute value, so a repeat is
-harmless, while a key per speed would replay a stale answer after a switch back within 24
-hours. A failed schedule update is logged and never blocks the KYC sync; the next event or
-view tries again.
+re-check. The daily reconciliation also goes through every account the campus holds, so an
+account nobody reads still moves within a day. So the cron writes to Connect accounts too.
+Each compares the schedule with the stored speed and calls Stripe only when they differ.
+An update whose answer still does not read as the stored speed is logged as "did not
+take", so an account that never settles shows up rather than retrying silently. No row
+lock is held across that call. Accounts made while payouts were daily move to weekly this
+way, with no script. A schedule this app does not offer, such as `manual` set in a
+Dashboard or Monday and Friday, reads as no speed and is put back. The weekly update sets
+both `weekly_anchor` and `weekly_payout_days` to Friday, since a read checks the days
+first. The update carries no fixed idempotency key: it sets an absolute value, so a repeat
+is harmless, while a key per speed would replay a stale answer after a switch back within
+24 hours. A failed schedule update is logged and never blocks the KYC sync; the next event
+or view tries again.
 
 **A chargeback is recorded, not judged.** It pauses that engagement's
 transfers and goes to ops; it writes no reliability fact on its own. Each dispute event
