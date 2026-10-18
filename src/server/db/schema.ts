@@ -22,6 +22,7 @@ import {
   REPORT_REASONS,
   THREAD_SIDES,
 } from "../modules/messaging/rules";
+import { DEFAULT_PAYOUT_SPEED, PAYOUT_SPEEDS } from "../modules/billing/payout-speed";
 import { NOTE_MAX } from "../modules/ratings/rules";
 import { DEFAULT_RATE_MINOR } from "../modules/tutoring/rate-rules";
 
@@ -33,6 +34,8 @@ export const kycStatus = pgEnum("kyc_status", [
   "verified",
   "restricted",
 ]);
+
+export const payoutSpeed = pgEnum("payout_speed", PAYOUT_SPEEDS);
 
 export const tutorCourseStatus = pgEnum("tutor_course_status", [
   "pending_verification",
@@ -176,6 +179,7 @@ export const tutorProfile = pgTable(
 
     stripeAccountId: text("stripe_account_id"),
     kycStatus: kycStatus("kyc_status").notNull().default("not_started"),
+    payoutSpeed: payoutSpeed("payout_speed").notNull().default(DEFAULT_PAYOUT_SPEED),
 
     expectedGraduationOn: date("expected_graduation_on"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
