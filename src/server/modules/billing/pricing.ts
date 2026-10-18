@@ -91,17 +91,6 @@ export function perSessionMinor(engagement: {
   return Math.floor(engagement.pricePaidMinor / engagement.sessionsPurchased);
 }
 
-export function unusedRefundMinor(engagement: {
-  pricePaidMinor: number;
-  sessionsPurchased: number;
-  sessionsDelivered: number;
-}): number {
-  return Math.max(
-    0,
-    engagement.pricePaidMinor - engagement.sessionsDelivered * perSessionMinor(engagement),
-  );
-}
-
 export function milestoneReached(feeToDateMinor: number): boolean {
   return feeToDateMinor >= FEE_MILESTONE_MINOR;
 }

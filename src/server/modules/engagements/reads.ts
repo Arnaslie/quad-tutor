@@ -22,13 +22,14 @@ import {
   bookAgainOpen,
   type PackageKind,
   type RequestedKind,
-  unusedRefundMinor,
 } from "@/server/modules/billing/pricing";
+import { deferredMinor } from "@/server/modules/billing/ledger";
 import { resumableUntil } from "@/server/modules/billing/checkout-window";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 
 import {
   bought,
+  deliveredCount,
   liveEngagement,
   onCampus,
   sessionContext,
@@ -227,12 +228,6 @@ export type PackageEnding = {
   cancels: Date[];
   blocked: EndBlock | null;
 };
-
-const deliveredCount = sql<number>`(
-  select count(*)::int from ${sessionBooking}
-  where ${sessionBooking.engagementId} = ${engagement.id}
-    and ${sessionBooking.status} = 'completed'
-)`;
 
 const remainingCount = sql<number>`greatest(0, ${engagement.sessionsPurchased} - (
   select count(*)::int from ${sessionBooking}
@@ -468,9 +463,10 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
       engagementId: engagement.id,
       kind: engagement.kind,
       sessionsPurchased: engagement.sessionsPurchased,
-      sessionsDelivered: deliveredCount,
+      sessionsDelivered: deliveredCount(engagement.id, engagement.institutionId),
       sessionsRemaining: remainingCount,
       pricePaidMinor: engagement.pricePaidMinor,
+      refundMinor: deferredMinor(engagement.id, engagement.institutionId),
       currency: engagement.currency,
       tutorName: user.name,
       tutorLocation: tutorProfile.defaultLocation,
@@ -525,12 +521,12 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
     .orderBy(asc(sessionBooking.scheduledAt));
 
   const now = new Date();
-  return packages.map((pkg) => {
+  return packages.map(({ refundMinor, ...pkg }) => {
     const sessions = open.filter((row) => row.engagementId === pkg.engagementId);
     return {
       ...pkg,
       ending: {
-        refundMinor: unusedRefundMinor(pkg),
+        refundMinor,
         cancels: sessions
           .filter((row) => row.status === "scheduled")
           .map((row) => row.scheduledAt),

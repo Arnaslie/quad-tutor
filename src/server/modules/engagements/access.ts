@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -33,6 +33,19 @@ export const quotedRate = sql<number>`coalesce(${matchRequest.quotedRateMinor}, 
 export const liveEngagement = inArray(engagement.status, ["active", "pending_payment"]);
 
 export const tutorUser = alias(user, "tutor_user");
+
+export function deliveredCount(engagementId: AnyColumn, institutionId: AnyColumn): SQL<number> {
+  return sql<number>`(${db
+    .select({ n: sql`count(*)::int` })
+    .from(sessionBooking)
+    .where(
+      and(
+        eq(sessionBooking.engagementId, engagementId),
+        eq(sessionBooking.institutionId, institutionId),
+        eq(sessionBooking.status, "completed"),
+      ),
+    )})`;
+}
 
 export type Participation = SessionContextRow & { role: "student" | "tutor" };
 

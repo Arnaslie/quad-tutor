@@ -8,13 +8,12 @@ import {
   sessionBooking,
   term,
 } from "@/server/db/schema";
-import { record } from "@/server/modules/billing/ledger";
-import { unusedRefundMinor } from "@/server/modules/billing/pricing";
+import { deferredMinor, record } from "@/server/modules/billing/ledger";
 import { SWEEP_BUDGET_MS, refundThroughStripe } from "@/server/modules/billing/refunds";
 import { errorFacts } from "@/server/modules/billing/stripe";
 import type { Actor } from "@/server/modules/identity/actor";
 
-import { SessionError } from "./access";
+import { SessionError, deliveredCount } from "./access";
 import { END_BLOCK_MESSAGE, endBlock, type EndBlock } from "./attendance";
 
 export type TermEndRefund = {
@@ -26,25 +25,20 @@ export type TermEndRefund = {
   currency: string;
 };
 
-const deliveredCount = sql<number>`(
-  select count(*)::int from ${sessionBooking}
-  where ${sessionBooking.engagementId} = ${engagement.id}
-    and ${sessionBooking.institutionId} = ${engagement.institutionId}
-    and ${sessionBooking.status} = 'completed'
-)`;
+const refundFields = () => ({
+  engagementId: engagement.id,
+  studentProfileId: engagement.studentProfileId,
+  sessionsPurchased: engagement.sessionsPurchased,
+  sessionsDelivered: deliveredCount(engagement.id, engagement.institutionId),
+  refundMinor: deferredMinor(engagement.id, engagement.institutionId),
+  currency: engagement.currency,
+});
 
 export async function engagementsDueForTermEndRefund(
   institutionId: string,
 ): Promise<TermEndRefund[]> {
   const rows = await db
-    .select({
-      engagementId: engagement.id,
-      studentProfileId: engagement.studentProfileId,
-      sessionsPurchased: engagement.sessionsPurchased,
-      pricePaidMinor: engagement.pricePaidMinor,
-      currency: engagement.currency,
-      sessionsDelivered: deliveredCount,
-    })
+    .select(refundFields())
     .from(engagement)
     .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
     .innerJoin(term, eq(term.id, courseOffering.termId))
@@ -56,25 +50,7 @@ export async function engagementsDueForTermEndRefund(
       ),
     );
 
-  return rows.map(refundShape).filter((row) => row.refundMinor > 0);
-}
-
-function refundShape(row: {
-  engagementId: string;
-  studentProfileId: string;
-  sessionsPurchased: number;
-  pricePaidMinor: number;
-  currency: string;
-  sessionsDelivered: number;
-}): TermEndRefund {
-  return {
-    engagementId: row.engagementId,
-    studentProfileId: row.studentProfileId,
-    sessionsPurchased: row.sessionsPurchased,
-    sessionsDelivered: row.sessionsDelivered,
-    refundMinor: unusedRefundMinor(row),
-    currency: row.currency,
-  };
+  return rows.filter((row) => row.refundMinor > 0);
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -93,14 +69,7 @@ export async function closeWithRefund(
   const now = new Date();
 
   const rows = await tx
-    .select({
-      engagementId: engagement.id,
-      studentProfileId: engagement.studentProfileId,
-      status: engagement.status,
-      sessionsPurchased: engagement.sessionsPurchased,
-      pricePaidMinor: engagement.pricePaidMinor,
-      currency: engagement.currency,
-    })
+    .select({ studentProfileId: engagement.studentProfileId, status: engagement.status })
     .from(engagement)
     .where(
       and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)),
@@ -145,21 +114,10 @@ export async function closeWithRefund(
       ),
     );
 
-  const delivered = await tx
-    .select({ n: sql<number>`count(*)::int` })
-    .from(sessionBooking)
-    .where(
-      and(
-        eq(sessionBooking.engagementId, engagementId),
-        eq(sessionBooking.institutionId, params.institutionId),
-        eq(sessionBooking.status, "completed"),
-      ),
-    );
-
-  const refund = refundShape({
-    ...target,
-    sessionsDelivered: delivered.at(0)?.n ?? 0,
-  });
+  const [refund] = await tx
+    .select(refundFields())
+    .from(engagement)
+    .where(eq(engagement.id, engagementId));
 
   if (refund.refundMinor > 0) {
     await record(tx, [
@@ -168,7 +126,7 @@ export async function closeWithRefund(
         institutionId: params.institutionId,
         type: "refund",
         amountMinor: refund.refundMinor,
-        currency: target.currency,
+        currency: refund.currency,
       },
     ]);
   }

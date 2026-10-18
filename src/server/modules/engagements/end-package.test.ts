@@ -236,6 +236,24 @@ test("ending refunds what the sweep would for the same state, as one refund row 
   assert.deepEqual(await facts(ended), []);
 });
 
+test("the refund is what the ledger still defers, the same as price less delivered sessions for every kind", async () => {
+  const cases = [
+    { kind: "exam_anchored", delivered: 0, refund: 14_000 },
+    { kind: "exam_anchored", delivered: 1, refund: 10_500 },
+    { kind: "exam_anchored", delivered: 3, refund: 3_500 },
+    { kind: "through_final", delivered: 5, refund: 9_450 },
+    { kind: "top_up", delivered: 0, refund: 3_500 },
+  ] as const;
+  for (const { kind, delivered: n, refund } of cases) {
+    const student = await person(home.institutionId);
+    const id = await pkg(student, { kind });
+    for (let i = 0; i < n; i += 1) await delivered(id, hours(-100 - i));
+    const [preview] = (await packagesForStudent(student)).filter((row) => row.engagementId === id);
+    assert.equal(preview.ending.refundMinor, refund, `${kind} with ${n} delivered, preview`);
+    assert.equal((await endPackage({ actor: student, engagementId: id }))?.refundMinor, refund, `${kind} with ${n} delivered`);
+  }
+});
+
 test("refused at 11h before a session, allowed at 13h; the future booking is cancelled as the student's on-time cancel", async () => {
   const student = await person(home.institutionId);
   const id = await pkg(student);
