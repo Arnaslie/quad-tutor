@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, ne, not, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, ne, not, or, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -30,6 +30,7 @@ import { blockedBetween } from "@/server/modules/messaging/blocks";
 import {
   bought,
   deliveredCount,
+  heldAgainstPackage,
   liveEngagement,
   onCampus,
   sessionContext,
@@ -229,11 +230,12 @@ export type PackageEnding = {
   blocked: EndBlock | null;
 };
 
-const remainingCount = sql<number>`greatest(0, ${engagement.sessionsPurchased} - (
-  select count(*)::int from ${sessionBooking}
-  where ${sessionBooking.engagementId} = ${engagement.id}
-    and ${sessionBooking.status} <> 'cancelled'
-))`;
+function remainingCount(): SQL<number> {
+  return sql<number>`greatest(0, ${engagement.sessionsPurchased} - (${db
+    .select({ n: sql`count(*)::int` })
+    .from(sessionBooking)
+    .where(and(eq(sessionBooking.engagementId, engagement.id), heldAgainstPackage()))}))`;
+}
 
 export type BookAgain = {
   tutorCourseId: string;
@@ -351,7 +353,7 @@ async function bookAgainRows(
     .select({
       tutorCourseId: engagement.tutorCourseId,
       offeringId: engagement.courseOfferingId,
-      sessionsRemaining: sql<number>`coalesce(sum(${remainingCount}) filter (where ${liveEngagement}), 0)::int`,
+      sessionsRemaining: sql<number>`coalesce(sum(${remainingCount()}) filter (where ${liveEngagement}), 0)::int`,
       tutorProfileId: tutorProfile.id,
       tutorName: user.name,
       tutorLocation: tutorProfile.defaultLocation,
@@ -464,7 +466,7 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
       kind: engagement.kind,
       sessionsPurchased: engagement.sessionsPurchased,
       sessionsDelivered: deliveredCount(engagement.id, engagement.institutionId),
-      sessionsRemaining: remainingCount,
+      sessionsRemaining: remainingCount(),
       pricePaidMinor: engagement.pricePaidMinor,
       refundMinor: deferredMinor(engagement.id, engagement.institutionId),
       currency: engagement.currency,

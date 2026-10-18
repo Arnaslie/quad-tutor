@@ -13,7 +13,7 @@ import { SWEEP_BUDGET_MS, refundThroughStripe } from "@/server/modules/billing/r
 import { errorFacts } from "@/server/modules/billing/stripe";
 import type { Actor } from "@/server/modules/identity/actor";
 
-import { SessionError, deliveredCount } from "./access";
+import { SessionError, deliveredCount, heldAgainstPackage } from "./access";
 import { END_BLOCK_MESSAGE, endBlock, type EndBlock } from "./attendance";
 
 export type TermEndRefund = {
@@ -61,9 +61,11 @@ export class EndPackageError extends SessionError {
   }
 }
 
+type EngagementLock = "update" | "no key update";
+
 export async function closeWithRefund(
   tx: Tx,
-  params: { engagementId: string; institutionId: string; endedBy?: Actor },
+  params: { engagementId: string; institutionId: string; endedBy?: Actor; lock?: EngagementLock },
 ): Promise<TermEndRefund | null> {
   const { engagementId, endedBy } = params;
   const now = new Date();
@@ -74,7 +76,7 @@ export async function closeWithRefund(
     .where(
       and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)),
     )
-    .for("update")
+    .for(params.lock ?? "update")
     .limit(1);
 
   const target = rows.at(0);
@@ -95,7 +97,7 @@ export async function closeWithRefund(
       ),
     );
   const block = endBlock(sessions, now);
-  if (block && (endedBy || block.reason !== "late_cancel_window")) {
+  if (block && (endedBy || block.reason !== "cancel_costs")) {
     throw new EndPackageError(block);
   }
 
@@ -140,6 +142,34 @@ export async function closeWithRefund(
     .where(and(eq(engagement.id, engagementId), eq(engagement.status, "active")));
 
   return refund;
+}
+
+/** Closes a package once every session in it was delivered or kept by a cancel, refunding what is left. */
+export async function closeIfUsedUp(
+  tx: Tx,
+  ids: { engagementId: string; institutionId: string },
+  lock: EngagementLock = "update",
+): Promise<TermEndRefund | null> {
+  const [target] = await tx
+    .select({ status: engagement.status, sessionsPurchased: engagement.sessionsPurchased })
+    .from(engagement)
+    .where(and(eq(engagement.id, ids.engagementId), eq(engagement.institutionId, ids.institutionId)));
+  if (target?.status !== "active") return null;
+
+  const [{ used }] = await tx
+    .select({ used: sql<number>`count(*)::int` })
+    .from(sessionBooking)
+    .where(
+      and(
+        eq(sessionBooking.engagementId, ids.engagementId),
+        eq(sessionBooking.institutionId, ids.institutionId),
+        inArray(sessionBooking.status, ["completed", "cancelled"]),
+        heldAgainstPackage(),
+      ),
+    );
+  if (used < target.sessionsPurchased) return null;
+
+  return closeWithRefund(tx, { ...ids, lock });
 }
 
 export async function endPackage(params: {

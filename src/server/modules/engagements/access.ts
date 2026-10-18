@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, notInArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, ne, notInArray, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -7,6 +7,7 @@ import {
   courseCodeAlias,
   courseOffering,
   engagement,
+  ledgerEntry,
   matchRequest,
   messageThread,
   professor,
@@ -33,6 +34,25 @@ export const quotedRate = sql<number>`coalesce(${matchRequest.quotedRateMinor}, 
 export const liveEngagement = inArray(engagement.status, ["active", "pending_payment"]);
 
 export const tutorUser = alias(user, "tutor_user");
+
+/** A cancelled session still takes its place in the package once a cancel kept part of its price. */
+export function heldAgainstPackage(): SQL {
+  return or(
+    ne(sessionBooking.status, "cancelled"),
+    exists(
+      db
+        .select({ id: ledgerEntry.id })
+        .from(ledgerEntry)
+        .where(
+          and(
+            eq(ledgerEntry.sessionId, sessionBooking.id),
+            eq(ledgerEntry.institutionId, sessionBooking.institutionId),
+            eq(ledgerEntry.type, "session_earned"),
+          ),
+        ),
+    ),
+  )!;
+}
 
 export function deliveredCount(engagementId: AnyColumn, institutionId: AnyColumn): SQL<number> {
   return sql<number>`(${db

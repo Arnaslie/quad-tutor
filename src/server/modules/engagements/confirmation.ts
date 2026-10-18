@@ -1,8 +1,7 @@
-import { and, eq, lte, sql } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
-  engagement,
   reliabilityEvent,
   sessionBooking,
   tutorProfile,
@@ -19,10 +18,11 @@ import {
   type SessionContextRow,
 } from "./access";
 import { sessionEndsAt, settle, type Settlement } from "./attendance";
+import { closeIfUsedUp } from "./termEnd";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function recognise(
+export async function recognise(
   tx: Tx,
   session: Pick<
     SessionContextRow,
@@ -34,6 +34,7 @@ async function recognise(
     | "currency"
     | "tutorProfileId"
   >,
+  sessionMinor = perSessionMinor(session),
 ): Promise<void> {
   await tx
     .select({ id: tutorProfile.id })
@@ -41,7 +42,6 @@ async function recognise(
     .where(eq(tutorProfile.id, session.tutorProfileId))
     .for("no key update");
 
-  const sessionMinor = perSessionMinor(session);
   const fees = await feesToDate(tx, session.institutionId, [session.tutorProfileId]);
   const { tutorMinor, platformMinor } = splitMinor(sessionMinor, {
     feeToDateMinor: fees.get(session.tutorProfileId) ?? 0,
@@ -75,29 +75,9 @@ async function recognise(
   ]);
 }
 
-async function closeIfDelivered(
-  tx: Tx,
-  engagementId: string,
-  sessionsPurchased: number,
-  now: Date,
-): Promise<void> {
-  const rows = await tx
-    .select({ n: sql<number>`count(*)::int` })
-    .from(sessionBooking)
-    .where(
-      and(
-        eq(sessionBooking.engagementId, engagementId),
-        eq(sessionBooking.status, "completed"),
-      ),
-    );
-
-  if ((rows.at(0)?.n ?? 0) < sessionsPurchased) return;
-
-  await tx
-    .update(engagement)
-    .set({ status: "completed", completedAt: now })
-    .where(and(eq(engagement.id, engagementId), eq(engagement.status, "active")));
-}
+// Under the tutor lock, so the engagement is taken no key update: a booking holds it for key share first.
+const closeIfDelivered = (tx: Tx, session: Pick<SessionContextRow, "engagementId" | "institutionId">) =>
+  closeIfUsedUp(tx, session, "no key update");
 
 async function applySettlement(
   tx: Tx,
@@ -114,7 +94,7 @@ async function applySettlement(
 
   if (outcome.delivered) {
     await recognise(tx, session);
-    await closeIfDelivered(tx, session.engagementId, session.sessionsPurchased, now);
+    await closeIfDelivered(tx, session);
   }
 
   if (outcome.studentFact) {
@@ -311,7 +291,7 @@ export async function resolveDispute(params: {
 
     if (params.attended) {
       await recognise(tx, session);
-      await closeIfDelivered(tx, session.engagementId, session.sessionsPurchased, now);
+      await closeIfDelivered(tx, session);
     }
 
     const fact = params.studentNoShowed

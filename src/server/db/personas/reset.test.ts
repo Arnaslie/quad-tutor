@@ -251,9 +251,9 @@ test("each student persona sees its package, what it paid and whether it can end
       courseCode: "ST 260",
       tutorName: "Sam Novak",
       sessionsDelivered: 1,
-      sessionsRemaining: 3,
+      sessionsRemaining: 1,
       pricePaidMinor: 20_000,
-      refundMinor: 15_000,
+      refundMinor: 7_500,
       blocked: null,
     },
   ]);

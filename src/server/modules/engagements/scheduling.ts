@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -11,16 +11,26 @@ import {
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
+import { perSessionMinor } from "@/server/modules/billing/pricing";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
 import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slots";
-import { SessionError, lockSession, loadParticipation, type Executor } from "./access";
+import {
+  SessionError,
+  heldAgainstPackage,
+  lockSession,
+  loadParticipation,
+  type Executor,
+} from "./access";
 import {
   LATE_CANCEL_HOURS,
   SESSION_MINUTES,
   isLateCancel,
   remindedAtForNewBooking,
 } from "./attendance";
+import { cancelSplit, hoursBefore } from "./cancel-rules";
+import { recognise } from "./confirmation";
+import { closeIfUsedUp, type TermEndRefund } from "./termEnd";
 
 export async function sessionsRemaining(params: {
   exec?: Executor;
@@ -33,10 +43,7 @@ export async function sessionsRemaining(params: {
     .select({ n: sql<number>`count(*)::int` })
     .from(sessionBooking)
     .where(
-      and(
-        eq(sessionBooking.engagementId, params.engagementId),
-        ne(sessionBooking.status, "cancelled"),
-      ),
+      and(eq(sessionBooking.engagementId, params.engagementId), heldAgainstPackage()),
     );
 
   return Math.max(0, params.sessionsPurchased - (rows.at(0)?.n ?? 0));
@@ -161,13 +168,19 @@ export async function bookSession(params: {
   });
 }
 
+export type CancelOutcome = {
+  late: boolean;
+  keptMinor: number;
+  refund: TermEndRefund | null;
+};
+
 export async function cancelSession(params: {
   actor: Actor;
   sessionId: string;
-}): Promise<{ late: boolean }> {
+}): Promise<CancelOutcome> {
   const now = new Date();
 
-  return db.transaction(async (tx) => {
+  const cancelled = await db.transaction(async (tx) => {
     await lockSession(tx, params.sessionId);
     const session = await loadParticipation({
       exec: tx,
@@ -185,6 +198,11 @@ export async function cancelSession(params: {
     }
 
     const late = isLateCancel(session.scheduledAt, now);
+    const { keptMinor } = cancelSplit(
+      perSessionMinor(session),
+      hoursBefore(session.scheduledAt, now),
+      session.role,
+    );
 
     await tx
       .update(sessionBooking)
@@ -203,6 +221,8 @@ export async function cancelSession(params: {
 
     // TODO(v1): the tutor side of this is `cancelled_at` + `cancelled_by_user_id`
 
+    if (keptMinor > 0) await recognise(tx, session, keptMinor);
+
     if (late && session.role === "student") {
       await tx.insert(reliabilityEvent).values({
         userId: session.studentUserId,
@@ -213,8 +233,23 @@ export async function cancelSession(params: {
       });
     }
 
-    return { late };
+    return { late, keptMinor, engagementId: session.engagementId };
   });
+
+  // Its own transaction, so the engagement is locked before its sessions as the term-end sweep does.
+  // The cancel has committed either way; a package left open here is refunded at term end or when ended.
+  const ids = { engagementId: cancelled.engagementId, institutionId: params.actor.institutionId };
+  const refund =
+    cancelled.keptMinor > 0
+      ? await db
+          .transaction((tx) => closeIfUsedUp(tx, ids))
+          .catch((error: unknown) => {
+            console.error(`[cancel] closing ${ids.engagementId} left for the term-end sweep`, error);
+            return null;
+          })
+      : null;
+
+  return { late: cancelled.late, keptMinor: cancelled.keptMinor, refund };
 }
 
 export async function setSessionLocation(params: {
