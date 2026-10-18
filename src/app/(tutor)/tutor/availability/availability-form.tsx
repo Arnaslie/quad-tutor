@@ -6,7 +6,7 @@ import { Button } from "@/components/button";
 import { Field, Select } from "@/components/field";
 
 import { addAvailabilityAction, type AvailabilityState } from "./actions";
-import { TIME_OPTIONS, WEEKDAYS, formatMinuteOfDay } from "./time";
+import { END_OPTIONS, START_OPTIONS, WEEKDAYS, formatMinuteOfDay } from "./time";
 
 const INITIAL: AvailabilityState = { status: "idle" };
 
@@ -34,7 +34,7 @@ export function AvailabilityForm() {
       <div className="grid grid-cols-2 gap-3">
         <Field id={startId} label="From">
           <Select id={startId} name="startMinute" defaultValue={DEFAULT_START}>
-            {TIME_OPTIONS.map((minute) => (
+            {START_OPTIONS.map((minute) => (
               <option key={minute} value={minute}>
                 {formatMinuteOfDay(minute)}
               </option>
@@ -44,7 +44,7 @@ export function AvailabilityForm() {
 
         <Field id={endId} label="Until">
           <Select id={endId} name="endMinute" defaultValue={DEFAULT_END}>
-            {TIME_OPTIONS.map((minute) => (
+            {END_OPTIONS.map((minute) => (
               <option key={minute} value={minute}>
                 {formatMinuteOfDay(minute)}
               </option>

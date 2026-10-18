@@ -10,11 +10,17 @@ export const WEEKDAYS = [
   "Saturday",
 ] as const;
 
+const END_OF_DAY = 24 * 60;
+
 export function formatMinuteOfDay(minute: number): string {
+  if (minute === END_OF_DAY) return "Midnight";
   return formatTime(new Date(Date.UTC(2000, 0, 1, 0, minute)), "UTC");
 }
 
-export const TIME_OPTIONS: readonly number[] = Array.from(
-  { length: (24 - 6) * 2 + 1 },
-  (_, index) => 6 * 60 + index * 30,
+const HALF_HOURS: readonly number[] = Array.from(
+  { length: END_OF_DAY / 30 + 1 },
+  (_, index) => index * 30,
 );
+
+export const START_OPTIONS = HALF_HOURS.slice(0, -1);
+export const END_OPTIONS = HALF_HOURS.slice(1);
