@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { Metadata } from "next";
 
 import type { ButtonVariant } from "@/components/button";
@@ -5,6 +7,7 @@ import { Card } from "@/components/card";
 import { Icon } from "@/components/icons";
 import { Money } from "@/components/money";
 import { PageHeader } from "@/components/page-header";
+import { cashOutOffer } from "@/server/modules/billing/cash-out";
 import { payoutsFor } from "@/server/modules/billing/connect";
 import type { PayoutStage } from "@/server/modules/billing/kyc";
 import { PAYOUT_SPEEDS, PAYOUT_SPEED_COPY } from "@/server/modules/billing/payout-speed";
@@ -12,6 +15,7 @@ import { requireTutor } from "@/server/modules/identity/actor";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
 import { pickPayoutSpeed, startOnboarding } from "./actions";
+import { CashOut } from "./cash-out";
 import { OnboardingButton } from "./onboarding-button";
 import { SpeedOption } from "./speed-option";
 import { PAYOUTS_SUPPORT, STAGE_ICON } from "./stage";
@@ -51,6 +55,7 @@ const COPY: Record<PayoutStage, Copy> = {
 export default async function TutorPayoutsPage() {
   const tutor = await requireTutor();
   const [payouts, earnings] = await Promise.all([payoutsFor(tutor), earningsForTutor(tutor)]);
+  const offer = await cashOutOffer(payouts);
   const copy = COPY[payouts.stage];
   const icon = STAGE_ICON[payouts.stage];
   const unfinished = payouts.accountId && payouts.stage === "not_started";
@@ -85,6 +90,8 @@ export default async function TutorPayoutsPage() {
           </form>
         ) : null}
       </Card>
+
+      {payouts.stage === "verified" ? <CashOut offer={offer} requestId={randomUUID()} /> : null}
 
       {payouts.accountId ? (
         <Card className="flex flex-col gap-3">
