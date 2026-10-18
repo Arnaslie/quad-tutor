@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before, test } from "node:test";
+import { after, before, mock, test } from "node:test";
 
 import { eq, inArray } from "drizzle-orm";
 
@@ -25,6 +25,8 @@ import {
 } from "@/server/db/schema";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import { assertMoneyInvariants } from "@/server/modules/billing/invariants";
+import { notifyCancelledSessions } from "@/server/modules/notifications/dispatch";
+import { sessionBooked, sessionTomorrow } from "@/server/modules/notifications/messages";
 import { rateSession } from "@/server/modules/ratings/capture";
 import { sessionRatingState } from "@/server/modules/ratings/reads";
 
@@ -313,6 +315,52 @@ test("a cancel the tutor was paid for can never be rated", async () => {
 
   assert.equal(await sessionRatingState(student, sessionId), null);
   await assert.rejects(rateSession({ actor: student, sessionId, stars: 5, note: null }), /Only a session that took place can be rated/);
+});
+
+async function cancelEmails(): Promise<string> {
+  const lines: string[] = [];
+  const logged = mock.method(console, "log", (line: unknown) => lines.push(String(line)));
+  try {
+    await notifyCancelledSessions(institutionId);
+  } finally {
+    logged.mock.restore();
+  }
+  return lines.join("\n");
+}
+
+test("the cancel email tells the tutor what a kept cancel pays, and tells the student how to get unused sessions back", async () => {
+  const student = await person();
+  const id = await pkg(student);
+  await cancelSession({ actor: student, sessionId: await session(id, hours(20), { bookedNotifiedAt: new Date() }) });
+  await cancelSession({ actor: tutor, sessionId: await session(id, hours(5), { bookedNotifiedAt: new Date() }) });
+
+  const sent = await cancelEmails();
+  assert.match(sent, /That time is open again\. You'll be paid \$15\.75 for this session\./);
+  assert.match(sent, /The session is back in your package\. Book another time whenever suits you, or end the package to get the sessions you don't use refunded\./);
+  assert.doesNotMatch(sent, /late cancel/i);
+});
+
+test("the booking and reminder emails tell the student what a cancel gives back from when they are sent", () => {
+  const email = (scheduledAt: Date, recipient: "student" | "tutor" = "student") => ({
+    to: "x@example.test",
+    name: "Sam",
+    otherPartyName: "Ada",
+    courseLabel: "CXL 101",
+    scheduledAt,
+    freeUntil: new Date(scheduledAt.getTime() - 12 * 3_600_000),
+    recipient,
+    location: "Library",
+    studentNote: null,
+  });
+
+  assert.match(
+    sessionBooked(email(hours(72))).text,
+    /Cancel before .+ and the session goes back in your package\. After that you get 50% of it back, and 25% inside 12 hours\./,
+  );
+  assert.match(sessionTomorrow(email(hours(20))).text, /Can't make it\? Cancel before .+ and you get 50% of the session back\. After that, 25%\./);
+  assert.match(sessionBooked(email(hours(11))).text, /Cancelling now gets you 25% of the session back\./);
+  assert.doesNotMatch(sessionBooked(email(hours(72))).text, /late cancel/);
+  assert.match(sessionBooked(email(hours(72), "tutor")).text, /Cancelling is free until/);
 });
 
 test("the ledger keeps its money invariants across every cancel above", async () => {
