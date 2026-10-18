@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { formatMinuteOfDay } from "@/app/(tutor)/tutor/availability/time";
-
 import { toClockTime } from "./clock-rules";
 import { addAvailabilityInput } from "./input";
 
@@ -10,10 +8,10 @@ function hours(start: [string, string, string], end: [string, string, string]) {
   const clock = ([hour, minute, period]: [string, string, string]) => ({ hour, minute, period });
   const parsed = addAvailabilityInput.safeParse({ weekday: 2, start: clock(start), end: clock(end) });
   if (!parsed.success) return "rejected";
-  return `${formatMinuteOfDay(parsed.data.startMinute)} – ${formatMinuteOfDay(parsed.data.endMinute)}`;
+  return [parsed.data.startMinute, parsed.data.endMinute];
 }
 
-test("the hour, minute and AM/PM a tutor picks become the window they see", () => {
+test("the hour, minute and AM/PM a tutor picks become minutes of the day", () => {
   assert.deepEqual(
     [
       hours(["12", "30", "PM"], ["2", "45", "PM"]),
@@ -21,7 +19,12 @@ test("the hour, minute and AM/PM a tutor picks become the window they see", () =
       hours(["12", "0", "AM"], ["1", "0", "AM"]),
       hours(["10", "45", "PM"], ["12", "0", "AM"]),
     ],
-    ["12:30 PM – 2:45 PM", "7:20 PM – 9:20 PM", "12:00 AM – 1:00 AM", "10:45 PM – Midnight"],
+    [
+      [750, 885],
+      [1160, 1280],
+      [0, 60],
+      [1365, 1440],
+    ],
   );
 });
 
@@ -32,8 +35,11 @@ test("the form refuses an hour, minute or AM/PM that is not on the clock", () =>
       hours(["1", "60", "PM"], ["2", "0", "PM"]),
       hours(["1", "0", "XM"], ["2", "0", "PM"]),
       hours(["", "", ""], ["2", "0", "PM"]),
+      hours(["1", "7", "PM"], ["2", "0", "PM"]),
+      hours(["1e1", "0", "PM"], ["2", "0", "PM"]),
+      hours(["1", " ", "PM"], ["2", "0", "PM"]),
     ],
-    ["rejected", "rejected", "rejected", "rejected"],
+    ["rejected", "rejected", "rejected", "rejected", "rejected", "rejected", "rejected"],
   );
 });
 
