@@ -79,7 +79,7 @@ test("a quote that moved since the tutor confirmed sends nothing, and two cash-o
       cashOut(w.tutor, { netMinor: 197_500, requestId: randomUUID() }),
     ]),
   );
-  assert.deepEqual(results.map((result) => result.status).sort(), ["sent", "unavailable"]);
+  assert.deepEqual(results.map((result) => result.status).sort(), ["refused", "sent"]);
   assert.equal(await cashOutOffer(await payoutsOf(w.tutor)), null);
 });
 
@@ -117,7 +117,17 @@ test("an unanswered call answers retry and keeps the request id; a Stripe error 
       assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "retry" });
     });
     await patched("createInstantPayout", failed, async () => {
-      assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId: randomUUID() }), { status: "unavailable" });
+      assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId: randomUUID() }), { status: "refused" });
+    });
+    await patched("createInstantPayout", async () => {
+      throw new GatewayError("Too many requests", { status: 429, type: "rate_limit_error" });
+    }, async () => {
+      assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "retry" });
+    });
+    await patched("createInstantPayout", async () => {
+      throw new GatewayError("Keys for idempotent requests can only be used with the same parameters", { status: 400, idempotency: true });
+    }, async () => {
+      assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "changed" });
     });
   });
   assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "sent", netMinor: 9_825, currency: "usd" });

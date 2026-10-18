@@ -37,10 +37,12 @@ function cashOutState(result: CashOutResult): CashOutState {
       return { status: "error", message: "Your balance changed since you opened this page. Check the new amount and send again." };
     case "busy":
       return { status: "error", message: "That cash-out is already being sent." };
+    case "refused":
+      return { status: "error", message: "Stripe couldn't send that. Your pay still goes out on your usual schedule." };
     case "retry":
       return { status: "error", message: "We couldn't reach Stripe. Try again in a minute." };
     case "unavailable":
-      return { status: "error", message: "You can't cash out right now. Your pay still goes out on your usual schedule." };
+      return { status: "error", message: "There's nothing to cash out right now. If you just cashed out, it's on its way. The rest goes out on your usual schedule." };
   }
 }
 

@@ -809,15 +809,16 @@ numbers the page discloses. The page reads the balance with
 tutor gets, and sends exactly the `net_available` amount the tutor confirmed. If the quote
 moved since then, nothing is sent and the tutor sees the new one. The button is hidden
 unless an external account lists `instant` in `available_payout_methods` and Stripe's net
-is above zero and below the gross. That last check fails closed: until the pricing tool is
-set, Stripe quotes no fee, so the button never offers a cash-out that would cost the
-platform Stripe's 1%. Each confirm carries a request id, and the payout's idempotency key
-is `instant-payout:<account>:<request id>`, so a double submit sends once. If Stripe can't
-be reached or rate-limits the call, the tutor is asked to try again and the page keeps the
-same request id, so the retry reuses the key. Any answer Stripe did give (a 5xx it would
-replay for that key, a 403, a refusal) refreshes the page with a new request id instead;
-the balance re-read before every create stops a second payout. An offer under Stripe's
-$0.50 instant minimum is not shown. A cash-out moves connected-balance money to a card,
+is at least Stripe's $0.50 instant minimum and below the gross. That last check fails
+closed: until the pricing tool is set, Stripe quotes no fee, so the button never offers a
+cash-out that would cost the platform Stripe's 1%. Each confirm carries a request id, and
+the payout's idempotency key is `instant-payout:<account>:<request id>`, so a double
+submit sends once. If Stripe can't be reached or rate-limits the call, the tutor is asked
+to try again and the page keeps the same request id, so the retry reuses the key. Any
+answer Stripe did give (a 5xx it would replay for that key, a 403, a refusal) refreshes
+the page with a new request id instead; the balance re-read before every create stops a
+second payout. Stripe's $9,999 cap on one instant payout is not checked; a balance that
+large is not expected from tutoring. A cash-out moves connected-balance money to a card,
 the way a scheduled payout moves it to a bank, so it writes no ledger row and adds no
 ledger type; the fee is Stripe's application fee, reconciled from Stripe's own list for
 now.

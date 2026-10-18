@@ -10,6 +10,7 @@ export type CashOutResult =
   | { status: "changed" }
   | { status: "busy" }
   | { status: "retry" }
+  | { status: "refused" }
   | { status: "unavailable" };
 
 /** Leaves out the destination, so the offer can cross to the client. Null hides the button. */
@@ -53,6 +54,6 @@ export async function cashOut(
     if (error.inFlight) return { status: "busy" };
     if (error.idempotency) return { status: "changed" };
     // Stripe replays a saved 5xx for the same key, so only an unanswered or rate-limited call keeps it.
-    return error.status === undefined || error.status === 429 ? { status: "retry" } : { status: "unavailable" };
+    return error.status === undefined || error.status === 429 ? { status: "retry" } : { status: "refused" };
   }
 }
