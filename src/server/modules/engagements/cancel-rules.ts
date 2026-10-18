@@ -12,16 +12,16 @@ export function hoursBefore(scheduledAt: Date, now: Date): number {
   return (scheduledAt.getTime() - now.getTime()) / 3_600_000;
 }
 
-export function keptShareBp(hoursBefore: number, by: Canceller): number {
+export function keptShareBp(hours: number, by: Canceller): number {
   if (by === "tutor") return 0;
-  return STUDENT_TIERS.find((tier) => hoursBefore < tier.underHours)?.keptBp ?? 0;
+  return STUDENT_TIERS.find((tier) => hours < tier.underHours)?.keptBp ?? 0;
 }
 
 export function cancelSplit(
   sessionMinor: number,
-  hoursBefore: number,
+  hours: number,
   by: Canceller,
 ): { keptMinor: number; returnedMinor: number } {
-  const keptMinor = Math.floor((sessionMinor * keptShareBp(hoursBefore, by)) / 10_000);
+  const keptMinor = Math.floor((sessionMinor * keptShareBp(hours, by)) / 10_000);
   return { keptMinor, returnedMinor: sessionMinor - keptMinor };
 }

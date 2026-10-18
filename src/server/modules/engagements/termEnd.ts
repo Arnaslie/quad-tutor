@@ -119,7 +119,7 @@ export async function closeWithRefund(
   const [refund] = await tx
     .select(refundFields())
     .from(engagement)
-    .where(eq(engagement.id, engagementId));
+    .where(and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)));
 
   if (refund.refundMinor > 0) {
     await record(tx, [

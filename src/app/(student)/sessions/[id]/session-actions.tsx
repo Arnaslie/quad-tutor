@@ -11,7 +11,7 @@ import {
   deliveredIfUnanswered,
   lapseCopy,
 } from "@/server/modules/engagements/answer-outcome";
-import type { ViewerAction } from "@/server/modules/engagements/attendance";
+import { isLateCancel, type ViewerAction } from "@/server/modules/engagements/attendance";
 import { cancelSplit, hoursBefore } from "@/server/modules/engagements/cancel-rules";
 
 import { cancel, confirm, deny, type ActionResult } from "../../actions";
@@ -41,14 +41,7 @@ export function SessionActions({
   switch (action) {
     case "cancel":
     case "late_cancel":
-      return (
-        <Cancel
-          sessionId={sessionId}
-          late={action === "late_cancel"}
-          otherPartyName={otherPartyName}
-          price={price}
-        />
-      );
+      return <Cancel sessionId={sessionId} otherPartyName={otherPartyName} price={price} />;
     case "confirm_or_deny":
       return <Answer sessionId={sessionId} otherPartyName={otherPartyName} />;
     case "awaiting_other_party":
@@ -109,12 +102,10 @@ function Result({ state }: { state: ActionResult | null }) {
 
 function Cancel({
   sessionId,
-  late,
   otherPartyName,
   price,
 }: {
   sessionId: string;
-  late: boolean;
   otherPartyName: string;
   price: CancelPrice;
 }) {
@@ -122,7 +113,7 @@ function Cancel({
     cancel,
     null,
   );
-  const [split, setSplit] = useState<ReturnType<typeof cancelSplit> | null>(null);
+  const [split, setSplit] = useState<(ReturnType<typeof cancelSplit> & { late: boolean }) | null>(null);
 
   if (state?.ok) return <Result state={state} />;
 
@@ -133,11 +124,13 @@ function Cancel({
         <Button
           type="button"
           variant="secondary"
-          onClick={() =>
-            setSplit(
-              cancelSplit(price.sessionMinor, hoursBefore(price.scheduledAt, new Date()), "student"),
-            )
-          }
+          onClick={() => {
+            const now = new Date();
+            setSplit({
+              ...cancelSplit(price.sessionMinor, hoursBefore(price.scheduledAt, now), "student"),
+              late: isLateCancel(price.scheduledAt, now),
+            });
+          }}
         >
           Cancel this session
         </Button>
@@ -171,7 +164,7 @@ function Cancel({
             another time. Nothing is charged.
           </p>
         )}
-        {late ? (
+        {split.late ? (
           <p className="text-muted">
             Inside 12 hours it is also recorded as a late cancel, which is a fact
             about the timing and nothing else. Your next few attended sessions

@@ -83,8 +83,8 @@ export function EndPackage({
       <p className="font-medium">
         {refundMinor > 0 ? (
           <>
-            You get <Money minor={refundMinor} currency={currency} /> back for the
-            sessions you have not had.
+            You get <Money minor={refundMinor} currency={currency} /> back for
+            everything you have not used.
           </>
         ) : (
           "Nothing is left to refund."

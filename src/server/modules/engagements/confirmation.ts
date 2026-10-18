@@ -75,10 +75,6 @@ export async function recognise(
   ]);
 }
 
-// Under the tutor lock, so the engagement is taken no key update: a booking holds it for key share first.
-const closeIfDelivered = (tx: Tx, session: Pick<SessionContextRow, "engagementId" | "institutionId">) =>
-  closeIfUsedUp(tx, session, "no key update");
-
 async function applySettlement(
   tx: Tx,
   session: SessionContextRow,
@@ -94,7 +90,8 @@ async function applySettlement(
 
   if (outcome.delivered) {
     await recognise(tx, session);
-    await closeIfDelivered(tx, session);
+    // Under the tutor lock, so the engagement is taken no key update: a booking holds it for key share first.
+    await closeIfUsedUp(tx, session, "no key update");
   }
 
   if (outcome.studentFact) {
@@ -291,7 +288,7 @@ export async function resolveDispute(params: {
 
     if (params.attended) {
       await recognise(tx, session);
-      await closeIfDelivered(tx, session);
+      await closeIfUsedUp(tx, session, "no key update");
     }
 
     const fact = params.studentNoShowed

@@ -576,6 +576,7 @@ export async function sessionDetail(params: {
       .where(
         and(
           eq(sessionBooking.engagementId, row.engagementId),
+          eq(sessionBooking.institutionId, row.institutionId),
           ne(sessionBooking.id, row.sessionId),
           inArray(sessionBooking.status, ["held", "scheduled", "disputed"]),
         ),

@@ -85,7 +85,12 @@ How the money moves:
 - **The rest of its price stays deferred.** It goes back to the card in the package's
   one refund: at term end, when the student ends the package, or straight away when
   the cancel leaves nothing to book and nothing scheduled or disputed. A single
-  session cancelled inside 24 hours is refunded its 50% or 25% at once.
+  session cancelled inside 24 hours is refunded its 50% or 25% at once. When the
+  package is used up by a later confirmation instead, the refund row is written then
+  and the refund retry sweep sends it on its next run.
+- **A package with no attended session closes `refunded`** even when a kept cancel
+  paid the tutor. The status says nothing was delivered, not that nothing was earned;
+  the ledger says what was.
 - **Why the partial refund waits.** The ledger allows one refund per engagement
   (`moneyViolations`, the refund retry and the discrepancy flags all rely on it), so a
   cancel cannot send its own card refund. The package refund is what the ledger
@@ -184,7 +189,7 @@ drift:
   | `purchaseTopUp` | `tutor_profile` |
   | `bookSession` | `engagement` (for key share; re-read, refused unless `active`), then `tutor_profile` |
   | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update). When the package is used up, `closeIfUsedUp` closes it under that same no-key-update lock |
-  | `cancelSession` | `session_booking` (for update), then `tutor_profile` when the cancel keeps part of the price. Closing a used-up package runs after commit in its own transaction: `engagement` (for update), then its sessions, as the term-end refund does |
+  | `cancelSession` | `engagement` (for key share), then `session_booking` (for update), then `tutor_profile` when the cancel keeps part of the price. The kept share's ledger rows take the engagement for key share through their foreign key, so the cancel takes it first, in the term-end refund's order, or the two deadlock. Closing a used-up package runs after commit in its own transaction: `engagement` (for update), then its sessions |
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
   | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation or a priced cancel could hold (inside 24h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
   | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment` and the Checkout Session id matches), then its `held` `session_booking` rows. An amount or currency mismatch cancels both and inserts a `money_discrepancy` row in the same transaction |
