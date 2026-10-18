@@ -6,7 +6,8 @@ import { Button } from "@/components/button";
 import { Field, Select } from "@/components/field";
 
 import { addAvailabilityAction, type AvailabilityState } from "./actions";
-import { END_OPTIONS, START_OPTIONS, WEEKDAYS, formatMinuteOfDay } from "./time";
+import { WEEKDAYS } from "./time";
+import { TimePicker } from "./time-picker";
 
 const INITIAL: AvailabilityState = { status: "idle" };
 
@@ -16,8 +17,6 @@ const DEFAULT_END = 21 * 60;
 export function AvailabilityForm() {
   const [state, submit, pending] = useActionState(addAvailabilityAction, INITIAL);
   const dayId = useId();
-  const startId = useId();
-  const endId = useId();
 
   return (
     <form action={submit} className="flex flex-col gap-4">
@@ -31,27 +30,8 @@ export function AvailabilityForm() {
         </Select>
       </Field>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field id={startId} label="From">
-          <Select id={startId} name="startMinute" defaultValue={DEFAULT_START}>
-            {START_OPTIONS.map((minute) => (
-              <option key={minute} value={minute}>
-                {formatMinuteOfDay(minute)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field id={endId} label="Until">
-          <Select id={endId} name="endMinute" defaultValue={DEFAULT_END}>
-            {END_OPTIONS.map((minute) => (
-              <option key={minute} value={minute}>
-                {formatMinuteOfDay(minute)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </div>
+      <TimePicker label="From" name="start" defaultMinute={DEFAULT_START} />
+      <TimePicker label="Until" name="end" defaultMinute={DEFAULT_END} />
 
       {state.status === "error" ? (
         <p role="alert" className="text-sm text-danger">

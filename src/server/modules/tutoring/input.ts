@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { HOURS, MINUTES, PERIODS, toMinuteOfDay } from "./clock-rules";
 import { PROOF_KINDS } from "./proof-rules";
 import { RATE_RULE, rateMinorFromDollars } from "./rate-rules";
 
@@ -19,13 +20,26 @@ export const submitProofInput = z.object({
 
 const weekday = z.number().int().min(0).max(6);
 
-const minuteOfDay = z.number().int().min(0).max(24 * 60);
+const clockField = (allowed: readonly number[]) =>
+  z
+    .string()
+    .regex(/^\d{1,2}$/)
+    .transform(Number)
+    .refine((value) => allowed.includes(value));
 
-export const addAvailabilityInput = z.object({
-  weekday,
-  startMinute: minuteOfDay,
-  endMinute: minuteOfDay,
+const clockTime = z.object({
+  hour: clockField(HOURS),
+  minute: clockField(MINUTES),
+  period: z.enum(PERIODS),
 });
+
+export const addAvailabilityInput = z
+  .object({ weekday, start: clockTime, end: clockTime })
+  .transform(({ weekday, start, end }) => ({
+    weekday,
+    startMinute: toMinuteOfDay(start, "start"),
+    endMinute: toMinuteOfDay(end, "end"),
+  }));
 
 export const removeAvailabilityInput = z.object({
   windowId: z.uuid(),
