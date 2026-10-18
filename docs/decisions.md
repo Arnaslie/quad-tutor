@@ -5,7 +5,7 @@ Full source analysis in `docs/research/`. Where a decision came from independent
 agreement between reviewers who could not see each other's work, that is noted — it
 is the strongest signal in here.
 
-Last updated: 2026-10-08.
+Last updated: 2026-10-18.
 
 ---
 
@@ -45,13 +45,62 @@ guarantee as the way out of a bad fit. Ending runs the term-end refund on demand
   `refunded`.
 
 It moves only deferred money: no fee, no payout, and the fee meter is not touched.
-Ending writes no reliability fact. It is refused while a session is inside the
-late-cancel window, past its start and unconfirmed, or disputed. A late cancel stays
-something only the cancel action records, and a session that may have happened is
-never refunded. Only the student can end their package.
+Ending writes no reliability fact. It is refused while a session is less than 24
+hours away, past its start and unconfirmed, or disputed. A cancel inside 24 hours has
+a price (see below), and ending the package must not dodge it, so the refusal tells
+the student to cancel that session first. A late cancel stays something only the
+cancel action records, and a session that may have happened is never refunded. Only
+the student can end their package. (The window was the 12-hour late-cancel window
+until 2026-10-18.)
 
 **Unused sessions refund at term end, or when the student ends the package.**
 Breakage income is a trap on a campus where everyone talks.
+
+**A student cancel inside 24 hours keeps part of the session's price. A tutor cancel
+never costs the student anything** (user, 2026-10-18). This settles the open question
+of whether a late cancel should move money. The tiers live in
+`engagements/cancel-rules.ts`, shared by the server and the cancel form:
+
+| The student cancels | The student gets back | The tutor's side keeps |
+|---|---|---|
+| 24 hours or more before | the session, back in the package | nothing |
+| 12 to 24 hours before | 50% of the session's price | 50% |
+| under 12 hours before | 25% | 75% |
+| the tutor cancels, at any time | the session, back in the package | nothing |
+
+The reason is supply. A tutor who held 9pm on a Tuesday and was cancelled at 8pm
+earned nothing, and with 15 tutors in week one, tutor churn is the failure mode that
+kills a campus. The kept share is the price of the hour, the same for every student,
+and never keyed on their history. It is not a reliability consequence, so the rule
+that those stay recoverable does not apply to it. The reliability fact is unchanged:
+only a student cancel under 12 hours (`LATE_CANCEL_HOURS`) writes `late_cancelled`.
+Spot moves and reminders keep the 12-hour window too.
+
+How the money moves:
+- **The kept share is revenue.** `cancelSession` passes it to `recognise()`, which
+  writes `session_earned`, `tutor_accrued` and `platform_fee` exactly as for a
+  delivered session, against the fee meter. The kept share rounds down, so an odd
+  cent goes back to the student. The session stays `cancelled`, but it counts as used:
+  it is not back in the package.
+- **The rest of its price stays deferred.** It goes back to the card in the package's
+  one refund: at term end, when the student ends the package, or straight away when
+  the cancel leaves nothing to book and nothing scheduled or disputed. A single
+  session cancelled inside 24 hours is refunded its 50% or 25% at once.
+- **Why the partial refund waits.** The ledger allows one refund per engagement
+  (`moneyViolations`, the refund retry and the discrepancy flags all rely on it), so a
+  cancel cannot send its own card refund. The package refund is what the ledger
+  still defers, purchase less `session_earned` less refunds, which covers both
+  undelivered sessions and the returned share of kept cancels.
+- **A tutor cancel moves no money.** The session goes back in the package. When the
+  student is refunded in the end, the platform has already paid the card fee to
+  collect, and it absorbs that, as it does for every refund.
+- **A kept cancel is never rateable.** Rating needs a `completed` session, not just a
+  `session_earned` row. The tutor's earnings count it as a paid session.
+
+Copy says what happens before it happens. The cancel form shows "Cancel now and you
+get $X back. $Y goes to <tutor>." and when the money reaches the card. The tutor's
+cancel email says what they will be paid for the session. The student's booking and
+reminder emails give the tiers instead of "cancelling is free until 12 hours before".
 
 **A single session exists, but only for an existing pair.** One session, full
 price, offered to a student whose packages with that tutor in a course have nothing
@@ -107,7 +156,8 @@ drift:
 - **Charged at recognition, never at purchase.** A package is deferred revenue, and its
   split is unknown until each session is delivered. The fee is fixed in `recognise()`
   (`engagements/confirmation.ts`), the one place a session becomes revenue — two
-  confirmations, auto-release, or a dispute resolved as attended. It is written as a
+  confirmations, auto-release, a dispute resolved as attended, or the kept share of a
+  student cancel inside 24 hours. It is written as a
   `platform_fee` row beside `session_earned` and `tutor_accrued`, so every delivered
   session satisfies `session_earned = tutor_accrued + platform_fee`, and the meter is
   the sum of `platform_fee` for that tutor.
@@ -116,7 +166,7 @@ drift:
   step stay as they are. If `FEE_MILESTONE_MINOR` is raised later, tutors between the
   old and the new line go back to 10% (accepted 2026-10-16).
 - **Reversals follow the tutor's pay.** A term-end refund, and a package the student
-  ends early, return only undelivered sessions, which never charged a fee, so
+  ends early, return only money no session earned, which never charged a fee, so
   neither touches the meter. A disputed session charges nothing while it holds;
   resolved as attended, it is charged at resolution against the meter as it stands
   then; resolved as not attended, never. Nothing today reverses a recognised session.
@@ -133,9 +183,10 @@ drift:
   | `purchasePackage` | `tutor_profile` (no key update), then `match_request` |
   | `purchaseTopUp` | `tutor_profile` |
   | `bookSession` | `engagement` (for key share; re-read, refused unless `active`), then `tutor_profile` |
-  | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update) |
+  | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update). When the package is used up, `closeIfUsedUp` closes it under that same no-key-update lock |
+  | `cancelSession` | `session_booking` (for update), then `tutor_profile` when the cancel keeps part of the price. Closing a used-up package runs after commit in its own transaction: `engagement` (for update), then its sessions, as the term-end refund does |
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
-  | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation could hold (inside 12h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
+  | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation or a priced cancel could hold (inside 24h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
   | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment` and the Checkout Session id matches), then its `held` `session_booking` rows. An amount or currency mismatch cancels both and inserts a `money_discrepancy` row in the same transaction |
   | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the unstamped `refund` row, calls Stripe, then stamps `re_…` with `where stripe_reference is null`. The retry sweep runs each campus under a `sweep_lease` row (a timestamp claimed by one conditional upsert, not a lock) |
   | transfer sweep | `engagement` (no key update) alone. Re-reads what is owed and the pause after the lock, inserts the unstamped `tutor_transfer` row and commits; Stripe is called after commit, and the stamp `where stripe_reference is null` is the only guard after that. Each campus runs under its own `sweep_lease` row |
@@ -942,15 +993,6 @@ mechanism — a student who has paid for four sessions won't defect mid-package,
 leakage concentrates entirely at the renewal boundary. Exam-anchored 4-session
 packages therefore create 3–4 leakage moments per semester where "through the final"
 creates one. Conversion and retention pull in opposite directions here. Not resolved.
-
-**A late cancel costs the student nothing and pays the tutor nothing.** It writes the
-timestamped fact and moves no money. Charging for it was rejected because a fee is an
-unrecoverable consequence and reliability consequences must always be recoverable —
-but that leaves a tutor who blocked 9pm on a Tuesday and was cancelled at 8pm earning
-zero. With 15 tutors in week one, tutor churn is the failure mode that kills a campus;
-student leakage is not. The alternative is to consume the session and pay the tutor,
-which trades an unrecoverable money consequence for supply protection. Revisit with
-real cancellation data, deliberately — this is currently a default, not a decision.
 
 **Disintermediation generally** — now the top business risk, and not solvable by
 engineering. Two adults on one campus with no safeguarding reason to stay on-platform.
