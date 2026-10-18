@@ -97,21 +97,27 @@ test("a tutor Stripe no longer verifies sees no cash-out, and asking sends nothi
   });
 });
 
-test("Stripe being down answers retry, and the retry with the same request id sends once", async () => {
+test("an unanswered call answers retry and keeps the request id; a Stripe error refreshes instead", async () => {
   const w = await world();
   await fakeStripe.dashboardTransfer({ engagementId: randomUUID(), accountId: w.accountId, amountMinor: 10_000 });
   await fakeStripe.addDebitCard(w.accountId);
   const requestId = randomUUID();
-  const down = async () => {
+  const unanswered = async () => {
+    throw new GatewayError("socket hang up");
+  };
+  const failed = async () => {
     throw new GatewayError("An unknown error occurred", { status: 500, type: "api_error" });
   };
 
   await quietly(async () => {
-    await patched("instantBalance", down, async () => {
+    await patched("instantBalance", unanswered, async () => {
       assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "retry" });
     });
-    await patched("createInstantPayout", down, async () => {
+    await patched("createInstantPayout", unanswered, async () => {
       assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "retry" });
+    });
+    await patched("createInstantPayout", failed, async () => {
+      assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId: randomUUID() }), { status: "unavailable" });
     });
   });
   assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "sent", netMinor: 9_825, currency: "usd" });

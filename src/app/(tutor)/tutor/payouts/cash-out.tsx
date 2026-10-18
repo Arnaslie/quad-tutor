@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { startTransition, useActionState, useState } from "react";
 
 import { Button } from "@/components/button";
 import { Card } from "@/components/card";
@@ -16,7 +16,7 @@ export function CashOut({ offer, requestId }: { offer: CashOutOffer | null; requ
   const [confirming, setConfirming] = useState(false);
   const [state, action, pending] = useActionState<CashOutState, FormData>(async (previous, formData) => {
     const next = await cashOutNow(previous, formData);
-    if (next.status === "sent") setConfirming(false);
+    if (next.status === "sent") startTransition(() => setConfirming(false));
     return next;
   }, { status: "idle" });
 

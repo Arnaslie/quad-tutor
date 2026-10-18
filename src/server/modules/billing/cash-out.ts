@@ -51,6 +51,8 @@ export async function cashOut(
     if (!(error instanceof GatewayError)) throw error;
     console.error("[cash-out] instant payout failed", errorFacts(error));
     if (error.inFlight) return { status: "busy" };
-    return error.refused || error.idempotency ? { status: "unavailable" } : { status: "retry" };
+    if (error.idempotency) return { status: "changed" };
+    // Stripe replays a saved 5xx for the same key, so only an unanswered or rate-limited call keeps it.
+    return error.status === undefined || error.status === 429 ? { status: "retry" } : { status: "unavailable" };
   }
 }

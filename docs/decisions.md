@@ -797,25 +797,30 @@ is harmless, while a key per speed would replay a stale answer after a switch ba
 event, view or daily pass tries again.
 
 **Instant cash-out is the paid, faster tier (2026-10-18).** A verified tutor with a debit
-card (or bank account) that takes instant payouts sees "Cash out now" on
-`/tutor/payouts`. It sends the whole instant balance to that card or account in minutes.
-The fee is 1.75%, at least $1.00 and at most $25.00: Venmo's rate and cap, with a $1 floor
-that covers Stripe's cost on any payout size. The platform sets it and keeps the margin
-over Stripe's 1%; the page calls it the "instant fee", not Stripe's. Stripe collects it,
-as an application fee set in the Dashboard's Platform Pricing Tool; `payouts.create` has
-no fee parameter, and our code never computes or deducts it. `instant-fee.ts` only holds the numbers the page discloses.
-The page reads the balance with `instant_available.net_available`, shows the gross, the fee
-Stripe quotes and what the tutor gets, and sends exactly the `net_available` amount the tutor
-confirmed. If the quote moved since then, nothing is sent and the tutor sees the new one.
-The button is hidden unless an external account lists `instant` in
-`available_payout_methods` and Stripe's net is above zero and below the gross. That last
-check fails closed: until the pricing tool is set, Stripe quotes no fee, so the button never
-offers a cash-out that would cost the platform Stripe's 1%. Each confirm carries a request
-id, and the payout's idempotency key is `instant-payout:<account>:<request id>`, so a
-double submit sends once. If Stripe can't be reached, the tutor is asked to try again and
-the page keeps the same request id, so the retry reuses the key. A cash-out moves connected-balance money to a card, the way a
-scheduled payout moves it to a bank, so it writes no ledger row and adds no ledger type;
-the fee is Stripe's application fee, reconciled from Stripe's own list for now.
+card (or bank account) that takes instant payouts sees "Cash out now" on `/tutor/payouts`.
+It sends the whole instant balance to that card or account in minutes. The fee is 1.75%,
+at least $1.00 and at most $25.00: Venmo's rate and cap, with a $1 floor that covers
+Stripe's cost on any payout size. The platform sets it and keeps the margin over Stripe's
+1%; the page calls it the "instant fee", not Stripe's. Stripe collects it, as an
+application fee set in the Dashboard's Platform Pricing Tool; `payouts.create` has no fee
+parameter, and our code never computes or deducts it. `instant-fee.ts` only holds the
+numbers the page discloses. The page reads the balance with
+`instant_available.net_available`, shows the gross, the fee Stripe quotes and what the
+tutor gets, and sends exactly the `net_available` amount the tutor confirmed. If the quote
+moved since then, nothing is sent and the tutor sees the new one. The button is hidden
+unless an external account lists `instant` in `available_payout_methods` and Stripe's net
+is above zero and below the gross. That last check fails closed: until the pricing tool is
+set, Stripe quotes no fee, so the button never offers a cash-out that would cost the
+platform Stripe's 1%. Each confirm carries a request id, and the payout's idempotency key
+is `instant-payout:<account>:<request id>`, so a double submit sends once. If Stripe can't
+be reached or rate-limits the call, the tutor is asked to try again and the page keeps the
+same request id, so the retry reuses the key. Any answer Stripe did give (a 5xx it would
+replay for that key, a 403, a refusal) refreshes the page with a new request id instead;
+the balance re-read before every create stops a second payout. An offer under Stripe's
+$0.50 instant minimum is not shown. A cash-out moves connected-balance money to a card,
+the way a scheduled payout moves it to a bank, so it writes no ledger row and adds no
+ledger type; the fee is Stripe's application fee, reconciled from Stripe's own list for
+now.
 
 **A chargeback is recorded, not judged.** It pauses that engagement's
 transfers and goes to ops; it writes no reliability fact on its own. Each dispute event

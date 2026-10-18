@@ -5,7 +5,7 @@ import path from "node:path";
 
 import Stripe from "stripe";
 
-import { INSTANT_FEE } from "./instant-fee";
+import { INSTANT_FEE, INSTANT_PAYOUT_MIN_MINOR } from "./instant-fee";
 import { DEFAULT_PAYOUT_SPEED, type PayoutSpeed } from "./payout-speed";
 
 export const API_VERSION = "2026-09-30.endive";
@@ -214,7 +214,7 @@ export type Gateway = {
   listAccounts(): Promise<ConnectAccount[]>;
   createAccountLink(params: NewAccountLink): Promise<string>;
   setPayoutSpeed(accountId: string, speed: PayoutSpeed): Promise<ConnectAccount>;
-  /** Null unless an instant destination exists and the platform's fee is set, so net < gross. */
+  /** Null unless an instant destination exists, the platform's fee is set (net < gross), and net meets Stripe's minimum. */
   instantBalance(accountId: string): Promise<InstantBalance | null>;
   createInstantPayout(params: NewInstantPayout): Promise<InstantPayout>;
   /** The PaymentIntent's `latest_charge`, which a transfer names as its `source_transaction`. */
@@ -527,7 +527,9 @@ export function stripeDriver(stripe: Stripe, livemode = false): Gateway {
           externals.data.filter((external) => external.available_payout_methods?.includes("instant")).map((external) => external.id),
         );
         for (const pot of balance.instant_available ?? []) {
-          const net = pot.net_available?.find((entry) => instant.has(entry.destination) && entry.amount > 0);
+          const net = pot.net_available?.find(
+            (entry) => instant.has(entry.destination) && entry.amount >= INSTANT_PAYOUT_MIN_MINOR,
+          );
           if (net && net.amount < pot.amount) {
             return { grossMinor: pot.amount, netMinor: net.amount, currency: pot.currency, destination: net.destination };
           }
@@ -788,7 +790,7 @@ const fakeGateway: Gateway = {
       INSTANT_FEE.maxMinor,
       Math.max(INSTANT_FEE.minMinor, Math.round((grossMinor * INSTANT_FEE.basisPoints) / 10_000)),
     );
-    if (!destination || grossMinor - feeMinor <= 0) return null;
+    if (!destination || grossMinor - feeMinor < INSTANT_PAYOUT_MIN_MINOR) return null;
     return { grossMinor, netMinor: grossMinor - feeMinor, currency: "usd", destination };
   },
   createInstantPayout(params) {

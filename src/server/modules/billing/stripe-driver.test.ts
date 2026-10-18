@@ -155,14 +155,14 @@ test("the instant balance is read as the tutor's account and counts only a desti
   assert.deepEqual([...new URL(read.path, "http://local").searchParams.values()], ["instant_available.net_available"]);
 });
 
-test("no instant balance without a platform fee, an instant destination, or anything left after the fee", async () => {
+test("no instant balance without a platform fee, an instant destination, or Stripe's $0.50 minimum left after the fee", async () => {
   const card = externals(["card_fast", ["standard", "instant"]]);
   const quotes = [];
   for (const [pot, accounts] of [
     [{ amount: 10_000, currency: "usd" }, card],
     [{ amount: 10_000, currency: "usd", net_available: [{ amount: 10_000, destination: "card_fast" }] }, card],
     [{ amount: 10_000, currency: "usd", net_available: [{ amount: 9_825, destination: "ba_slow" }] }, externals(["ba_slow", ["standard"]])],
-    [{ amount: 80, currency: "usd", net_available: [{ amount: 0, destination: "card_fast" }] }, card],
+    [{ amount: 149, currency: "usd", net_available: [{ amount: 49, destination: "card_fast" }] }, card],
   ] as const) {
     routes = { "GET /v1/balance": balance([pot]), "GET /v1/accounts/acct_local/external_accounts": accounts };
     quotes.push(await driver.instantBalance("acct_local"));
