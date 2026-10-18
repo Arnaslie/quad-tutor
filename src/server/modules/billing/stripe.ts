@@ -5,6 +5,8 @@ import path from "node:path";
 
 import Stripe from "stripe";
 
+import { DEFAULT_PAYOUT_SPEED, type PayoutSpeed } from "./payout-speed";
+
 export const API_VERSION = "2026-09-30.endive";
 const MIN_EXPIRY_SECONDS = 30 * 60;
 const MAX_EXPIRY_SECONDS = 24 * 60 * 60;
@@ -170,6 +172,8 @@ export type ConnectAccount = {
   transfers: string | null;
   disabledReason: string | null;
   pastDue: string[];
+  /** Null when the account's payout schedule is not one this app offers, such as one set in a Dashboard. */
+  payoutSpeed: PayoutSpeed | null;
   tutorProfileId: string | null;
   institutionId: string | null;
 };
@@ -193,6 +197,7 @@ export type Gateway = {
   retrieveAccount(id: string): Promise<ConnectAccount>;
   listAccounts(): Promise<ConnectAccount[]>;
   createAccountLink(params: NewAccountLink): Promise<string>;
+  setPayoutSpeed(accountId: string, speed: PayoutSpeed): Promise<ConnectAccount>;
   /** The PaymentIntent's `latest_charge`, which a transfer names as its `source_transaction`. */
   chargeOf(paymentIntentId: string): Promise<string | null>;
   createTransfer(params: NewTransfer): Promise<Transfer>;
@@ -229,6 +234,18 @@ function sessionView(session: Stripe.Checkout.Session): CheckoutSession {
   };
 }
 
+const PAYOUT_SCHEDULES = {
+  weekly: { interval: "weekly", weekly_anchor: "friday" },
+  daily: { interval: "daily" },
+} satisfies Record<PayoutSpeed, Stripe.AccountUpdateParams.Settings.Payouts.Schedule>;
+
+function speedOf(schedule: Stripe.Account.Settings.Payouts.Schedule | undefined): PayoutSpeed | null {
+  if (schedule?.interval === "daily") return "daily";
+  const days = schedule?.weekly_payout_days ?? (schedule?.weekly_anchor ? [schedule.weekly_anchor] : []);
+  if (schedule?.interval === "weekly" && days.length === 1 && days[0] === "friday") return "weekly";
+  return null;
+}
+
 function accountView(account: Stripe.Account): ConnectAccount {
   return {
     id: account.id,
@@ -237,6 +254,7 @@ function accountView(account: Stripe.Account): ConnectAccount {
     transfers: account.capabilities?.transfers ?? null,
     disabledReason: account.requirements?.disabled_reason ?? null,
     pastDue: account.requirements?.past_due ?? [],
+    payoutSpeed: speedOf(account.settings?.payouts?.schedule),
     tutorProfileId: account.metadata?.tutor_profile_id ?? null,
     institutionId: account.metadata?.institution_id ?? null,
   };
@@ -323,8 +341,11 @@ function realGateway(): Gateway {
       "Live Stripe keys are refused until refunds through Stripe and tutor transfers ship (Stripe plan items 4 and 6). Use an sk_test_ key.",
     );
   }
-  const stripe = new Stripe(key, { apiVersion: API_VERSION, maxNetworkRetries: 2, timeout: 15_000 });
+  return stripeDriver(new Stripe(key, { apiVersion: API_VERSION, maxNetworkRetries: 2, timeout: 15_000 }), livemode);
+}
 
+/** The real driver over a given client; tests point one at a local server to read what would be sent. */
+export function stripeDriver(stripe: Stripe, livemode = false): Gateway {
   return {
     livemode,
     createCheckout: (params) =>
@@ -452,7 +473,7 @@ function realGateway(): Gateway {
             business_type: "individual",
             capabilities: { transfers: { requested: true } },
             business_profile: { product_description: TUTOR_PRODUCT_DESCRIPTION },
-            settings: { payouts: { schedule: { interval: "daily" } } },
+            settings: { payouts: { schedule: PAYOUT_SCHEDULES[DEFAULT_PAYOUT_SPEED] } },
             metadata: { tutor_profile_id: params.tutorProfileId, institution_id: params.institutionId },
           },
           { idempotencyKey: `connect-account:${params.tutorProfileId}` },
@@ -473,6 +494,11 @@ function realGateway(): Gateway {
         });
         return link.url;
       }),
+    /** No fixed idempotency key: a key per speed would replay a stale answer after a switch back within 24 hours. */
+    setPayoutSpeed: (accountId, speed) =>
+      call(async () =>
+        accountView(await stripe.accounts.update(accountId, { settings: { payouts: { schedule: PAYOUT_SCHEDULES[speed] } } })),
+      ),
   };
 }
 
@@ -676,6 +702,7 @@ const fakeGateway: Gateway = {
         transfers: "inactive",
         disabledReason: "requirements.past_due",
         pastDue: ["external_account", "individual.dob.day", "individual.ssn_last_4", "tos_acceptance.date"],
+        payoutSpeed: DEFAULT_PAYOUT_SPEED,
         tutorProfileId: params.tutorProfileId,
         institutionId: params.institutionId,
       };
@@ -697,6 +724,7 @@ const fakeGateway: Gateway = {
     await fakeWrite(id, params);
     return `${new URL(params.returnUrl).origin}/api/dev/connect/${id}`;
   },
+  setPayoutSpeed: (accountId, speed) => fakeSchedule(accountId, speed),
   async chargeOf(paymentIntentId) {
     if (!(await fakeRead<FakePayment>(paymentIntentId))) throw missing("payment_intent", paymentIntentId);
     return paymentIntentId.replace(/^pi_/, "ch_");
@@ -828,7 +856,15 @@ function signedEvent(type: string, object: Record<string, unknown>): { payload: 
 async function fakeAccount(id: string): Promise<ConnectAccount> {
   const account = await fakeRead<ConnectAccount>(id);
   if (!account) throw missing("account", id);
-  return account;
+  return { ...account, payoutSpeed: account.payoutSpeed ?? null };
+}
+
+function fakeSchedule(id: string, payoutSpeed: PayoutSpeed | null): Promise<ConnectAccount> {
+  return locked(id, async () => {
+    const account = { ...(await fakeAccount(id)), payoutSpeed };
+    await fakeWrite(id, account);
+    return account;
+  });
 }
 
 const FAKE_ACCOUNT_STATES = {
@@ -973,6 +1009,11 @@ export const fakeStripe = {
       await fakeWrite(id, account);
       return account;
     });
+  },
+  /** Plays someone changing the schedule in a Dashboard; null is one this app doesn't offer, such as manual. */
+  setPayoutSchedule(id: string, speed: PayoutSpeed | null): Promise<ConnectAccount> {
+    assertNotProduction();
+    return fakeSchedule(id, speed);
   },
   /** A signed Connect `account.updated`; `object` lets tests send a stale payload. */
   async accountEvent(id: string, object?: ConnectAccount): Promise<{ payload: string; signature: string }> {

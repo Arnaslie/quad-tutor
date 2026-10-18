@@ -4,7 +4,7 @@ export type KycStatus = "not_started" | "pending" | "verified" | "restricted";
 
 export type PayoutStage = KycStatus | "needs_support";
 
-type AccountState = Omit<ConnectAccount, "id" | "tutorProfileId" | "institutionId"> | null;
+type AccountState = Pick<ConnectAccount, "detailsSubmitted" | "payoutsEnabled" | "transfers" | "disabledReason" | "pastDue"> | null;
 
 const STRIPE_REVIEWING = new Set(["requirements.pending_verification", "under_review"]);
 
