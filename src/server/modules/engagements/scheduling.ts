@@ -183,6 +183,19 @@ export async function cancelSession(params: {
   const now = new Date();
 
   const cancelled = await db.transaction(async (tx) => {
+    // A kept share writes ledger rows, whose foreign key takes the engagement for key share.
+    // Taking it first keeps the term-end sweep's order: engagement, then its sessions.
+    await tx
+      .select({ id: engagement.id })
+      .from(engagement)
+      .innerJoin(sessionBooking, eq(sessionBooking.engagementId, engagement.id))
+      .where(
+        and(
+          eq(sessionBooking.id, params.sessionId),
+          eq(sessionBooking.institutionId, params.actor.institutionId),
+        ),
+      )
+      .for("key share", { of: engagement });
     await lockSession(tx, params.sessionId);
     const session = await loadParticipation({
       exec: tx,

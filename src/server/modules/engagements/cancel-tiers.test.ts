@@ -30,10 +30,11 @@ import { sessionBooked, sessionTomorrow } from "@/server/modules/notifications/m
 import { rateSession } from "@/server/modules/ratings/capture";
 import { sessionRatingState } from "@/server/modules/ratings/reads";
 
+import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
 import { packagesForStudent, sessionDetail } from "./reads";
 import { cancelSession, sessionsRemaining } from "./scheduling";
-import { endPackage } from "./termEnd";
+import { closeWithRefund, endPackage } from "./termEnd";
 
 const databaseHost = new URL(process.env.DATABASE_URL ?? "postgres://unset").hostname;
 if (!isLocalHost(databaseHost)) {
@@ -294,6 +295,23 @@ test("a kept cancel and the confirmation of the other last session at once close
     assert.ok(results.every((result) => result.status === "fulfilled"), String(results.map((r) => r.status === "rejected" && r.reason)));
     assert.equal(await statusOf(id), "completed", `head start ${headStartMs}ms`);
     assert.deepEqual((await ledger(id)).filter((row) => row.type === "refund"), [{ type: "refund", amountMinor: 1_750 }]);
+  }
+});
+
+test("a kept cancel racing the term-end sweep never deadlocks and leaves one refund", async () => {
+  for (const headStartMs of [0, 1, 2, 4, 8]) {
+    const student = await person();
+    const id = await pkg(student);
+    const sessionId = await session(id, hours(20));
+
+    const results = await Promise.allSettled([
+      db.transaction((tx) => closeWithRefund(tx, { engagementId: id, institutionId })),
+      new Promise((resolve) => setTimeout(resolve, headStartMs)).then(() => cancelSession({ actor: student, sessionId })),
+    ]);
+    assert.equal(results[0].status, "fulfilled", `head start ${headStartMs}ms: ${results[0].status === "rejected" && results[0].reason}`);
+    if (results[1].status === "rejected") assert.ok(results[1].reason instanceof SessionError, String(results[1].reason));
+    const refunds = (await ledger(id)).filter((row) => row.type === "refund");
+    assert.deepEqual(refunds, [{ type: "refund", amountMinor: results[1].status === "fulfilled" ? 12_250 : 14_000 }], `head start ${headStartMs}ms`);
   }
 });
 
