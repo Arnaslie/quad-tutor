@@ -79,7 +79,7 @@ test("a quote that moved since the tutor confirmed sends nothing, and two cash-o
       cashOut(w.tutor, { netMinor: 197_500, requestId: randomUUID() }),
     ]),
   );
-  assert.deepEqual(results.map((result) => result.status).sort(), ["refused", "sent"]);
+  assert.deepEqual(results.map((result) => result.status).sort(), ["sent", "unavailable"]);
   assert.equal(await cashOutOffer(await payoutsOf(w.tutor)), null);
 });
 
@@ -128,6 +128,11 @@ test("an unanswered call answers retry and keeps the request id; a Stripe error 
       throw new GatewayError("Keys for idempotent requests can only be used with the same parameters", { status: 400, idempotency: true });
     }, async () => {
       assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "changed" });
+    });
+    await patched("createInstantPayout", async () => {
+      throw new GatewayError("You have insufficient funds in your Stripe account for this transfer.", { status: 400, code: "balance_insufficient" });
+    }, async () => {
+      assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId: randomUUID() }), { status: "unavailable" });
     });
   });
   assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "sent", netMinor: 9_825, currency: "usd" });

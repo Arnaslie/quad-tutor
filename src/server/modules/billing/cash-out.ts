@@ -53,6 +53,7 @@ export async function cashOut(
     console.error("[cash-out] instant payout failed", errorFacts(error));
     if (error.inFlight) return { status: "busy" };
     if (error.idempotency) return { status: "changed" };
+    if (error.code === "balance_insufficient") return { status: "unavailable" };
     // Stripe replays a saved 5xx for the same key, so only an unanswered or rate-limited call keeps it.
     return error.status === undefined || error.status === 429 ? { status: "retry" } : { status: "refused" };
   }
