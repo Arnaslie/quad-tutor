@@ -7,11 +7,13 @@ import { Money } from "@/components/money";
 import { PageHeader } from "@/components/page-header";
 import { payoutsFor } from "@/server/modules/billing/connect";
 import type { PayoutStage } from "@/server/modules/billing/kyc";
+import { PAYOUT_SPEEDS, PAYOUT_SPEED_COPY } from "@/server/modules/billing/payout-speed";
 import { requireTutor } from "@/server/modules/identity/actor";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
-import { startOnboarding } from "./actions";
+import { pickPayoutSpeed, startOnboarding } from "./actions";
 import { OnboardingButton } from "./onboarding-button";
+import { SpeedOption } from "./speed-option";
 import { PAYOUTS_SUPPORT, STAGE_ICON } from "./stage";
 
 export const metadata: Metadata = { title: "Payouts" };
@@ -84,11 +86,25 @@ export default async function TutorPayoutsPage() {
         ) : null}
       </Card>
 
+      {payouts.accountId ? (
+        <Card className="flex flex-col gap-3">
+          <h2 className="text-sm font-medium text-foreground">How often you get paid</h2>
+          <form action={pickPayoutSpeed} className="flex flex-col gap-2">
+            {PAYOUT_SPEEDS.map((speed) => (
+              <SpeedOption key={speed} speed={speed} selected={speed === payouts.speed} />
+            ))}
+          </form>
+        </Card>
+      ) : null}
+
       <Card className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-foreground">How payouts work</h2>
         <ul className="flex list-disc flex-col gap-2 pl-5 text-sm text-muted">
           <li>Pay is earned once a session&apos;s attendance settles.</li>
-          <li>Stripe sends it to your bank daily. It usually arrives two business days later.</li>
+          <li>
+            Stripe sends it to your bank {PAYOUT_SPEED_COPY[payouts.speed].when}. It usually arrives two
+            business days later.
+          </li>
           <li>Stripe collects your bank and ID details, not Quad Tutor.</li>
         </ul>
       </Card>
