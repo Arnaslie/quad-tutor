@@ -798,20 +798,22 @@ event, view or daily pass tries again.
 
 **Instant cash-out is the paid, faster tier (2026-10-18).** A verified tutor with a debit
 card (or bank account) that takes instant payouts sees "Cash out now" on
-`/tutor/payouts`. It sends the whole instant balance to that card in minutes. The fee is
-1.75%, at least $1.00 and at most $25.00. Venmo's rate and cap, with a $1 floor that
-covers Stripe's cost on any payout size. Stripe charges it, as an application fee set in
-the Dashboard's Platform Pricing Tool; `payouts.create` has no fee parameter, and our code
-never computes or deducts it. `instant-fee.ts` only holds the numbers the page discloses.
-The page reads the balance with `instant_available.net_available`, shows the gross, Stripe's
-fee and what the tutor gets, and sends exactly the `net_available` amount the tutor
+`/tutor/payouts`. It sends the whole instant balance to that card or account in minutes.
+The fee is 1.75%, at least $1.00 and at most $25.00: Venmo's rate and cap, with a $1 floor
+that covers Stripe's cost on any payout size. The platform sets it and keeps the margin
+over Stripe's 1%; the page calls it the "instant fee", not Stripe's. Stripe collects it,
+as an application fee set in the Dashboard's Platform Pricing Tool; `payouts.create` has
+no fee parameter, and our code never computes or deducts it. `instant-fee.ts` only holds the numbers the page discloses.
+The page reads the balance with `instant_available.net_available`, shows the gross, the fee
+Stripe quotes and what the tutor gets, and sends exactly the `net_available` amount the tutor
 confirmed. If the quote moved since then, nothing is sent and the tutor sees the new one.
 The button is hidden unless an external account lists `instant` in
 `available_payout_methods` and Stripe's net is above zero and below the gross. That last
 check fails closed: until the pricing tool is set, Stripe quotes no fee, so the button never
 offers a cash-out that would cost the platform Stripe's 1%. Each confirm carries a request
 id, and the payout's idempotency key is `instant-payout:<account>:<request id>`, so a
-double submit sends once. A cash-out moves connected-balance money to a card, the way a
+double submit sends once. If Stripe can't be reached, the tutor is asked to try again and
+the page keeps the same request id, so the retry reuses the key. A cash-out moves connected-balance money to a card, the way a
 scheduled payout moves it to a bank, so it writes no ledger row and adds no ledger type;
 the fee is Stripe's application fee, reconciled from Stripe's own list for now.
 
@@ -1069,6 +1071,9 @@ Before launch, confirm in a sandbox:
 - Money that arrived by a `source_transaction` transfer shows in `instant_available`.
 - Whether Stripe also charges 25¢ + 0.25% on an instant payout, and whether its 1% has a
   $0.50 minimum. Either changes the platform's margin, not the code.
+- Whether the pricing tool takes 1.75% of the gross or of the payout. The page shows
+  Stripe's own gross minus net, so the tutor sees the real fee either way; only the
+  disclosed "1.75%" and the fake could be off by a few cents.
 
 ---
 

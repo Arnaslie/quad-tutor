@@ -10,8 +10,8 @@ import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
 import { cashOut, cashOutOffer } from "./cash-out";
 import { payoutsOf, syncConnectAccount } from "./connect";
-import { fakeStripe } from "./stripe";
-import { cleanup, delivered, noStripe, world } from "./test-world";
+import { GatewayError, fakeStripe } from "./stripe";
+import { cleanup, delivered, noStripe, patched, world } from "./test-world";
 import { runTransfers } from "./transfers";
 
 after(cleanup);
@@ -95,4 +95,25 @@ test("a tutor Stripe no longer verifies sees no cash-out, and asking sends nothi
     assert.equal(await cashOutOffer(await payoutsOf(w.tutor)), null);
     assert.deepEqual(await cashOut(w.tutor, { netMinor: 4_900, requestId: randomUUID() }), { status: "unavailable" });
   });
+});
+
+test("Stripe being down answers retry, and the retry with the same request id sends once", async () => {
+  const w = await world();
+  await fakeStripe.dashboardTransfer({ engagementId: randomUUID(), accountId: w.accountId, amountMinor: 10_000 });
+  await fakeStripe.addDebitCard(w.accountId);
+  const requestId = randomUUID();
+  const down = async () => {
+    throw new GatewayError("An unknown error occurred", { status: 500, type: "api_error" });
+  };
+
+  await quietly(async () => {
+    await patched("instantBalance", down, async () => {
+      assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "retry" });
+    });
+    await patched("createInstantPayout", down, async () => {
+      assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "retry" });
+    });
+  });
+  assert.deepEqual(await cashOut(w.tutor, { netMinor: 9_825, requestId }), { status: "sent", netMinor: 9_825, currency: "usd" });
+  assert.equal(await cashOutOffer(await payoutsOf(w.tutor)), null);
 });

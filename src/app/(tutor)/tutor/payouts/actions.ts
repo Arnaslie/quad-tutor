@@ -37,6 +37,8 @@ function cashOutState(result: CashOutResult): CashOutState {
       return { status: "error", message: "Your balance changed since you opened this page. Check the new amount and send again." };
     case "busy":
       return { status: "error", message: "That cash-out is already being sent." };
+    case "retry":
+      return { status: "error", message: "We couldn't reach Stripe. Try again in a minute." };
     case "unavailable":
       return { status: "error", message: "You can't cash out right now. Your pay still goes out on your usual schedule." };
   }
@@ -46,7 +48,7 @@ export async function cashOutNow(_previous: CashOutState, formData: FormData): P
   const actor = await requireTutor();
   const input = cashOutInput.safeParse({ netMinor: formData.get("netMinor"), requestId: formData.get("requestId") });
   if (!input.success) return { status: "error", message: "Reload the page and try again." };
-  const state = cashOutState(await cashOut(actor, input.data));
-  revalidatePath(PAYOUTS_HREF);
-  return state;
+  const result = await cashOut(actor, input.data);
+  if (result.status !== "retry") revalidatePath(PAYOUTS_HREF);
+  return cashOutState(result);
 }

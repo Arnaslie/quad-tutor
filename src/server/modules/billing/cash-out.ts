@@ -9,9 +9,10 @@ export type CashOutResult =
   | { status: "sent"; netMinor: number; currency: string }
   | { status: "changed" }
   | { status: "busy" }
+  | { status: "retry" }
   | { status: "unavailable" };
 
-/** Stripe's quote for cashing out now, without the destination, so it can cross to the client. Null hides the button. */
+/** Leaves out the destination, so the offer can cross to the client. Null hides the button. */
 export async function cashOutOffer(payouts: Pick<Payouts, "accountId" | "status">): Promise<CashOutOffer | null> {
   if (!payouts.accountId || payouts.status !== "verified") return null;
   try {
@@ -25,10 +26,6 @@ export async function cashOutOffer(payouts: Pick<Payouts, "accountId" | "status"
   }
 }
 
-/**
- * Sends the whole instant balance to the tutor's card at Stripe's quote, only if the quote is still the one the
- * tutor confirmed. Moves connected-balance money to a bank, so no ledger row is written.
- */
 export async function cashOut(
   actor: TutorActor,
   confirmed: { netMinor: number; requestId: string },
@@ -36,10 +33,10 @@ export async function cashOut(
   const { accountId, status } = await payoutsOf(actor);
   if (!accountId || status !== "verified") return { status: "unavailable" };
   const gateway = stripeGateway();
-  const balance = await gateway.instantBalance(accountId);
-  if (!balance) return { status: "unavailable" };
-  if (balance.netMinor !== confirmed.netMinor) return { status: "changed" };
   try {
+    const balance = await gateway.instantBalance(accountId);
+    if (!balance) return { status: "unavailable" };
+    if (balance.netMinor !== confirmed.netMinor) return { status: "changed" };
     const payout = await gateway.createInstantPayout({
       accountId,
       amountMinor: balance.netMinor,
@@ -52,9 +49,8 @@ export async function cashOut(
     return { status: "sent", netMinor: payout.amountMinor, currency: payout.currency };
   } catch (error) {
     if (!(error instanceof GatewayError)) throw error;
+    console.error("[cash-out] instant payout failed", errorFacts(error));
     if (error.inFlight) return { status: "busy" };
-    if (!error.refused && !error.idempotency) throw error;
-    console.error("[cash-out] instant payout refused", errorFacts(error));
-    return { status: "unavailable" };
+    return error.refused || error.idempotency ? { status: "unavailable" } : { status: "retry" };
   }
 }

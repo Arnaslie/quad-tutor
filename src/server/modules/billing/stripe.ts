@@ -214,7 +214,7 @@ export type Gateway = {
   listAccounts(): Promise<ConnectAccount[]>;
   createAccountLink(params: NewAccountLink): Promise<string>;
   setPayoutSpeed(accountId: string, speed: PayoutSpeed): Promise<ConnectAccount>;
-  /** Null unless a debit card or bank account takes instant payouts and the platform's fee leaves something to send. */
+  /** Null unless an instant destination exists and the platform's fee is set, so net < gross. */
   instantBalance(accountId: string): Promise<InstantBalance | null>;
   createInstantPayout(params: NewInstantPayout): Promise<InstantPayout>;
   /** The PaymentIntent's `latest_charge`, which a transfer names as its `source_transaction`. */
@@ -961,7 +961,6 @@ async function fakeAccount(id: string): Promise<ConnectAccount> {
   return { ...account, payoutSpeed: account.payoutSpeed ?? null };
 }
 
-/** The connected balance, which transfers fill and instant payouts empty. */
 function fakeCredit(accountId: string, deltaMinor: number): Promise<void> {
   const name = `balance-${accountId}`;
   return locked(name, async () => fakeWrite(name, ((await fakeRead<number>(name)) ?? 0) + deltaMinor));

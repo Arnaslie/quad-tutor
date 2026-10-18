@@ -10,17 +10,21 @@ import { INSTANT_FEE, INSTANT_FEE_PERCENT } from "@/server/modules/billing/insta
 
 import { cashOutNow, type CashOutState } from "./actions";
 
-const FEE_TERMS = `Stripe charges ${INSTANT_FEE_PERCENT} (min ${formatMinor(INSTANT_FEE.minMinor)}, max ${formatMinor(INSTANT_FEE.maxMinor)}).`;
+const FEE_TERMS = `Cashing out now costs ${INSTANT_FEE_PERCENT} (min ${formatMinor(INSTANT_FEE.minMinor)}, max ${formatMinor(INSTANT_FEE.maxMinor)}).`;
 
 export function CashOut({ offer, requestId }: { offer: CashOutOffer | null; requestId: string }) {
-  const [state, action, pending] = useActionState<CashOutState, FormData>(cashOutNow, { status: "idle" });
   const [confirming, setConfirming] = useState(false);
+  const [state, action, pending] = useActionState<CashOutState, FormData>(async (previous, formData) => {
+    const next = await cashOutNow(previous, formData);
+    if (next.status === "sent") setConfirming(false);
+    return next;
+  }, { status: "idle" });
 
   if (!offer && state.status === "idle") return null;
 
   return (
     <Card className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium text-foreground">Need it sooner?</h2>
+      {offer ? <h2 className="text-sm font-medium text-foreground">Need it sooner?</h2> : null}
       {offer ? (
         <p className="text-sm text-muted">Cash out what you have now instead of waiting for your next payout. It usually lands in minutes. {FEE_TERMS}</p>
       ) : null}
@@ -35,7 +39,7 @@ export function CashOut({ offer, requestId }: { offer: CashOutOffer | null; requ
               <dd><Money minor={offer.grossMinor} currency={offer.currency} /></dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-muted">Stripe&apos;s fee</dt>
+              <dt className="text-muted">Instant fee</dt>
               <dd>−<Money minor={offer.feeMinor} currency={offer.currency} /></dd>
             </div>
             <div className="flex justify-between gap-3 font-semibold">

@@ -54,8 +54,10 @@ const COPY: Record<PayoutStage, Copy> = {
 
 export default async function TutorPayoutsPage() {
   const tutor = await requireTutor();
-  const [payouts, earnings] = await Promise.all([payoutsFor(tutor), earningsForTutor(tutor)]);
-  const offer = await cashOutOffer(payouts);
+  const [[payouts, offer], earnings] = await Promise.all([
+    payoutsFor(tutor).then(async (payouts) => [payouts, await cashOutOffer(payouts)] as const),
+    earningsForTutor(tutor),
+  ]);
   const copy = COPY[payouts.stage];
   const icon = STAGE_ICON[payouts.stage];
   const unfinished = payouts.accountId && payouts.stage === "not_started";
