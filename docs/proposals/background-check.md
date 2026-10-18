@@ -155,12 +155,13 @@ ships (production is test data until launch, `decisions.md:826-841`).
 - With no `endedBy`, `closeWithRefund` cancels sessions without recording who did it
   (`termEnd.ts:132-140`). Every ops write records the acting operator
   (`decisions.md:822-824`). The ops path cannot pass the operator as `endedBy`, because
-  `endedBy` is an `Actor` that must own the package (`termEnd.ts:106-108`) and that turns
+  `endedBy` is an `Actor` that must own the package (`termEnd.ts:113-114`) and that turns
   on the late-cancel block (`termEnd.ts:129`). So `closeWithRefund` gets a new optional
   `operatorUserId` parameter, separate from `endedBy`. It writes the operator to
   `session_booking.cancelled_by_user_id` (`schema.ts:496`) on each cancelled session and
   to `ledger_entry.recorded_by_user_id` (`schema.ts:557`) on the refund row. Both columns
-  exist, so no existing table changes. `engagement` has no ended-by column. A close that
+  exist, so no existing table changes. `LedgerWrite` and `record()` (`billing/ledger.ts:40-53`)
+  gain a `recordedByUserId` field for it. `engagement` has no ended-by column. A close that
   cancels nothing and refunds nothing moves no money, and `background_check.decided_by_user_id`
   already records who removed the tutor.
 - `closeWithRefund` still refuses while a session is past its start and unconfirmed, or
