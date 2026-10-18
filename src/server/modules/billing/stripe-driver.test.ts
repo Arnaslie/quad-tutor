@@ -7,10 +7,11 @@ import Stripe from "stripe";
 
 import { API_VERSION, stripeDriver, type Gateway } from "./stripe";
 
-type Sent = { method: string; path: string; body: URLSearchParams; idempotencyKey: string | null };
+type Sent = { method: string; path: string; body: URLSearchParams; idempotencyKey: string | null; account: string | null };
 
 const sent: Sent[] = [];
 let reply: Record<string, unknown> = {};
+let routes: Record<string, unknown> = {};
 let server: Server;
 let driver: Gateway;
 
@@ -37,9 +38,10 @@ before(async () => {
         path: request.url ?? "",
         body: new URLSearchParams(body),
         idempotencyKey: (request.headers["idempotency-key"] as string | undefined) ?? null,
+        account: (request.headers["stripe-account"] as string | undefined) ?? null,
       });
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify(reply));
+      response.end(JSON.stringify(routes[`${request.method} ${request.url?.split("?")[0]}`] ?? reply));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -119,4 +121,87 @@ test("an account paid out Mondays and Fridays is set to Fridays only, and then r
       ["POST", "/v1/accounts/acct_local", WEEKLY],
     ],
   );
+});
+
+function balance(instantAvailable: unknown[]) {
+  return { object: "balance", available: [], pending: [], livemode: false, instant_available: instantAvailable };
+}
+
+function externals(...accounts: [string, string[]][]) {
+  return {
+    object: "list",
+    url: "/v1/accounts/acct_local/external_accounts",
+    has_more: false,
+    data: accounts.map(([id, methods]) => ({ id, object: id.startsWith("card_") ? "card" : "bank_account", available_payout_methods: methods })),
+  };
+}
+
+test("the instant balance is read as the tutor's account and counts only a destination that takes instant payouts", async () => {
+  sent.length = 0;
+  routes = {
+    "GET /v1/balance": balance([
+      { amount: 10_000, currency: "usd", net_available: [{ amount: 9_825, destination: "ba_slow" }, { amount: 9_825, destination: "card_fast" }] },
+    ]),
+    "GET /v1/accounts/acct_local/external_accounts": externals(["ba_slow", ["standard"]], ["card_fast", ["standard", "instant"]]),
+  };
+  assert.deepEqual(await driver.instantBalance("acct_local"), {
+    grossMinor: 10_000,
+    netMinor: 9_825,
+    currency: "usd",
+    destination: "card_fast",
+  });
+  const read = sent.find((request) => request.path.startsWith("/v1/balance"))!;
+  assert.equal(read.account, "acct_local");
+  assert.deepEqual([...new URL(read.path, "http://local").searchParams.values()], ["instant_available.net_available"]);
+});
+
+test("no instant balance without a platform fee, an instant destination, or anything left after the fee", async () => {
+  const card = externals(["card_fast", ["standard", "instant"]]);
+  const quotes = [];
+  for (const [pot, accounts] of [
+    [{ amount: 10_000, currency: "usd" }, card],
+    [{ amount: 10_000, currency: "usd", net_available: [{ amount: 10_000, destination: "card_fast" }] }, card],
+    [{ amount: 10_000, currency: "usd", net_available: [{ amount: 9_825, destination: "ba_slow" }] }, externals(["ba_slow", ["standard"]])],
+    [{ amount: 80, currency: "usd", net_available: [{ amount: 0, destination: "card_fast" }] }, card],
+  ] as const) {
+    routes = { "GET /v1/balance": balance([pot]), "GET /v1/accounts/acct_local/external_accounts": accounts };
+    quotes.push(await driver.instantBalance("acct_local"));
+  }
+  assert.deepEqual(quotes, [null, null, null, null]);
+});
+
+test("an instant payout is created on the tutor's account with its key and campus", async () => {
+  sent.length = 0;
+  routes = {
+    "POST /v1/payouts": { id: "po_local", object: "payout", amount: 9_825, currency: "usd", destination: "card_fast", status: "pending", method: "instant" },
+  };
+  const payout = await driver.createInstantPayout({
+    accountId: "acct_local",
+    amountMinor: 9_825,
+    currency: "usd",
+    destination: "card_fast",
+    tutorProfileId: "tp_1",
+    institutionId: "inst_1",
+    idempotencyKey: "instant-payout:acct_local:req_1",
+  });
+  assert.deepEqual(
+    sent.map(({ method, path, body, idempotencyKey, account }) => [method, path, Object.fromEntries(body), idempotencyKey, account]),
+    [
+      [
+        "POST",
+        "/v1/payouts",
+        {
+          amount: "9825",
+          currency: "usd",
+          method: "instant",
+          destination: "card_fast",
+          "metadata[tutor_profile_id]": "tp_1",
+          "metadata[institution_id]": "inst_1",
+        },
+        "instant-payout:acct_local:req_1",
+        "acct_local",
+      ],
+    ],
+  );
+  assert.deepEqual(payout, { id: "po_local", amountMinor: 9_825, currency: "usd", destination: "card_fast", status: "pending" });
 });

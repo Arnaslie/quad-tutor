@@ -5,6 +5,7 @@ import path from "node:path";
 
 import Stripe from "stripe";
 
+import { INSTANT_FEE } from "./instant-fee";
 import { DEFAULT_PAYOUT_SPEED, type PayoutSpeed } from "./payout-speed";
 
 export const API_VERSION = "2026-09-30.endive";
@@ -180,6 +181,21 @@ export type ConnectAccount = {
 
 export type NewAccountLink = { accountId: string; refreshUrl: string; returnUrl: string };
 
+/** What an instant payout to `destination` would take from the balance (`grossMinor`) and deliver (`netMinor`). */
+export type InstantBalance = { grossMinor: number; netMinor: number; currency: string; destination: string };
+
+export type NewInstantPayout = {
+  accountId: string;
+  amountMinor: number;
+  currency: string;
+  destination: string;
+  tutorProfileId: string;
+  institutionId: string;
+  idempotencyKey: string;
+};
+
+export type InstantPayout = { id: string; amountMinor: number; currency: string; destination: string | null; status: string };
+
 export type Gateway = {
   livemode: boolean;
   createCheckout(params: NewCheckout): Promise<CheckoutSession>;
@@ -198,6 +214,9 @@ export type Gateway = {
   listAccounts(): Promise<ConnectAccount[]>;
   createAccountLink(params: NewAccountLink): Promise<string>;
   setPayoutSpeed(accountId: string, speed: PayoutSpeed): Promise<ConnectAccount>;
+  /** Null unless a debit card or bank account takes instant payouts and the platform's fee leaves something to send. */
+  instantBalance(accountId: string): Promise<InstantBalance | null>;
+  createInstantPayout(params: NewInstantPayout): Promise<InstantPayout>;
   /** The PaymentIntent's `latest_charge`, which a transfer names as its `source_transaction`. */
   chargeOf(paymentIntentId: string): Promise<string | null>;
   createTransfer(params: NewTransfer): Promise<Transfer>;
@@ -498,6 +517,43 @@ export function stripeDriver(stripe: Stripe, livemode = false): Gateway {
       call(async () =>
         accountView(await stripe.accounts.update(accountId, { settings: { payouts: { schedule: PAYOUT_SCHEDULES[speed] } } })),
       ),
+    instantBalance: (accountId) =>
+      call(async () => {
+        const [balance, externals] = await Promise.all([
+          stripe.balance.retrieve({ expand: ["instant_available.net_available"] }, { stripeAccount: accountId }),
+          stripe.accounts.listExternalAccounts(accountId, { limit: 100 }),
+        ]);
+        const instant = new Set(
+          externals.data.filter((external) => external.available_payout_methods?.includes("instant")).map((external) => external.id),
+        );
+        for (const pot of balance.instant_available ?? []) {
+          const net = pot.net_available?.find((entry) => instant.has(entry.destination) && entry.amount > 0);
+          if (net && net.amount < pot.amount) {
+            return { grossMinor: pot.amount, netMinor: net.amount, currency: pot.currency, destination: net.destination };
+          }
+        }
+        return null;
+      }),
+    createInstantPayout: (params) =>
+      call(async () => {
+        const payout = await stripe.payouts.create(
+          {
+            amount: params.amountMinor,
+            currency: params.currency,
+            method: "instant",
+            destination: params.destination,
+            metadata: { tutor_profile_id: params.tutorProfileId, institution_id: params.institutionId },
+          },
+          { stripeAccount: params.accountId, idempotencyKey: params.idempotencyKey },
+        );
+        return {
+          id: payout.id,
+          amountMinor: payout.amount,
+          currency: payout.currency,
+          destination: idOf(payout.destination),
+          status: payout.status,
+        };
+      }),
   };
 }
 
@@ -724,6 +780,52 @@ const fakeGateway: Gateway = {
     return `${new URL(params.returnUrl).origin}/api/dev/connect/${id}`;
   },
   setPayoutSpeed: (accountId, speed) => fakeSchedule(accountId, speed),
+  async instantBalance(accountId) {
+    await fakeAccount(accountId);
+    const destination = await fakeRead<string>(`debit-card-${accountId}`);
+    const grossMinor = (await fakeRead<number>(`balance-${accountId}`)) ?? 0;
+    const feeMinor = Math.min(
+      INSTANT_FEE.maxMinor,
+      Math.max(INSTANT_FEE.minMinor, Math.round((grossMinor * INSTANT_FEE.basisPoints) / 10_000)),
+    );
+    if (!destination || grossMinor - feeMinor <= 0) return null;
+    return { grossMinor, netMinor: grossMinor - feeMinor, currency: "usd", destination };
+  },
+  createInstantPayout(params) {
+    const key = `idem-instant-payout:${params.idempotencyKey}`;
+    return locked(key, async () => {
+      const sent = JSON.stringify({ ...params, idempotencyKey: undefined });
+      const replay = await fakeRead<{ payout: InstantPayout; params: string; at: number }>(key);
+      if (replay && Date.now() - replay.at < IDEMPOTENCY_TTL_MS) {
+        if (replay.params !== sent) {
+          throw new GatewayError(
+            "Keys for idempotent requests can only be used with the same parameters they were first used with.",
+            { status: 400, idempotency: true },
+          );
+        }
+        return replay.payout;
+      }
+      return locked(`balance-${params.accountId}`, async () => {
+        const offer = await fakeGateway.instantBalance(params.accountId);
+        if (!offer || offer.destination !== params.destination || params.amountMinor !== offer.netMinor) {
+          throw new GatewayError("You have insufficient funds in your Stripe account for this transfer.", {
+            status: 400,
+            code: "balance_insufficient",
+          });
+        }
+        const payout: InstantPayout = {
+          id: `po_fake_${randomUUID().replaceAll("-", "")}`,
+          amountMinor: params.amountMinor,
+          currency: params.currency,
+          destination: params.destination,
+          status: "in_transit",
+        };
+        await fakeWrite(`balance-${params.accountId}`, 0);
+        await fakeWrite(key, { payout, params: sent, at: Date.now() });
+        return payout;
+      });
+    });
+  },
   async chargeOf(paymentIntentId) {
     if (!(await fakeRead<FakePayment>(paymentIntentId))) throw missing("payment_intent", paymentIntentId);
     return paymentIntentId.replace(/^pi_/, "ch_");
@@ -831,6 +933,7 @@ function fakeCreateTransfer(params: NewTransfer): Promise<Transfer> {
       };
       const group = (await fakeRead<string[]>(`transfer-group-${params.engagementId}`)) ?? [];
       await fakeWrite(transfer.id, transfer);
+      await fakeCredit(params.accountId, params.amountMinor);
       await fakeWrite(`transfer-charge-${params.chargeId}`, [...onCharge, transfer.id]);
       await fakeWrite(`transfer-group-${params.engagementId}`, [...group, transfer.id]);
       await fakeWrite(key, { transfer, error: null, params: sent, at: Date.now() });
@@ -856,6 +959,12 @@ async function fakeAccount(id: string): Promise<ConnectAccount> {
   const account = await fakeRead<ConnectAccount>(id);
   if (!account) throw missing("account", id);
   return { ...account, payoutSpeed: account.payoutSpeed ?? null };
+}
+
+/** The connected balance, which transfers fill and instant payouts empty. */
+function fakeCredit(accountId: string, deltaMinor: number): Promise<void> {
+  const name = `balance-${accountId}`;
+  return locked(name, async () => fakeWrite(name, ((await fakeRead<number>(name)) ?? 0) + deltaMinor));
 }
 
 function fakeSchedule(id: string, payoutSpeed: PayoutSpeed | null): Promise<ConnectAccount> {
@@ -1014,6 +1123,14 @@ export const fakeStripe = {
     assertNotProduction();
     return fakeSchedule(id, speed);
   },
+  /** Plays the tutor adding a debit card that takes instant payouts. */
+  async addDebitCard(id: string): Promise<string> {
+    assertNotProduction();
+    await fakeAccount(id);
+    const card = `card_fake_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+    await fakeWrite(`debit-card-${id}`, card);
+    return card;
+  },
   /** A signed Connect `account.updated`; `object` lets tests send a stale payload. */
   async accountEvent(id: string, object?: ConnectAccount): Promise<{ payload: string; signature: string }> {
     assertNotProduction();
@@ -1158,6 +1275,7 @@ export const fakeStripe = {
       }
       const reversed = { ...transfer, reversals: [...transfer.reversals, reversal], reversedMinor: transfer.reversedMinor + reversal.amountMinor };
       await fakeWrite(id, reversed);
+      if (transfer.destination) await fakeCredit(transfer.destination, -reversal.amountMinor);
       return reversed;
     });
   },
@@ -1180,6 +1298,7 @@ export const fakeStripe = {
     const group = `transfer-group-${params.engagementId}`;
     return locked(group, async () => {
       await fakeWrite(transfer.id, transfer);
+      await fakeCredit(params.accountId, params.amountMinor);
       await fakeWrite(group, [...((await fakeRead<string[]>(group)) ?? []), transfer.id]);
       return transfer;
     });
