@@ -29,7 +29,7 @@ import { rateSession } from "@/server/modules/ratings/capture";
 import { sessionRatingState } from "@/server/modules/ratings/reads";
 
 import { confirmAttendance } from "./confirmation";
-import { packagesForStudent } from "./reads";
+import { packagesForStudent, sessionDetail } from "./reads";
 import { cancelSession, sessionsRemaining } from "./scheduling";
 import { endPackage } from "./termEnd";
 
@@ -166,7 +166,7 @@ test("a student cancel 24 hours or more ahead moves no money and the session goe
   const id = await pkg(student);
   const sessionId = await session(id, hours(30));
 
-  assert.deepEqual(await cancelSession({ actor: student, sessionId }), { late: false, keptMinor: 0, refund: null });
+  assert.deepEqual(await cancelSession({ actor: student, sessionId }), { late: false, keptMinor: 0, returnedMinor: 3_500, currency: "usd", refund: null });
   assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
   assert.equal(await left(id), 4);
   assert.deepEqual(await facts(student), []);
@@ -177,7 +177,7 @@ test("a student cancel 12 to 24 hours ahead of a $35 session pays the tutor half
   const id = await pkg(student);
   const sessionId = await session(id, hours(20));
 
-  assert.deepEqual(await cancelSession({ actor: student, sessionId }), { late: false, keptMinor: 1_750, refund: null });
+  assert.deepEqual(await cancelSession({ actor: student, sessionId }), { late: false, keptMinor: 1_750, returnedMinor: 1_750, currency: "usd", refund: null });
   assert.deepEqual(await ledger(id), [
     { type: "package_purchase", amountMinor: 14_000 },
     { type: "platform_fee", amountMinor: 175 },
@@ -199,7 +199,7 @@ test("a student cancel inside 12 hours pays the tutor three quarters and is a la
   const id = await pkg(student);
   const sessionId = await session(id, hours(5));
 
-  assert.deepEqual(await cancelSession({ actor: student, sessionId }), { late: true, keptMinor: 2_625, refund: null });
+  assert.deepEqual(await cancelSession({ actor: student, sessionId }), { late: true, keptMinor: 2_625, returnedMinor: 875, currency: "usd", refund: null });
   assert.deepEqual(await ledger(id), [
     { type: "package_purchase", amountMinor: 14_000 },
     { type: "platform_fee", amountMinor: 262 },
@@ -215,7 +215,7 @@ test("a tutor cancel at the last minute costs the student nothing and the sessio
   const id = await pkg(student);
   const sessionId = await session(id, hours(1));
 
-  assert.deepEqual(await cancelSession({ actor: tutor, sessionId }), { late: true, keptMinor: 0, refund: null });
+  assert.deepEqual(await cancelSession({ actor: tutor, sessionId }), { late: true, keptMinor: 0, returnedMinor: 3_500, currency: "usd", refund: null });
   assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
   assert.equal(await left(id), 4);
   assert.deepEqual(await facts(student), []);
@@ -225,6 +225,7 @@ test("cancelling the only session of a single inside 24 hours closes it and refu
   const student = await person();
   const id = await pkg(student, "top_up");
   const sessionId = await session(id, hours(20));
+  assert.equal((await sessionDetail({ actor: student, sessionId })).lastInPackage, true, "the form says the money comes back now");
 
   const outcome = await cancelSession({ actor: student, sessionId });
   assert.equal(outcome.keptMinor, 1_750);
@@ -257,6 +258,7 @@ test("a cancel that leaves another session booked keeps the package open", async
   for (const h of [-300, -200]) await attended(id, hours(h));
   const soon = await session(id, hours(20));
   await session(id, hours(72));
+  assert.equal((await sessionDetail({ actor: student, sessionId: soon })).lastInPackage, false, "the form says it waits for the package to end");
 
   assert.equal((await cancelSession({ actor: student, sessionId: soon })).refund, null);
   assert.equal(await statusOf(id), "active");

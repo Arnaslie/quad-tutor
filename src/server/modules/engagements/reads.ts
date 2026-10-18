@@ -20,6 +20,7 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import {
   asRequestedKind,
   bookAgainOpen,
+  perSessionMinor,
   type PackageKind,
   type RequestedKind,
 } from "@/server/modules/billing/pricing";
@@ -550,6 +551,9 @@ export type SessionDetail = SessionListItem & {
   sessionsPurchased: number;
 
   sessionsRemaining: number;
+  sessionMinor: number;
+  currency: string;
+  lastInPackage: boolean;
 };
 
 export async function sessionDetail(params: {
@@ -564,6 +568,20 @@ export async function sessionDetail(params: {
     actor: params.actor,
   });
 
+  const [remaining, [others]] = await Promise.all([
+    sessionsRemaining({ engagementId: row.engagementId, sessionsPurchased: row.sessionsPurchased }),
+    db
+      .select({ open: sql<number>`count(*)::int` })
+      .from(sessionBooking)
+      .where(
+        and(
+          eq(sessionBooking.engagementId, row.engagementId),
+          ne(sessionBooking.id, row.sessionId),
+          inArray(sessionBooking.status, ["held", "scheduled", "disputed"]),
+        ),
+      ),
+  ]);
+
   return {
     ...toListItem(row, row.role, now),
     courseId: row.courseId,
@@ -573,10 +591,10 @@ export async function sessionDetail(params: {
     denialNote: row.denialNote,
     viewerRole: row.role,
     sessionsPurchased: row.sessionsPurchased,
-    sessionsRemaining: await sessionsRemaining({
-      engagementId: row.engagementId,
-      sessionsPurchased: row.sessionsPurchased,
-    }),
+    sessionsRemaining: remaining,
+    sessionMinor: perSessionMinor(row),
+    currency: row.currency,
+    lastInPackage: remaining === 0 && others.open === 0,
   };
 }
 

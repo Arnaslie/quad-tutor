@@ -313,25 +313,37 @@ export async function cancel(
   const parsed = cancelSessionInput.safeParse({ sessionId: formData.get("sessionId") });
   if (!parsed.success) return { ok: false, error: "That session no longer exists." };
 
-  let late: boolean;
+  let outcome: Awaited<ReturnType<typeof cancelSession>>;
   try {
-    const result = await cancelSession({ actor, sessionId: parsed.data.sessionId });
-    late = result.late;
+    outcome = await cancelSession({ actor, sessionId: parsed.data.sessionId });
   } catch (error) {
     return toResult(error);
   }
 
+  if (outcome.refund?.refundMinor) refundAfterCommit(outcome.refund.engagementId, actor.institutionId);
   notifySessionChangesSoon(actor.institutionId);
   revalidateStanding();
   revalidatePath("/sessions");
   revalidatePath(`/sessions/${parsed.data.sessionId}`);
 
-  return {
-    ok: true,
-    message: late
-      ? "Cancelled. The session goes back in your package and you can rebook it."
-      : "Cancelled. The session goes back in your package.",
-  };
+  return { ok: true, message: cancelledMessage(outcome) };
+}
+
+function cancelledMessage(outcome: Awaited<ReturnType<typeof cancelSession>>): string {
+  if (outcome.keptMinor === 0) return "Cancelled. The session goes back in your package.";
+  if (outcome.refund) {
+    return `Cancelled. ${formatMinor(outcome.refund.refundMinor, outcome.refund.currency)} is on its way back to you.`;
+  }
+  return `Cancelled. ${formatMinor(outcome.returnedMinor, outcome.currency)} goes back to you when the package ends.`;
+}
+
+function refundAfterCommit(engagementId: string, institutionId: string): void {
+  const ids = { engagementId, institutionId };
+  after(() =>
+    refundThroughStripe(ids).catch((error) =>
+      console.error(`[refund] ${ids.engagementId} left for the retry sweep`, errorFacts(error)),
+    ),
+  );
 }
 
 export async function endEarly(
@@ -351,12 +363,7 @@ export async function endEarly(
   }
   if (!refund) return { ok: false, error: "That package is already closed." };
 
-  const ids = { engagementId: parsed.data.engagementId, institutionId: actor.institutionId };
-  after(() =>
-    refundThroughStripe(ids).catch((error) =>
-      console.error(`[refund] ${ids.engagementId} left for the retry sweep`, errorFacts(error)),
-    ),
-  );
+  refundAfterCommit(parsed.data.engagementId, actor.institutionId);
   notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   revalidatePath("/sessions/[id]", "page");

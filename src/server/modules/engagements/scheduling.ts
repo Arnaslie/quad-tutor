@@ -171,6 +171,8 @@ export async function bookSession(params: {
 export type CancelOutcome = {
   late: boolean;
   keptMinor: number;
+  returnedMinor: number;
+  currency: string;
   refund: TermEndRefund | null;
 };
 
@@ -198,7 +200,7 @@ export async function cancelSession(params: {
     }
 
     const late = isLateCancel(session.scheduledAt, now);
-    const { keptMinor } = cancelSplit(
+    const { keptMinor, returnedMinor } = cancelSplit(
       perSessionMinor(session),
       hoursBefore(session.scheduledAt, now),
       session.role,
@@ -233,7 +235,13 @@ export async function cancelSession(params: {
       });
     }
 
-    return { late, keptMinor, engagementId: session.engagementId };
+    return {
+      late,
+      keptMinor,
+      returnedMinor,
+      currency: session.currency,
+      engagementId: session.engagementId,
+    };
   });
 
   // Its own transaction, so the engagement is locked before its sessions as the term-end sweep does.
@@ -249,7 +257,13 @@ export async function cancelSession(params: {
           })
       : null;
 
-  return { late: cancelled.late, keptMinor: cancelled.keptMinor, refund };
+  return {
+    late: cancelled.late,
+    keptMinor: cancelled.keptMinor,
+    returnedMinor: cancelled.returnedMinor,
+    currency: cancelled.currency,
+    refund,
+  };
 }
 
 export async function setSessionLocation(params: {

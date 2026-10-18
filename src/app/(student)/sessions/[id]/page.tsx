@@ -113,6 +113,12 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
         otherPartyName={otherParty}
         yourAnswer={session.yourAnswer}
         theirAnswer={session.theirAnswer}
+        price={{
+          scheduledAt: session.scheduledAt,
+          sessionMinor: session.sessionMinor,
+          currency: session.currency,
+          lastInPackage: session.lastInPackage,
+        }}
       />
 
       {session.action === "confirm_or_deny" && session.confirmationWindowEndsAt ? (
