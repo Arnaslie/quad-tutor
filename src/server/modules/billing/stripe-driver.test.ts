@@ -98,9 +98,10 @@ test("a schedule this app doesn't offer reads as no speed, so a sync replaces it
     { interval: "weekly", weekly_anchor: "monday" },
     { interval: "weekly", weekly_anchor: "friday", weekly_payout_days: ["monday", "friday"] },
     { interval: "weekly", weekly_payout_days: ["friday"] },
+    { interval: "weekly", weekly_anchor: "friday", weekly_payout_days: [] },
   ]) {
     reply = account(schedule);
     speeds.push((await driver.retrieveAccount("acct_local")).payoutSpeed);
   }
-  assert.deepEqual(speeds, [null, null, null, null, "weekly"]);
+  assert.deepEqual(speeds, [null, null, null, null, "weekly", "weekly"]);
 });

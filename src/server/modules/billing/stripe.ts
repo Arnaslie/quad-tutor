@@ -241,7 +241,7 @@ const PAYOUT_SCHEDULES = {
 
 function speedOf(schedule: Stripe.Account.Settings.Payouts.Schedule | undefined): PayoutSpeed | null {
   if (schedule?.interval === "daily") return "daily";
-  const days = schedule?.weekly_payout_days ?? (schedule?.weekly_anchor ? [schedule.weekly_anchor] : []);
+  const days = schedule?.weekly_payout_days?.length ? schedule.weekly_payout_days : schedule?.weekly_anchor ? [schedule.weekly_anchor] : [];
   if (schedule?.interval === "weekly" && days.length === 1 && days[0] === "friday") return "weekly";
   return null;
 }

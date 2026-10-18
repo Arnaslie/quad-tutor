@@ -739,32 +739,33 @@ row. A flag naming an unstamped refund or transfer row can only be settled, neve
 resolved: resolved, the row would stay stopped, unsent and unstamped for good, and the
 transfer sweep would count it as sent.
 
-**Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
-Transfers go per engagement once the tutor is verified and the engagement has no open
-discrepancy or dispute. Refunds return only undelivered sessions, so none needs a
-reversal. Bank payouts are weekly unless the tutor picks daily (below). Reversals are an
-ops tool. A reversal books a `transfer_reversal` row and leaves that money owed to the tutor until ops acts; the sweep
-never re-sends it. Ops answers each reversal once, on `/ops/money`, with a `tutor_transfer`
-row of its amount whose `corrects_entry_id` names it; a unique index on that column makes a
-second answer a refusal. Re-send leaves the row unstamped and sends it after commit, with
-the sweep as backstop, and is refused while the engagement is paused. Paid by hand stamps
-it `manual:<reversal id>`; written off stamps it `forfeited:<reversal id>`. The sweep's
-owed amount leaves out both the reversal and its answer, so the two cancel and a later
-accrual goes out at its own amount. Earnings count `tr_…` and `manual:…` as transferred,
-less reversals, and `forfeited:…` as neither transferred nor owed.
+**Tutor pay moves in the sweep, not inline, and is never clawed back by code.** Transfers
+go per engagement once the tutor is verified and the engagement has no open discrepancy or
+dispute. Refunds return only undelivered sessions, so none needs a reversal. Bank payouts
+are weekly unless the tutor picks daily (below). Reversals are an ops tool. A reversal
+books a `transfer_reversal` row and leaves that money owed to the tutor until ops acts;
+the sweep never re-sends it. Ops answers each reversal once, on `/ops/money`, with a
+`tutor_transfer` row of its amount whose `corrects_entry_id` names it; a unique index on
+that column makes a second answer a refusal. Re-send leaves the row unstamped and sends it
+after commit, with the sweep as backstop, and is refused while the engagement is paused.
+Paid by hand stamps it `manual:<reversal id>`; written off stamps it `forfeited:<reversal
+id>`. The sweep's owed amount leaves out both the reversal and its answer, so the two
+cancel and a later accrual goes out at its own amount. Earnings count `tr_…` and
+`manual:…` as transferred, less reversals, and `forfeited:…` as neither transferred nor
+owed.
 
-**KYC never blocks an accept.** An unverified tutor's pay accrues and
-waits, and the student's sessions proceed. Hiding unverified tutors from decks was
-rejected: they would never get the accept that triggers onboarding. The Express account is created
-when the tutor starts payout setup from `/tutor/payouts` (its button, or Stripe's
-`refresh_url`), never on viewing the page and never inside an accept, with transfers only
-and a weekly payout schedule (Fridays); onboarding collects `eventually_due` fields up
-front so a later threshold doesn't restrict the account. `kyc_status` is re-derived from Stripe's
-account on every `account.updated` and every view of that page, never from the event
-payload. An account the tutor hasn't submitted is `not_started` even though Stripe lists
-its fields as past due; one Stripe is still reviewing (`pending_verification`,
-`under_review`) is `pending`, since the tutor has nothing to fix; any other disabled
-reason or past-due field is `restricted`.
+**KYC never blocks an accept.** An unverified tutor's pay accrues and waits, and the
+student's sessions proceed. Hiding unverified tutors from decks was rejected: they would
+never get the accept that triggers onboarding. The Express account is created when the
+tutor starts payout setup from `/tutor/payouts` (its button, or Stripe's `refresh_url`),
+never on viewing the page and never inside an accept, with transfers only and a weekly
+payout schedule (Fridays); onboarding collects `eventually_due` fields up front so a later
+threshold doesn't restrict the account. `kyc_status` is re-derived from Stripe's account
+on every `account.updated` and every view of that page, never from the event payload. An
+account the tutor hasn't submitted is `not_started` even though Stripe lists its fields as
+past due; one Stripe is still reviewing (`pending_verification`, `under_review`) is
+`pending`, since the tutor has nothing to fix; any other disabled reason or past-due field
+is `restricted`.
 
 **Bank payouts are weekly by default, and daily is free too (2026-10-18, the owner's
 request).** Each tutor has a `payout_speed`: `weekly` (the default, every Friday) or
@@ -784,13 +785,13 @@ read of the account does it: each `account.updated`, each view of `/tutor/payout
 re-check, so the cron now writes to Connect accounts too. Each compares the schedule with
 the stored speed and calls Stripe only when they differ. An update whose answer still does
 not read as the stored speed is logged as "did not take", so an account that never settles
-shows up rather than retrying silently. No
-row lock is held across that call. Accounts made while payouts were daily move to weekly
-this way, with no script. A schedule this app does not offer, such as `manual` set in a
-Dashboard, reads as no speed and is put back. The update carries no fixed idempotency key:
-it sets an absolute value, so a repeat is harmless, while a key per speed would replay a
-stale answer after a switch back within 24 hours. A failed schedule update is logged and
-never blocks the KYC sync; the next event or view tries again.
+shows up rather than retrying silently. No row lock is held across that call. Accounts
+made while payouts were daily move to weekly this way, with no script. A schedule this app
+does not offer, such as `manual` set in a Dashboard, reads as no speed and is put back.
+The update carries no fixed idempotency key: it sets an absolute value, so a repeat is
+harmless, while a key per speed would replay a stale answer after a switch back within 24
+hours. A failed schedule update is logged and never blocks the KYC sync; the next event or
+view tries again.
 
 **A chargeback is recorded, not judged.** It pauses that engagement's
 transfers and goes to ops; it writes no reliability fact on its own. Each dispute event
