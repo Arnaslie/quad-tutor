@@ -481,6 +481,8 @@ test("the daily pass puts every held account on its tutor's stored speed, and le
   await fakeStripe.setPayoutSchedule(daily.id, "daily");
   const stray = await stripeGateway().createAccount({ tutorProfileId: randomUUID(), institutionId: w.institutionId, email: "stray@example.test" });
   await fakeStripe.setPayoutSchedule(stray.id, null);
+  const elsewhere = await world();
+  await fakeStripe.setPayoutSchedule(elsewhere.accountId, "daily");
 
   const calls: [string, string][] = [];
   const real = stripeGateway().setPayoutSpeed;
@@ -493,8 +495,34 @@ test("the daily pass puts every held account on its tutor's stored speed, and le
     assert.deepEqual(await reconcile(w), counts(0));
   });
   assert.deepEqual(calls, [[w.accountId, "weekly"]]);
-  const speeds = await Promise.all([w.accountId, daily.id, stray.id].map(async (id) => (await stripeGateway().retrieveAccount(id)).payoutSpeed));
-  assert.deepEqual(speeds, ["weekly", "daily", null]);
+  const speeds = await Promise.all(
+    [w.accountId, daily.id, stray.id, elsewhere.accountId].map(async (id) => (await stripeGateway().retrieveAccount(id)).payoutSpeed),
+  );
+  assert.deepEqual(speeds, ["weekly", "daily", null, "daily"]);
+});
+
+test("the deadline stops the speed sync between accounts, and the next cron run moves the rest", async (t) => {
+  const w = await world();
+  const late = await person(w.institutionId);
+  const other = await stripeGateway().createAccount({ tutorProfileId: randomUUID(), institutionId: w.institutionId, email: "other@example.test" });
+  await db.insert(tutorProfile).values({ userId: late.userId, institutionId: w.institutionId, stripeAccountId: other.id });
+  const legacy = [w.accountId, other.id];
+  for (const id of legacy) await fakeStripe.setPayoutSchedule(id, "daily");
+
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const calls: string[] = [];
+  const real = stripeGateway().setPayoutSpeed;
+  await patched("setPayoutSpeed", (accountId, speed) => {
+    calls.push(accountId);
+    t.mock.timers.tick(400);
+    return real(accountId, speed);
+  }, async () => {
+    await runReconciliation(w.institutionId, Date.now() + 300);
+    assert.equal(calls.length, 1, "the deadline stopped the sync after the first account");
+    await reconcile(w);
+  });
+  assert.deepEqual(calls.toSorted(), legacy.toSorted());
+  for (const id of legacy) assert.equal((await stripeGateway().retrieveAccount(id)).payoutSpeed, "weekly");
 });
 
 test("an orphaned account's flag that resolved itself reopens once no tutor holds the account again, and one ops resolved stays resolved", async () => {

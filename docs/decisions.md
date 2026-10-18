@@ -793,8 +793,8 @@ Dashboard or Monday and Friday, reads as no speed and is put back. The weekly up
 both `weekly_anchor` and `weekly_payout_days` to Friday, since a read checks the days
 first. The update carries no fixed idempotency key: it sets an absolute value, so a repeat
 is harmless, while a key per speed would replay a stale answer after a switch back within
-24 hours. A failed schedule update is logged and never blocks the KYC sync; the next event
-or view tries again.
+24 hours. A failed schedule update is logged and never blocks the KYC sync; the next
+event, view or daily pass tries again.
 
 **A chargeback is recorded, not judged.** It pauses that engagement's
 transfers and goes to ops; it writes no reliability fact on its own. Each dispute event

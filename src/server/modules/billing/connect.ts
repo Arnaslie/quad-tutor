@@ -53,7 +53,7 @@ export async function onboardingLink(actor: TutorActor): Promise<string> {
   });
 }
 
-async function convergeSpeed(account: ConnectAccount, speed: PayoutSpeed): Promise<void> {
+export async function convergeSpeed(account: ConnectAccount, speed: PayoutSpeed): Promise<void> {
   if (account.payoutSpeed === speed) return;
   try {
     const updated = await stripeGateway().setPayoutSpeed(account.id, speed);
@@ -65,10 +65,12 @@ async function convergeSpeed(account: ConnectAccount, speed: PayoutSpeed): Promi
   }
 }
 
-/** Puts every account this campus holds on its tutor's stored speed, so one nobody reads still moves. */
-export async function convergeSpeeds(institutionId: string, accounts: ConnectAccount[]): Promise<void> {
+export type OffSpeed = { account: ConnectAccount; speed: PayoutSpeed };
+
+/** Each account this campus holds whose schedule is not its tutor's stored speed. */
+export async function accountsOffSpeed(institutionId: string, accounts: ConnectAccount[]): Promise<OffSpeed[]> {
   const ours = accounts.filter((account) => account.institutionId === institutionId);
-  if (ours.length === 0) return;
+  if (ours.length === 0) return [];
   const held = await db
     .select({ accountId: tutorProfile.stripeAccountId, speed: tutorProfile.payoutSpeed })
     .from(tutorProfile)
@@ -82,10 +84,10 @@ export async function convergeSpeeds(institutionId: string, accounts: ConnectAcc
       ),
     );
   const speeds = new Map(held.map((row) => [row.accountId, row.speed]));
-  for (const account of ours) {
+  return ours.flatMap((account) => {
     const speed = speeds.get(account.id);
-    if (speed) await convergeSpeed(account, speed);
-  }
+    return speed && speed !== account.payoutSpeed ? [{ account, speed }] : [];
+  });
 }
 
 async function applyAccount(account: ConnectAccount, institutionId: string): Promise<KycStatus | null> {
