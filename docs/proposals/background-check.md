@@ -9,10 +9,11 @@ that commit. This is not legal advice. It is a research summary to take to a law
 The owner asked to "implement a background check for tutors in the same phase that they
 upload transcript to provide credibility for course mentoring."
 
-`docs/decisions.md` rejects this today (Rejected, line 888): "They buy nothing once
-minors are out of scope. `.edu` verification plus per-course grade proof replaces them."
-Building it means reversing that entry first, so this proposal asks for the reversal and
-sets out what the build would be.
+`docs/decisions.md` rules this out in two places. The Rejected entry (line 888) says
+"They buy nothing once minors are out of scope. `.edu` verification plus per-course
+grade proof replaces them." The Product entry (lines 16-18) lists background checks among
+what "no minors" removes from scope. Building it means editing both first, so this
+proposal asks for the reversal and sets out what the build would be.
 
 ## Reverse the rejection for safety, not credibility
 
@@ -25,9 +26,10 @@ Safety is the reason that holds. Sessions are one-on-one and in person, at a spo
 tutor picks (`decisions.md:256`, "The tutor owns the meeting spot"). Two adults who met
 through our deck sit alone together. A check that screens for sex and violent offenses
 is a fair thing for a student to expect before that meeting. The rejection was written
-when minors left scope, and it did not weigh this case. The reversal entry should say
-that `.edu` and grade proof still prove who the tutor is and that they can teach, and
-that the check answers a different question.
+when minors left scope, and it did not weigh this case. The Product entry at lines 16-18
+should say checks were removed with minors and brought back for safety. The reversal
+entry should say that `.edu` and grade proof still prove who the tutor is and that they
+can teach, and that the check answers a different question.
 
 ## Recommendation
 
@@ -37,22 +39,30 @@ A county search costs $25 more when the database search points to a county. We c
 candidate with only an email address and send an invite. On Checkr's page the tutor types
 their own details and signs the disclosure and authorization. We store a status, vendor
 ids and timestamps. We never store an SSN, a date of birth, an address history or any part
-of the report. Checkr's free staging environment returns fixed mock people, which fits
-the real and fake drivers `billing/stripe.ts` already uses. Stripe cannot stand in. Connect
-KYC runs no criminal search, and Stripe Identity's terms forbid FCRA-type decisions. Certn is cheaper ($13.99
-plus $9.99 per county) but Canada-first with a 72-hour average, so it stays the fallback
-behind the same gateway.
+of the report. Checkr's docs say its free staging environment returns fixed mock people
+(unverified), which would fit the real and fake drivers `billing/stripe.ts` already uses.
+Stripe cannot stand in. Connect KYC runs no criminal search, and Stripe's Identity
+use-case page forbids FCRA-type decisions (per that page, unverified). Certn is cheaper
+($13.99 plus $9.99 per county) but Canada-first, with a 72-hour average per its own page
+(unverified), so it stays the fallback behind the same gateway.
 
-**The platform pays.** About $35 per tutor on average. At a take of $1.75 to $3.50 per
-session, that pays back in 10 to 20 sessions. A $30 fee before a student tutor earns
-anything would cost supply on a new campus, and charging the person checked is a lawyer
-question.
+**The platform pays.** About $35 per tutor on average. That figure assumes about 1 in 5
+tutors needs a $25 county search, plus a few dollars of court fees. The 1 in 5 is an
+assumption, not a measured rate. The platform also absorbs card processing, about $1.10 a
+session on a $140 four-pack (`decisions.md:169-172`). So the net take on a $35 session is
+about $2.40 below the $100 fee milestone and about $0.65 past it. A first check pays back
+in about 15 sessions, because a $35 tutor's first 29 or so sessions sit below the
+milestone. A re-check for a tutor past the milestone takes about 54. A $30 fee before a
+student tutor earns anything would cost supply on a new campus, and charging the person
+checked is a lawyer question.
 
 **Consent at the first proof upload. Invite only after that first grade proof is
 approved.** The proof form gets a required "I agree to a background check" box the first
-time a tutor uploads proof. Ticking it records consent. The Checkr invite goes out only
-when an operator approves that first grade proof. A tutor whose grade proof is rejected
-costs nothing.
+time a tutor uploads proof. Ticking it records that the tutor agreed to be sent a check.
+The box is notice only. It is not the FCRA disclosure or authorization, which must stand
+alone on Checkr's page, so the box carries one plain line and no legal text. The Checkr
+invite goes out only when an operator approves that first grade proof. A tutor whose
+grade proof is rejected costs nothing.
 
 This bends "same step." The tutor agrees on the proof page, but signs and types their SSN
 on Checkr's page later, usually from an email a day or so after upload. That is a second
@@ -68,7 +78,11 @@ course's proof does not start another one.
 nothing, and a missing one would read as "didn't pass" (`decisions.md:906-909` makes the
 same point about badges). Students see one platform-wide sentence instead, for example
 "Every tutor passes a criminal background check before they can list," linked to a short
-page on what the check covers and what it misses.
+page on what the check covers and what it misses. The sentence ships only when it is
+true. It is false if `needs_review` tutors stay listed (owner decision 8), or if any tutor
+is listed without a clear check, so no tutor is grandfathered in when the gate ships. With
+a single check and no re-checks (owner decision 6), it must say "passed a check when they
+joined" and never imply a current record.
 
 **A filter, never a score.** The gate is a `WHERE` condition in `candidates.ts`. It never
 reaches `score.ts`. The result is never a reliability fact and never feeds matching or
@@ -95,20 +109,30 @@ vendor that hosts the forms and sends the notices, full compliance costs little 
 4. **Pre-adverse action notice.** Before any action based even partly on the report, the
    tutor gets a copy of the report and the CFPB "Summary of Your Rights Under the FCRA"
    (current version March 2023).
-5. **Wait at least 5 business days**, counted from receipt. We would set more.
+5. **Wait at least 5 business days**, counted from receipt. The statute sets no number.
+   Five is FTC staff guidance and industry practice. We would set more.
 6. **Final adverse action notice.** The vendor's contact details, a statement that the
    vendor did not decide, and the tutor's right to a free copy and to dispute.
 7. **Disputes.** The vendor reinvestigates free within 30 days (45 if the tutor sends new
    information). We hold the decision until it resolves.
 
 Checkr's adverse-action tool sends the notices in steps 4 and 6 and tracks disputes.
-Checkr staging does not support post-adverse action, so that part is tested against our
-fake driver only.
+Checkr's docs say staging does not support post-adverse action (unverified). If so, that
+part is tested against our fake driver only.
 
 Adverse action here means refusing to list, removing, pausing or limiting a tutor when the
-report played any part. The operator who reviews a report reads it in Checkr's dashboard
-and nowhere else. The status itself is sensitive. It stays server-side, and only the tutor
-sees their own. It never goes in Stripe metadata, analytics or anyone else's email.
+report played any part. The status itself is sensitive. It stays server-side, and only
+the tutor sees their own. It never goes in Stripe metadata, analytics or anyone else's
+email.
+
+The operator who reviews a report reads it in Checkr's dashboard and nowhere else. That
+dashboard is not campus-scoped and writes none of our audit rows, unlike reported threads
+(`decisions.md:307`) and rating reports (`decisions.md:484`), where every staff read is
+logged. So only the named adjudicators hold Checkr seats. They open a report only from a
+link on `/ops/verifications`, which is filtered to the operator's campuses and writes an
+append-only `background_check_access` row (operator, check, time) before it redirects to
+Checkr. Whether Checkr keeps its own access log is unconfirmed. Who holds seats is owner
+decision 11.
 
 ## A tutor with paid packages gets a bad result
 
@@ -124,10 +148,22 @@ ships (production is test data until launch, `decisions.md:826-841`).
   `endedBy` (`engagements/termEnd.ts:88-91`), the path the term-end sweep already uses.
   Delivered sessions stay paid and the tutor keeps every cent earned. Undelivered sessions
   refund to the student. No reliability fact is written for either side.
+- `closeWithRefund` only closes the ledger inside the transaction. The card refund is a
+  second step, `refundThroughStripe`, after commit (`termEnd.ts:215-217`), with the retry
+  sweep behind it. The ops action calls it the same way.
+- With no `endedBy`, `closeWithRefund` cancels sessions without recording who did it
+  (`termEnd.ts:132-140`). Every ops write records the acting operator
+  (`decisions.md:822-824`), so the ops path passes the operator and records it on the
+  cancelled sessions and the closed package.
 - `closeWithRefund` still refuses while a session is past its start and unconfirmed, or
   disputed (`termEnd.ts:128-131`). The operator retries once that settles.
-- Earned pay keeps flowing. The transfer sweep keys on KYC, not on the check
-  (`billing/transfers.ts:150-160`), and should stay that way.
+- `closeWithRefund` ignores any engagement that is not `active` (`termEnd.ts:116`), so a
+  `pending_payment` package with a checkout open is untouched. The ops path expires that
+  Checkout session, and the build makes fulfilment refund in full any payment that lands
+  after the tutor is removed.
+- Earned pay keeps flowing by default. The transfer sweep keys on KYC, not on the check
+  (`billing/transfers.ts:150-160`). Holding a removed tutor's earned pay would likely be a
+  contract problem, but it is owner decision 12.
 - The student is never told why. The email says something like "Your tutor is no longer
   available. Your unused sessions have been refunded. Here are other tutors for MATH 125."
 
@@ -150,7 +186,14 @@ Paths drop the `src/server/modules/`, `src/app/` and `src/app/(tutor)/tutor/` pr
   `expired`), vendor ids, step timestamps, `decided_by_user_id`, `notified_at` and the
   adjudication policy version. A partial unique index allows one live check per tutor. The
   migration is additive and touches no existing table. The check lives on the tutor, not on
-  `tutor_course` (`schema.ts:317-359`), because it is a fact about the person.
+  `tutor_course` (`schema.ts:317-359`), because it is a fact about the person. A second
+  table, `background_check_access`, is the append-only read log.
+- **Fixture rows.** Seed and persona checks are `clear` rows with `fixture_` vendor ids.
+  The gateway, webhook and sweep never send a `fixture_` id to Checkr, and any count of
+  real checks excludes them. Like the other foreign keys on tutor tables, the new ones have
+  no cascade. `db/personas/wipe.ts` deletes tables one by one in order, so it gains both new
+  tables, deleted before `tutor_profile`. The persona delete at launch
+  (`decisions.md:834-841`) then still works.
 - **Gateway.** `src/server/modules/screening/` copies `billing/stripe.ts`. A real driver
   refuses live keys (`stripe.ts:317-328`). A file-backed fake is refused in production
   (`:540-544`), and a dev hosted page copies `api/dev/connect/[id]/route.ts:18-42`. A pure
@@ -158,10 +201,13 @@ Paths drop the `src/server/modules/`, `src/app/` and `src/app/(tutor)/tutor/` pr
 - **Webhook.** A new route verifies the HMAC signature, then re-reads the invite or report
   from Checkr and writes status from that, as `syncConnectAccount` does
   (`billing/connect.ts:99-108`). Repeated and out-of-order events converge, so no event
-  table is needed. A write is skipped once an operator has decided.
+  table is needed. A routine sync never overwrites an operator's decision. A dispute event,
+  or a report whose result changed after reinvestigation, reopens the row to
+  `needs_review` and clears `decided_at`, so the operator decides again on the corrected
+  report.
 - **Sweep.** `syncOpenChecks` joins the per-campus loop in `api/cron/route.ts:65-111`. It
-  sends unsent invites, re-reads stale open checks and expires lapsed invites (Checkr's
-  expire after 7 days).
+  sends unsent invites, re-reads stale open checks and expires lapsed invites (after 7
+  days, per Checkr's docs, unverified).
 - **Email.** `notifyCheckOutcomes` sits next to `notifyVerificationDecisions`
   (`notifications/dispatch.ts:612-685`), guarded by `notified_at`.
 - **Gate.** A shared `listable()` replaces `tutorCourse.status = 'active'` in the deck
@@ -179,36 +225,40 @@ Paths drop the `src/server/modules/`, `src/app/` and `src/app/(tutor)/tutor/` pr
 | # | PR | Depends on | Merges |
 |---|---|---|---|
 | 1 | This proposal. After approval, the `decisions.md` edits land here before any build. | none | owner |
-| 2 | Schema: enum, `background_check` table, migration `0033`. Nothing reads it. | 1 | owner |
+| 2 | Schema: enum, `background_check` and `background_check_access` tables, migration `0033`. Nothing reads them. | 1 | owner |
 | 3 | Gateway: real and fake drivers, `status.ts` with tests, dev hosted page, `.env.example`, merge-gate patterns for the gateway and `SCREENING_` keys. | 1 | owner |
 | 4 | Consent and invite: proof-form box, `consented` row, invite after first approval, "Finish your background check" link, copy. No gate yet. | 2, 3 | pstack |
 | 5 | Webhook, `syncOpenChecks`, outcome emails. | 4 | pstack |
-| 6 | Seed and personas write `clear` fixture checks. e2e drives the fake hosted page. | 2 | pstack |
+| 6 | Seed and personas write `clear` checks with `fixture_` ids. `personas/wipe.ts` deletes both tables. e2e drives the fake hosted page. | 2 | pstack |
 | 7 | Gate: `listable()` in four paths, guards in `acceptRequest` and `purchasePackage`, `statusCopy`, the public sentence. After 6, so seed decks stay full. | 5, 6 | pstack |
-| 8 | Ops: review on `/ops/verifications`, `not_cleared` effects, `closeWithRefund` per package. Runs `db:check-money`. | 7 | pstack unless merge-gate flags it |
+| 8 | Ops: audited report link on `/ops/verifications`, `not_cleared` effects, `closeWithRefund` then `refundThroughStripe` per package with the operator recorded, open checkouts expired. Runs `db:check-money`. | 7 | pstack unless merge-gate flags it |
 
 ## Cost
 
-| Option | Clean record | Record found | Sessions to pay back |
+| Option | Clean record | Record found | Sessions to pay back, below or past the milestone |
 |---|---|---|---|
-| Checkr Basic, county on a hit (recommended) | $29.99 + court fees | $54.99 + court fees | 10 to 20 at ~$35 |
-| Checkr Essential, every county for 7 years | $59.99 + court fees | $59.99 + court fees | 17 to 34 |
-| Certn Core, county on a hit (fallback) | $13.99 or $17.99 | $23.98 | 4 to 14 |
-| Certn Complete, every county | $49.99 | $49.99 | 15 to 29 |
+| Checkr Basic, county on a hit (recommended) | $29.99 + court fees | $54.99 + court fees | 15 or 54, at the ~$35 average |
+| Checkr Essential, every county for 7 years | $59.99 + court fees | $59.99 + court fees | 25 or 93 |
+| Certn Core, county on a hit (fallback) | $13.99 or $17.99 | $23.98 | 6 to 10, or 22 to 37 |
+| Certn Complete, every county | $49.99 | $49.99 | 21 or 77 |
+
+Payback divides the check by the net take on a $35 session after about $1.10 of card
+processing. That is $2.40 below the $100 fee milestone and $0.65 past it.
 
 Court fees are passed through at cost. Alabama county fees are unconfirmed, so plan for $0
-to $10 per county. Fifty tutors in year one is about $1,750 on Checkr Basic and about
-$3,000 on Essential. Sending the invite at upload instead adds about $35 for each rejected
-applicant.
+to $10 per county. Fifty tutors in year one is an assumption, not a forecast. At that
+count the cost is about $1,750 on Checkr Basic and about $3,000 on Essential. Sending the
+invite at upload instead adds about $35 for each rejected applicant.
 
 ## Decisions only the owner can make
 
-1. **Reverse the rejection** in `decisions.md`, with safety as the reason.
+1. **Reverse the rejection** in `decisions.md`, with safety as the reason. That edits the
+   Rejected entry (line 888) and the Product entry (lines 16-18).
 2. **The adjudication policy.** Which findings disqualify (likely sex offenses, violence
-   against a person, maybe stalking or harassment). The lookback for each category (Wyzant
-   uses 7 years for felonies and no limit for the registry). What is never considered:
-   arrests without conviction, expunged or sealed records, juvenile records, minor traffic.
-   What a pending charge means. Who decides, and how fast. How a tutor sends context.
+   against a person, maybe stalking or harassment). The lookback for each category (per
+   Wyzant's support page, unverified, it uses 7 years for felonies and no limit for the
+   registry). What is never considered, such as arrests without conviction, expunged or
+   sealed records, juvenile records and minor traffic. What a pending charge means. Who decides, and how fast. How a tutor sends context.
 3. **Required to list or optional.** The recommendation is required, with no badge.
 4. **Who pays.** The recommendation is the platform.
 5. **Invite timing.** After the first approval (recommended, bends "same step") or at
@@ -218,10 +268,16 @@ applicant.
 7. **The platform ends a package.** Amend "Only the student can end their package."
 8. **What happens during review.** Delist on `needs_review`, or keep listed until the
    pre-adverse notice, and whether a severe result may pause a tutor early.
-9. **The vendor contract.** Checkr, hosted forms, the current Summary of Rights, 5-year
-   record retention, SSN never sent to us. The API account needs a registered business,
-   an EIN and articles of incorporation, and a call with a Checkr account executive.
-10. **The public sentence** students see, and the page it links to.
+9. **The vendor contract.** Checkr, hosted forms, the current Summary of Rights, SSN
+   never sent to us, and records kept 5 years. The FCRA sets no retention rule. Five years
+   matches the outer limit to sue (15 U.S.C. § 1681p). Per Checkr's docs (unverified), the
+   API account needs a registered business, an EIN and articles of incorporation, and a
+   call with a Checkr account executive.
+10. **The public sentence** students see, and the page it links to. It depends on
+    decisions 6 and 8 and ships only when true.
+11. **Who holds Checkr dashboard seats**, and that reports are opened only through the
+    audited link.
+12. **Whether a removed tutor's earned pay still goes out.** The default is yes.
 
 ## Questions for a lawyer
 
@@ -230,8 +286,8 @@ applicant.
 2. Is delisting or pausing during review adverse action that needs the pre-adverse notice
    first? Is any interim step safe for a severe result?
 3. How long should the waiting period be beyond 5 business days?
-4. Is the adjudication policy sound under 42 U.S.C. § 1981 and Alabama law, now that the
-   EEOC's 2012 guidance is being rescinded?
+4. Is the adjudication policy sound under 42 U.S.C. § 1981 and Alabama law? Per HR Dive,
+   the EEOC's 2012 guidance is being rescinded. The rescission is not confirmed final.
 5. Does any Tuscaloosa ordinance or University of Alabama policy touch screening of UA
    students by a platform? No ordinance turned up, which is not proof.
 6. May the platform charge a tutor for a check that is required to list?
@@ -242,10 +298,15 @@ applicant.
    adverse-action automation?
 10. Do the terms of service allow ending a student's package early on a tutor's removal?
 11. Do we owe a removed tutor any reason beyond the FCRA notices?
-12. Which state and city fair-chance laws reach contractors on future campuses? The policy
+12. What may the consent box on our proof form say, and where may it sit, given that the
+    FCRA disclosure must stand alone?
+13. Which state and city fair-chance laws reach contractors on future campuses? The policy
     carries `institution_id` so each campus can get its own.
 
-## Vendor facts not yet confirmed
+## Facts not yet confirmed
+
+Each claim marked "unverified" above comes from a vendor's own page or a secondary source,
+and is listed here.
 
 - Whether Checkr Basic orders the $25 county search on its own after a database hit.
 - Alabama county court fees.
@@ -256,7 +317,14 @@ applicant.
 - That Checkr's adverse-action tool attaches the March 2023 Summary of Rights.
 - The webhook header (`X-Checkr-Signature`, HMAC-SHA256 per Checkr's docs) has to be
   checked against staging before the verifier ships.
-- Certn's current price ($13.99 or $17.99) and current webhook header.
+- Certn's current price ($13.99 or $17.99), current webhook header and 72-hour average.
+- Checkr staging's fixed mock people, its lack of post-adverse action, and the 7-day
+  invite expiry.
+- Checkr's onboarding needs (registered business, EIN, articles of incorporation).
+- Whether Checkr's dashboard keeps an access log we can read.
+- Stripe Identity's FCRA restriction, from its use-case page.
+- Wyzant's 7-year felony lookback, from its support page.
+- That the EEOC rescission is final.
 
 ## Sources
 
@@ -276,6 +344,7 @@ Law and guidance
 - 15 U.S.C. § 1681b: https://www.law.cornell.edu/uscode/text/15/1681b
 - 15 U.S.C. § 1681c: https://www.law.cornell.edu/uscode/text/15/1681c
 - 15 U.S.C. § 1681n: https://www.law.cornell.edu/uscode/text/15/1681n
+- 15 U.S.C. § 1681p: https://www.law.cornell.edu/uscode/text/15/1681p
 - 15 U.S.C. § 1681i: https://www.govinfo.gov/content/pkg/USCODE-2022-title15/html/USCODE-2022-title15-chap41-subchapIII-sec1681i.htm
 - FTC, Using Consumer Reports: https://www.ftc.gov/business-guidance/resources/using-consumer-reports-what-employers-need-know
 - SHRM on contractors and the FCRA: https://www.shrm.org/in/topics-tools/news/talent-acquisition/fcra-apply-to-background-checks-independent-contractors
