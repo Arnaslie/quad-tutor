@@ -53,11 +53,13 @@ export async function onboardingLink(actor: TutorActor): Promise<string> {
   });
 }
 
-/** The stored speed is the tutor's choice; Stripe is set to match it, never the other way. */
 async function convergeSpeed(account: ConnectAccount, speed: PayoutSpeed): Promise<void> {
   if (account.payoutSpeed === speed) return;
   try {
-    await stripeGateway().setPayoutSpeed(account.id, speed);
+    const updated = await stripeGateway().setPayoutSpeed(account.id, speed);
+    if (updated.payoutSpeed !== speed) {
+      console.error("[connect] payout speed did not take", JSON.stringify({ accountId: account.id, speed, read: updated.payoutSpeed }));
+    }
   } catch (error) {
     console.error("[connect] payout speed sync failed", errorFacts(error));
   }

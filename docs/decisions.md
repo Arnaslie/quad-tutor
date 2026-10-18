@@ -742,8 +742,8 @@ transfer sweep would count it as sent.
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.**
 Transfers go per engagement once the tutor is verified and the engagement has no open
 discrepancy or dispute. Refunds return only undelivered sessions, so none needs a
-reversal. Bank payouts are weekly unless the tutor picks daily (below). Reversals are an ops tool. A reversal books a
-`transfer_reversal` row and leaves that money owed to the tutor until ops acts; the sweep
+reversal. Bank payouts are weekly unless the tutor picks daily (below). Reversals are an
+ops tool. A reversal books a `transfer_reversal` row and leaves that money owed to the tutor until ops acts; the sweep
 never re-sends it. Ops answers each reversal once, on `/ops/money`, with a `tutor_transfer`
 row of its amount whose `corrects_entry_id` names it; a unique index on that column makes a
 second answer a refusal. Re-send leaves the row unstamped and sends it after commit, with
@@ -758,8 +758,8 @@ waits, and the student's sessions proceed. Hiding unverified tutors from decks w
 rejected: they would never get the accept that triggers onboarding. The Express account is created
 when the tutor starts payout setup from `/tutor/payouts` (its button, or Stripe's
 `refresh_url`), never on viewing the page and never inside an accept, with transfers only
-and a weekly payout schedule (Fridays); onboarding collects `eventually_due` fields up front so a
-later threshold doesn't restrict the account. `kyc_status` is re-derived from Stripe's
+and a weekly payout schedule (Fridays); onboarding collects `eventually_due` fields up
+front so a later threshold doesn't restrict the account. `kyc_status` is re-derived from Stripe's
 account on every `account.updated` and every view of that page, never from the event
 payload. An account the tutor hasn't submitted is `not_started` even though Stripe lists
 its fields as past due; one Stripe is still reviewing (`pending_verification`,
@@ -779,8 +779,12 @@ platform about 25¢ for each extra payout: Connect charges 0.25% + 25¢ a payout
 a week more than weekly. The paid, faster tier is an instant cash-out, built separately.
 
 The stored speed is the truth and Stripe is made to match it, never the reverse. Every
-`account.updated`, every view of `/tutor/payouts` and every pick reads the account,
-compares its schedule with the stored speed, and calls Stripe only when they differ. No
+read of the account does it: each `account.updated`, each view of `/tutor/payouts` (and of
+`/tutor/sessions` while payouts are blocked), each pick, and the transfer sweep's KYC
+re-check, so the cron now writes to Connect accounts too. Each compares the schedule with
+the stored speed and calls Stripe only when they differ. An update whose answer still does
+not read as the stored speed is logged as "did not take", so an account that never settles
+shows up rather than retrying silently. No
 row lock is held across that call. Accounts made while payouts were daily move to weekly
 this way, with no script. A schedule this app does not offer, such as `manual` set in a
 Dashboard, reads as no speed and is put back. The update carries no fixed idempotency key:

@@ -59,7 +59,6 @@ async function deliver(event: { payload: string; signature: string }) {
   return handleStripeWebhook(event.payload, event.signature);
 }
 
-/** Runs `work` with every schedule change Stripe would be sent recorded, in order. */
 async function scheduleCalls(work: () => Promise<unknown>): Promise<[string, PayoutSpeed][]> {
   const calls: [string, PayoutSpeed][] = [];
   const real = stripeGateway().setPayoutSpeed;

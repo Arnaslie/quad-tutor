@@ -344,7 +344,6 @@ function realGateway(): Gateway {
   return stripeDriver(new Stripe(key, { apiVersion: API_VERSION, maxNetworkRetries: 2, timeout: 15_000 }), livemode);
 }
 
-/** The real driver over a given client; tests point one at a local server to read what would be sent. */
 export function stripeDriver(stripe: Stripe, livemode = false): Gateway {
   return {
     livemode,
