@@ -110,7 +110,8 @@ vendor that hosts the forms and sends the notices, full compliance costs little 
    tutor gets a copy of the report and the CFPB "Summary of Your Rights Under the FCRA"
    (current version March 2023).
 5. **Wait at least 5 business days**, counted from receipt. The statute sets no number.
-   Five is FTC staff guidance and industry practice. We would set more.
+   Five is industry practice. The legal research traces it to FTC staff, through secondary
+   sources (unverified). We would set more.
 6. **Final adverse action notice.** The vendor's contact details, a statement that the
    vendor did not decide, and the tutor's right to a free copy and to dispute.
 7. **Disputes.** The vendor reinvestigates free within 30 days (45 if the tutor sends new
@@ -149,18 +150,26 @@ ships (production is test data until launch, `decisions.md:826-841`).
   Delivered sessions stay paid and the tutor keeps every cent earned. Undelivered sessions
   refund to the student. No reliability fact is written for either side.
 - `closeWithRefund` only closes the ledger inside the transaction. The card refund is a
-  second step, `refundThroughStripe`, after commit (`termEnd.ts:215-217`), with the retry
+  second step, `refundThroughStripe`, after commit (`termEnd.ts:218-221`), with the retry
   sweep behind it. The ops action calls it the same way.
 - With no `endedBy`, `closeWithRefund` cancels sessions without recording who did it
   (`termEnd.ts:132-140`). Every ops write records the acting operator
-  (`decisions.md:822-824`), so the ops path passes the operator and records it on the
-  cancelled sessions and the closed package.
+  (`decisions.md:822-824`). The ops path cannot pass the operator as `endedBy`, because
+  `endedBy` is an `Actor` that must own the package (`termEnd.ts:106-108`) and that turns
+  on the late-cancel block (`termEnd.ts:129`). So `closeWithRefund` gets a new optional
+  `operatorUserId` parameter, separate from `endedBy`. It writes the operator to
+  `session_booking.cancelled_by_user_id` (`schema.ts:496`) on each cancelled session and
+  to `ledger_entry.recorded_by_user_id` (`schema.ts:557`) on the refund row. Both columns
+  exist, so no existing table changes. `engagement` has no ended-by column. A close that
+  cancels nothing and refunds nothing moves no money, and `background_check.decided_by_user_id`
+  already records who removed the tutor.
 - `closeWithRefund` still refuses while a session is past its start and unconfirmed, or
   disputed (`termEnd.ts:128-131`). The operator retries once that settles.
 - `closeWithRefund` ignores any engagement that is not `active` (`termEnd.ts:116`), so a
   `pending_payment` package with a checkout open is untouched. The ops path expires that
-  Checkout session, and the build makes fulfilment refund in full any payment that lands
-  after the tutor is removed.
+  Checkout session through the gateway after its transaction commits, never under a row
+  lock. The build makes fulfilment refund in full any payment that lands after the tutor
+  is removed.
 - Earned pay keeps flowing by default. The transfer sweep keys on KYC, not on the check
   (`billing/transfers.ts:150-160`). Holding a removed tutor's earned pay would likely be a
   contract problem, but it is owner decision 12.
@@ -191,7 +200,7 @@ Paths drop the `src/server/modules/`, `src/app/` and `src/app/(tutor)/tutor/` pr
 - **Fixture rows.** Seed and persona checks are `clear` rows with `fixture_` vendor ids.
   The gateway, webhook and sweep never send a `fixture_` id to Checkr, and any count of
   real checks excludes them. Like the other foreign keys on tutor tables, the new ones have
-  no cascade. `db/personas/wipe.ts` deletes tables one by one in order, so it gains both new
+  no cascade. `src/server/db/personas/wipe.ts` deletes tables one by one in order, so it gains both new
   tables, deleted before `tutor_profile`. The persona delete at launch
   (`decisions.md:834-841`) then still works.
 - **Gateway.** `src/server/modules/screening/` copies `billing/stripe.ts`. A real driver
@@ -229,7 +238,7 @@ Paths drop the `src/server/modules/`, `src/app/` and `src/app/(tutor)/tutor/` pr
 | 3 | Gateway: real and fake drivers, `status.ts` with tests, dev hosted page, `.env.example`, merge-gate patterns for the gateway and `SCREENING_` keys. | 1 | owner |
 | 4 | Consent and invite: proof-form box, `consented` row, invite after first approval, "Finish your background check" link, copy. No gate yet. | 2, 3 | pstack |
 | 5 | Webhook, `syncOpenChecks`, outcome emails. | 4 | pstack |
-| 6 | Seed and personas write `clear` checks with `fixture_` ids. `personas/wipe.ts` deletes both tables. e2e drives the fake hosted page. | 2 | pstack |
+| 6 | Seed and personas write `clear` checks with `fixture_` ids. `src/server/db/personas/wipe.ts` deletes both tables. e2e drives the fake hosted page. | 2 | pstack |
 | 7 | Gate: `listable()` in four paths, guards in `acceptRequest` and `purchasePackage`, `statusCopy`, the public sentence. After 6, so seed decks stay full. | 5, 6 | pstack |
 | 8 | Ops: audited report link on `/ops/verifications`, `not_cleared` effects, `closeWithRefund` then `refundThroughStripe` per package with the operator recorded, open checkouts expired. Runs `db:check-money`. | 7 | pstack unless merge-gate flags it |
 
@@ -254,11 +263,16 @@ invite at upload instead adds about $35 for each rejected applicant.
 
 1. **Reverse the rejection** in `decisions.md`, with safety as the reason. That edits the
    Rejected entry (line 888) and the Product entry (lines 16-18).
-2. **The adjudication policy.** Which findings disqualify (likely sex offenses, violence
-   against a person, maybe stalking or harassment). The lookback for each category (per
-   Wyzant's support page, unverified, it uses 7 years for felonies and no limit for the
-   registry). What is never considered, such as arrests without conviction, expunged or
-   sealed records, juvenile records and minor traffic. What a pending charge means. Who decides, and how fast. How a tutor sends context.
+2. **The adjudication policy.** The policy answers these questions:
+   - Which findings disqualify? Likely sex offenses, violence against a person, and maybe
+     stalking or harassment.
+   - How far back does each category count? Wyzant's support page says it uses 7 years
+     for felonies and no limit for the registry (unverified).
+   - What is never considered? Likely arrests without conviction, expunged or sealed
+     records, juvenile records and minor traffic.
+   - What does a pending charge mean?
+   - Who decides, and how fast?
+   - How does a tutor send context?
 3. **Required to list or optional.** The recommendation is required, with no badge.
 4. **Who pays.** The recommendation is the platform.
 5. **Invite timing.** After the first approval (recommended, bends "same step") or at
