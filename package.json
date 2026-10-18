@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node --env-file-if-exists=.env.local --import tsx --test \"src/**/*.test.ts\"",
+    "test": "TZ=Australia/Adelaide node --env-file-if-exists=.env.local --import tsx --test \"src/**/*.test.ts\"",
     "db:generate": "node --env-file-if-exists=.env.local ./node_modules/drizzle-kit/bin.cjs generate",
     "db:check-money": "node --env-file-if-exists=.env.local --import tsx ./src/server/db/check-money.ts",
     "db:check-journal": "node ./src/server/db/check-journal.mjs",
