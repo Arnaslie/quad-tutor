@@ -59,3 +59,14 @@ test("a taken slot and a slot inside the 12-hour lead are not offered", () => {
 
   assert.deepEqual(iso(slots), ["2026-10-21T04:00:00.000Z", "2026-10-28T04:00:00.000Z"]);
 });
+
+test("a campus far east of UTC still gets the first occurrence of a repeated hour", () => {
+  const slots = expandSlots({
+    windows: [{ weekday: SUNDAY, startMinute: 2 * 60, endMinute: 3 * 60 }],
+    timeZone: "Pacific/Auckland",
+    now: new Date("2026-03-30T00:00:00Z"),
+    taken: new Set(),
+  });
+
+  assert.deepEqual(iso(slots), ["2026-04-04T13:00:00.000Z", "2026-04-11T14:00:00.000Z"]);
+});

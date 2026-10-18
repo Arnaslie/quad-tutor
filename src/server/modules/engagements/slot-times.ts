@@ -43,7 +43,7 @@ function campusClock(timeZone: string) {
 
   function instantAt(day: CalendarDay, minute: number): number | null {
     const asUtc = Date.UTC(day.year, day.month - 1, day.day, 0, minute);
-    const candidates = [asUtc - offset(asUtc - DAY_MS / 2), asUtc - offset(asUtc + DAY_MS / 2)];
+    const candidates = [asUtc - offset(asUtc - DAY_MS), asUtc - offset(asUtc + DAY_MS)];
     return (
       candidates
         .sort((a, b) => a - b)
