@@ -22,6 +22,14 @@ export type AvailabilityState =
   | { status: "added" }
   | { status: "error"; message: string };
 
+function clockFields(formData: FormData, prefix: "start" | "end") {
+  return {
+    hour: formData.get(`${prefix}Hour`),
+    minute: formData.get(`${prefix}Minute`),
+    period: formData.get(`${prefix}Period`),
+  };
+}
+
 export async function addAvailabilityAction(
   _previous: AvailabilityState,
   formData: FormData,
@@ -30,8 +38,8 @@ export async function addAvailabilityAction(
 
   const parsed = addAvailabilityInput.safeParse({
     weekday: Number(formData.get("weekday")),
-    startMinute: Number(formData.get("startMinute")),
-    endMinute: Number(formData.get("endMinute")),
+    start: clockFields(formData, "start"),
+    end: clockFields(formData, "end"),
   });
 
   if (!parsed.success) {
