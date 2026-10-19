@@ -320,7 +320,7 @@ export async function cancel(
     return toResult(error);
   }
 
-  if (outcome.refund?.refundMinor) refundAfterCommit(outcome.refund.engagementId, actor.institutionId);
+  if (outcome.refund) refundAfterCommit(outcome.refund, actor.institutionId);
   notifySessionChangesSoon(actor.institutionId);
   revalidateStanding();
   revalidatePath("/sessions");
@@ -337,11 +337,12 @@ function cancelledMessage(outcome: Awaited<ReturnType<typeof cancelSession>>): s
   return `Cancelled. ${formatMinor(outcome.returnedMinor, outcome.currency)} goes back to you when the package ends.`;
 }
 
-function refundAfterCommit(engagementId: string, institutionId: string): void {
-  const ids = { engagementId, institutionId };
+function refundAfterCommit(refund: { refundId: string | null; engagementId: string }, institutionId: string): void {
+  const { refundId: id, engagementId } = refund;
+  if (!id) return;
   after(() =>
-    refundThroughStripe(ids).catch((error) =>
-      console.error(`[refund] ${ids.engagementId} left for the retry sweep`, errorFacts(error)),
+    refundThroughStripe({ id, engagementId, institutionId }).catch((error) =>
+      console.error(`[refund] ${id} left for the retry sweep`, errorFacts(error)),
     ),
   );
 }
@@ -363,7 +364,7 @@ export async function endEarly(
   }
   if (!refund) return { ok: false, error: "That package is already closed." };
 
-  refundAfterCommit(parsed.data.engagementId, actor.institutionId);
+  refundAfterCommit(refund, actor.institutionId);
   notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   revalidatePath("/sessions/[id]", "page");

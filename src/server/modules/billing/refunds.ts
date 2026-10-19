@@ -1,9 +1,9 @@
-import { and, eq, exists, isNotNull, isNull, like, lt, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, like, lt, not, notExists, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 import { db } from "@/server/db";
-import { engagement, ledgerEntry } from "@/server/db/schema";
+import { engagement, ledgerEntry, sessionBooking } from "@/server/db/schema";
 
 import { withLease } from "./lease";
 import {
@@ -11,6 +11,7 @@ import {
   ledgerRowBlocker,
   recordDiscrepancy,
   recordRefundFailure,
+  unbookedDashboardRefund,
   type Ids,
 } from "./discrepancy";
 import { refuseFixture } from "./fixtures";
@@ -77,34 +78,65 @@ const boughtThroughStripe = and(
 );
 const unstampedRefund = and(eq(ledgerEntry.type, "refund"), isNull(ledgerEntry.stripeReference));
 const blocked = () => ledgerRowBlocker(ledgerEntry.id, ledgerEntry.institutionId);
-const held = () => failedDashboardRefund(purchase.stripeReference, purchase.institutionId);
+const held = () =>
+  or(
+    exists(failedDashboardRefund(purchase.stripeReference, purchase.institutionId)),
+    exists(unbookedDashboardRefund(ledgerEntry.id, ledgerEntry.engagementId, ledgerEntry.institutionId)),
+  )!;
 
 /** A flag names the row, so it stays unsent even once nothing else holds it. */
 export const stoppedForGood = () => sql<boolean>`exists(${blocked()})`;
 
-/**
- * The refund row of the engagement a PaymentIntent bought. Unstamped, it is the one a failed refund on that
- * PaymentIntent holds; stamped, it already went out or was paid by hand.
- */
-export const packageRefund = (
-  column: typeof ledgerEntry.id | typeof ledgerEntry.amountMinor | SQL<boolean>,
-  paymentIntentId: AnyColumn,
-  institutionId: AnyColumn,
-  stamped: boolean,
-) =>
+/** One refund row of ours, the unit every refund call, failure and ops answer is about. */
+export type RefundRef = Ids & { id: string };
+
+type HeldRefund = {
+  id: string;
+  paymentIntentId: string;
+  institutionId: string;
+  amountMinor: number;
+  bookedAt: Date;
+  sessionAt: Date | null;
+  stoppedForGood: boolean;
+};
+
+/** Unsent refund rows of the engagement a PaymentIntent bought: what a failed Dashboard refund on it holds back. */
+export const heldBehindPayment = (paymentIntentId: AnyColumn | SQL, institutionId: AnyColumn | SQL, where?: SQL) =>
   db
-    .select({ value: column })
+    .select({ id: ledgerEntry.id })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
+    .where(and(unstampedRefund, eq(purchase.stripeReference, paymentIntentId), eq(purchase.institutionId, institutionId), where));
+
+/** The refunds each failed Dashboard refund holds, oldest first, so its card can name every one. */
+export async function heldBehindPayments(institutionIds: string[], paymentIntentIds: string[]): Promise<HeldRefund[]> {
+  if (paymentIntentIds.length === 0) return [];
+  const rows = await db
+    .select({
+      id: ledgerEntry.id,
+      paymentIntentId: purchase.stripeReference,
+      institutionId: ledgerEntry.institutionId,
+      amountMinor: ledgerEntry.amountMinor,
+      bookedAt: ledgerEntry.occurredAt,
+      sessionAt: sessionBooking.scheduledAt,
+      stoppedForGood: stoppedForGood(),
+    })
+    .from(ledgerEntry)
+    .innerJoin(purchase, boughtThroughStripe)
+    .leftJoin(
+      sessionBooking,
+      and(eq(sessionBooking.id, ledgerEntry.sessionId), eq(sessionBooking.institutionId, ledgerEntry.institutionId)),
+    )
     .where(
       and(
-        eq(ledgerEntry.type, "refund"),
-        stamped ? isNotNull(ledgerEntry.stripeReference) : isNull(ledgerEntry.stripeReference),
-        eq(purchase.stripeReference, paymentIntentId),
-        eq(purchase.institutionId, institutionId),
+        unstampedRefund,
+        inArray(ledgerEntry.institutionId, institutionIds),
+        inArray(purchase.stripeReference, paymentIntentIds),
       ),
     )
-    .limit(1);
+    .orderBy(ledgerEntry.occurredAt, ledgerEntry.id);
+  return rows.map((row) => ({ ...row, paymentIntentId: row.paymentIntentId! }));
+}
 
 /** Unstamped refund rows of engagements bought through Stripe; one bought before Stripe has no `pi_` and never appears. */
 async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[]> {
@@ -120,7 +152,7 @@ async function unstampedRefunds(where: SQL[], limit: number): Promise<RefundRow[
     })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
-    .where(and(unstampedRefund, notExists(blocked()), notExists(held()), ...where))
+    .where(and(unstampedRefund, notExists(blocked()), not(held()), ...where))
     .orderBy(sql`random()`)
     .limit(limit);
   return rows.map((row) => ({ ...row, paymentIntentId: row.paymentIntentId! }));
@@ -132,7 +164,7 @@ export async function blockedRefunds(institutionId: string): Promise<number> {
     .select({ n: sql<number>`count(*)::int` })
     .from(ledgerEntry)
     .innerJoin(purchase, boughtThroughStripe)
-    .where(and(unstampedRefund, or(exists(blocked()), exists(held())), eq(ledgerEntry.institutionId, institutionId)));
+    .where(and(unstampedRefund, or(exists(blocked()), held()), eq(ledgerEntry.institutionId, institutionId)));
   return row?.n ?? 0;
 }
 
@@ -168,13 +200,40 @@ async function settle(row: Settling, refund: Refund): Promise<RefundOutcome> {
   return isLiveRefund(refund) ? "refunded" : fail(row, refund);
 }
 
-/** Ours (live first), or a live refund on the charge that is not, such as one made in the Dashboard. */
+/** Ids of the engagement's refund rows, and the refunds already stamped on them, ours or booked from the Dashboard. */
+async function refundsOfEngagement(row: Settling): Promise<{ rows: Set<string>; stamped: Set<string> }> {
+  const found = await db
+    .select({ id: ledgerEntry.id, reference: ledgerEntry.stripeReference })
+    .from(ledgerEntry)
+    .where(
+      and(
+        eq(ledgerEntry.engagementId, row.engagementId),
+        eq(ledgerEntry.institutionId, row.institutionId),
+        eq(ledgerEntry.type, "refund"),
+      ),
+    );
+  return {
+    rows: new Set(found.map((r) => r.id)),
+    stamped: new Set(found.flatMap((r) => (r.reference ? [r.reference] : []))),
+  };
+}
+
+/**
+ * Ours (live first), or a live refund on the charge that no refund row of the engagement accounts for, such as
+ * one made in the Dashboard. Another row's own refund, or a Dashboard refund ops booked onto a row, is not foreign.
+ */
 async function onCharge(row: Settling): Promise<{ mine?: Refund; foreign?: Refund }> {
   const listed = await stripeGateway().listRefunds(row.paymentIntentId);
   const mine = listed.filter((r) => r.ledgerEntryId === row.id);
+  const engagementRefunds = await refundsOfEngagement(row);
   return {
     mine: mine.find(isLiveRefund) ?? mine.at(0),
-    foreign: listed.find((r) => r.ledgerEntryId !== row.id && isLiveRefund(r)),
+    foreign: listed.find(
+      (r) =>
+        isLiveRefund(r) &&
+        !(r.ledgerEntryId && engagementRefunds.rows.has(r.ledgerEntryId)) &&
+        !engagementRefunds.stamped.has(r.id),
+    ),
   };
 }
 
@@ -251,9 +310,14 @@ async function attempt(row: RefundRow, retry: boolean): Promise<RefundOutcome> {
   return settle(row, refund);
 }
 
-export async function refundThroughStripe(ids: Ids): Promise<RefundOutcome> {
+/** Sends one refund row to the card after the transaction that wrote it commits. */
+export async function refundThroughStripe(ref: RefundRef): Promise<RefundOutcome> {
   const [row] = await unstampedRefunds(
-    [eq(ledgerEntry.engagementId, ids.engagementId), eq(ledgerEntry.institutionId, ids.institutionId)],
+    [
+      eq(ledgerEntry.id, ref.id),
+      eq(ledgerEntry.engagementId, ref.engagementId),
+      eq(ledgerEntry.institutionId, ref.institutionId),
+    ],
     1,
   );
   return row ? issue(row, false) : "skipped";
@@ -348,7 +412,7 @@ export async function reconcileRefund(refund: Refund): Promise<Reconciled> {
   const ids = bought ?? (engagementId && institutionId ? await ourEngagement({ engagementId, institutionId }) : undefined);
   if (!ids) return { outcome: "foreign", institutionId: null };
   if (isLiveRefund(refund)) return { outcome: "skipped", institutionId: ids.institutionId };
-  // A Dashboard refund ops booked as the package refund: the flag names that row, so the row counts as unpaid.
+  // A Dashboard refund ops booked onto one of our rows: the flag names that row, so the row counts as unpaid.
   const [booked] = await db
     .select({ id: ledgerEntry.id })
     .from(ledgerEntry)

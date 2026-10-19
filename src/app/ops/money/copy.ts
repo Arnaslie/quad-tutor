@@ -1,4 +1,5 @@
 import type { DiscrepancyItem, MoneyForOperator } from "@/server/modules/billing/ops";
+import { formatDayTime } from "@/components/format";
 import { formatMinor } from "@/server/modules/billing/pricing";
 
 const KIND: Record<DiscrepancyItem["kind"], { title: string; body: string; note?: string }> = {
@@ -25,32 +26,46 @@ const KIND: Record<DiscrepancyItem["kind"], { title: string; body: string; note?
   },
 };
 
-const STOPPED_ROW: Partial<Record<NonNullable<DiscrepancyItem["ledgerEntryType"]>, string>> = {
+const STOPPED_ROW: Partial<Record<NonNullable<DiscrepancyItem["row"]>["type"], string>> = {
   refund: "the refund to the student",
   tutor_transfer: "the transfer to the tutor",
 };
 
-export type SettleLabel = { label: string; pending: string };
-export type DiscrepancyCopy = { title: string; body: string; note: string | null; settle: SettleLabel | null };
+/** A settle button. `heldRefundId` names the held refund it pays by hand; null settles the row the flag names. */
+export type SettleChoice = { label: string; pending: string; heldRefundId: string | null };
+export type DiscrepancyCopy = { title: string; body: string; note: string | null; settle: SettleChoice[] };
 
-const SETTLE: SettleLabel = { label: "Record manual payment", pending: "Recording…" };
+const SETTLE: SettleChoice = { label: "Record manual payment", pending: "Recording…", heldRefundId: null };
+
+/** One button per held refund. Two of the same amount are told apart by the day each was booked. */
+function settleHeld(item: DiscrepancyItem): SettleChoice[] {
+  return item.held.map((held) => {
+    const amount = formatMinor(held.amountMinor, item.currency);
+    const twin = item.held.some((other) => other.id !== held.id && other.amountMinor === held.amountMinor);
+    return {
+      label: `Record ${amount}${twin ? ` from ${formatDayTime(held.bookedAt)}` : ""} as paid by hand`,
+      pending: "Recording…",
+      heldRefundId: held.id,
+    };
+  });
+}
 
 export function explained(item: DiscrepancyItem): DiscrepancyCopy {
   const { title, body, note = null } = KIND[item.kind];
-  const plain = { title, body, note, settle: item.canSettle ? SETTLE : null };
+  const plain = { title, body, note, settle: item.canSettle ? [SETTLE] : [] };
   const charge = item.kind === "ledger_vs_stripe_charge";
 
-  if (charge && item.ledgerEntryType === "refund" && item.stripeReference?.startsWith("re_")) {
+  if (charge && item.row?.type === "refund" && item.stripeReference?.startsWith("re_")) {
     return {
       title: "A refund was made in the Stripe Dashboard",
-      body: "Someone refunded this payment in the Dashboard, so the package refund was stopped rather than sent a second time.",
+      body: "Someone refunded this payment in the Dashboard, so this refund was stopped rather than sent a second time. Other refunds on this package wait until it is answered.",
       note:
         item.refund === "failed"
           ? "That Dashboard refund then failed at Stripe, so the student did not get it. Pay them another way and record it on the failed refund card for this payment. Once that card is recorded, resolve this."
           : item.canSettle
-            ? "Booking it records the Dashboard refund as the package refund. If the Ledger and Stripe amounts on this card differ, settle the difference yourself."
+            ? "Booking it records the Dashboard refund as this refund. If the Ledger and Stripe amounts on this card differ, settle the difference yourself."
             : null,
-      settle: item.canSettle ? { label: "Book this Dashboard refund", pending: "Booking…" } : null,
+      settle: item.canSettle ? [{ label: "Book this Dashboard refund", pending: "Booking…", heldRefundId: null }] : [],
     };
   }
   if (charge && item.stripeReference?.startsWith("cs_")) {
@@ -75,44 +90,41 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
           : "The refund has not gone out yet and keeps retrying. Resolving stops the retries.",
     };
   }
-  if (item.kind === "refund_failed" && !item.ledgerEntryType) {
+  if (item.kind === "refund_failed" && !item.row) {
     if (!item.paymentBooked) {
       return {
         ...plain,
         note: "It returned a payment no package booked. Nothing sends this money again, so pay the student another way, then resolve this with a note on how you paid.",
-        settle: null,
+        settle: [],
       };
     }
-    const waiting = item.heldRefundMinor === null ? null : formatMinor(item.heldRefundMinor, item.currency);
+    const dashboard = "It was made in the Stripe Dashboard, so no refund row names it.";
+    if (item.held.length === 0) {
+      return {
+        ...plain,
+        note: `${dashboard} Nothing on this package is waiting to be refunded. Check the payment's history in Stripe. If this money did not reach the student another way, pay them, then resolve this with how you paid. Until then, any refund the package owes is held back from this card.`,
+        settle: [],
+      };
+    }
     return {
       ...plain,
       note:
-        "It was made in the Stripe Dashboard, so no refund row names it. " +
-        (item.packageRefundAnswered
-          ? "The package refund already went out or was paid by hand, so check the payment's history in Stripe. If neither that refund nor this one reached the student, pay what is missing, then record it."
-          : !waiting
-          ? "The package has no refund waiting yet. Resolving or recording a manual payment both close this, and a refund the package owes later goes to the same card."
-          : item.refund === "holding_stopped"
-            ? `Another flag on this package has also stopped its ${waiting} refund for good, so nothing sends it. Pay the student that ${waiting} another way, then record it here and the refund is marked paid.`
-            : `It holds the package's ${waiting} refund so it is not sent to the same card. If you paid the student that ${waiting} another way, record it, and the refund is marked paid and never sent. Resolving instead sends it to the same card.`),
+        `${dashboard} It holds the package's refunds listed here, so none is sent to the same card. For each one you pay the student another way, record it on its button. ` +
+        (item.refund === "holding_stopped"
+          ? "Another flag has also stopped one of them for good, so that one can only be paid by hand."
+          : "Resolving sends the rest to the same card."),
+      settle: settleHeld(item),
     };
   }
-  if (item.kind === "refund_failed" && item.ledgerEntryType === "refund" && item.ledgerEntryMinor !== null && item.canResolve) {
-    if (item.packageRefundAnswered) {
-      return {
-        ...plain,
-        note: "Another refund on this payment failed at Stripe. The package refund failed before and was answered then, so check the payment's history in Stripe. If neither that answer nor this refund reached the student, pay what is missing, then resolve with how you paid.",
-        settle: null,
-      };
-    }
+  if (item.kind === "refund_failed" && item.row?.type === "refund" && item.canResolve) {
     return {
       ...plain,
       body: "Stripe could not deliver the refund to the student, and nothing sends it again.",
-      note: `The package owes them ${formatMinor(item.ledgerEntryMinor, item.currency)}. Pay them that another way, then resolve this with a note on how you paid.`,
-      settle: null,
+      note: `The package owes them ${formatMinor(item.row.amountMinor, item.currency)}. Pay them that another way, then resolve this with a note on how you paid.`,
+      settle: [],
     };
   }
-  const stopped = item.canSettle && item.ledgerEntryType ? STOPPED_ROW[item.ledgerEntryType] : undefined;
+  const stopped = item.canSettle && item.row ? STOPPED_ROW[item.row.type] : undefined;
   if (!stopped) return plain;
   return {
     ...plain,

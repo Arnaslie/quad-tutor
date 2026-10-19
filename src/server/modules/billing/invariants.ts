@@ -69,7 +69,6 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
       flag("one purchase of the price", subject, `${purchases} purchase rows totalling ${paid}, price ${e.pricePaidMinor}`);
     }
     if (refunded > paid) flag("refund <= purchase", subject, `refunded ${refunded} of ${paid}`);
-    if (rows(e.totals, REFUND) > 1) flag("one refund per engagement", subject, `${rows(e.totals, REFUND)} refund rows`);
     const references = (type: LedgerType) => e.references?.[type] ?? [];
     for (const reference of references(REFUND)) {
       if (reference && !reference.startsWith("re_") && !reference.startsWith(MANUAL_PREFIX)) {

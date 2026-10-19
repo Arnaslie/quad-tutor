@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, isNull, like, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -57,12 +57,11 @@ export const FORFEITED_PREFIX = "forfeited:";
 
 /**
  * A refund Stripe could not deliver is never re-issued by code: the card that bounced it would bounce
- * the next one too. Keyed on the PaymentIntent; a repeat on it fills in the ledger row if the first had none.
- * One PaymentIntent never carries two refund rows: it is one engagement's purchase, with one refund.
- * A row failing, or a refund the flag has not recorded failing, on a flag ops already resolved reopens it at that
- * amount: the money it names is news. The reconciliation replays every failed refund on the PaymentIntent each
- * day, so which refunds already failed is told apart by their ids, never by an amount. A reopen keeps ops' last
- * note unless the news is a row failing, so an answered package refund is told apart from one still owed.
+ * the next one too. A failure of one of our refund rows is keyed on that row, since a PaymentIntent can carry
+ * many; a refund made in the Dashboard has no row and is keyed on its PaymentIntent.
+ * A refund the flag has not recorded failing, on a flag ops already resolved, reopens it at that amount: the money
+ * it names is news. The reconciliation replays every failed refund on the PaymentIntent each day, so which refunds
+ * already failed is told apart by their ids, never by an amount. Reopening a PaymentIntent's flag keeps ops' last note.
  */
 export async function recordRefundFailure(
   ids: Ids,
@@ -75,7 +74,7 @@ export async function recordRefundFailure(
   },
 ): Promise<void> {
   console.error(
-    `[refund] ${failed.refund?.id ?? "create"} on ${failed.paymentIntentId} for ${ids.engagementId} failed (${failed.refund?.failureReason ?? "refused at create"}); flagged for ops`,
+    `[refund] ${failed.refund?.id ?? "create"} on ${failed.paymentIntentId} for ${failed.ledgerEntryId ?? ids.engagementId} failed (${failed.refund?.failureReason ?? "refused at create"}); flagged for ops`,
   );
   await db
     .insert(moneyDiscrepancy)
@@ -83,7 +82,7 @@ export async function recordRefundFailure(
       engagementId: ids.engagementId,
       institutionId: ids.institutionId,
       kind: "refund_failed",
-      stripeReference: failed.paymentIntentId,
+      stripeReference: failed.ledgerEntryId ?? failed.paymentIntentId,
       ledgerEntryId: failed.ledgerEntryId,
       ledgerAmountMinor: failed.amountMinor,
       stripeAmountMinor: 0,
@@ -94,7 +93,6 @@ export async function recordRefundFailure(
       target: [moneyDiscrepancy.kind, moneyDiscrepancy.stripeReference],
       targetWhere: sql`${moneyDiscrepancy.stripeReference} is not null`,
       set: {
-        ledgerEntryId: sql`coalesce(${moneyDiscrepancy.ledgerEntryId}, excluded.ledger_entry_id)`,
         ledgerAmountMinor: onNews(sql`excluded.ledger_amount_minor`, moneyDiscrepancy.ledgerAmountMinor),
         detectedAt: onNews(sql`now()`, moneyDiscrepancy.detectedAt),
         resolvedAt: onNews(sql`null`, moneyDiscrepancy.resolvedAt),
@@ -108,8 +106,7 @@ export async function recordRefundFailure(
 }
 
 const onNews = (value: SQL, column: AnyColumn) =>
-  sql`case when (${moneyDiscrepancy.ledgerEntryId} is null and excluded.ledger_entry_id is not null)
-    or (${moneyDiscrepancy.resolvedAt} is not null and not ${moneyDiscrepancy.failedRefundIds} @> excluded.failed_refund_ids)
+  sql`case when ${moneyDiscrepancy.resolvedAt} is not null and not ${moneyDiscrepancy.failedRefundIds} @> excluded.failed_refund_ids
     then ${value} else ${column} end`;
 
 const blocker = alias(moneyDiscrepancy, "refund_blocker");
@@ -132,8 +129,8 @@ export const ledgerRowBlocker = (
     );
 
 /**
- * A refund of the purchase that failed with no ledger row of ours (one made in the Dashboard) holds the
- * engagement's own refund until ops resolves it, so it is not sent to a card that just bounced one.
+ * A refund of the purchase that failed with no ledger row of ours (one made in the Dashboard) holds every unsent
+ * refund of the engagement until ops resolves it, so none is sent to a card that just bounced one.
  */
 export const failedDashboardRefund = (paymentIntentId: AnyColumn, institutionId: AnyColumn) =>
   db
@@ -145,6 +142,25 @@ export const failedDashboardRefund = (paymentIntentId: AnyColumn, institutionId:
         eq(blocker.stripeReference, paymentIntentId),
         eq(blocker.institutionId, institutionId),
         isNull(blocker.ledgerEntryId),
+        isNull(blocker.resolvedAt),
+      ),
+    );
+
+/**
+ * A live refund made in the Dashboard stops the first refund row that finds it. The engagement's other unsent
+ * refunds wait behind it until ops books it onto that row, then go out without it counting as foreign again.
+ */
+export const unbookedDashboardRefund = (ledgerEntryId: AnyColumn, engagementId: AnyColumn, institutionId: AnyColumn) =>
+  db
+    .select({ id: blocker.id })
+    .from(blocker)
+    .where(
+      and(
+        eq(blocker.kind, "ledger_vs_stripe_charge"),
+        like(blocker.stripeReference, "re\\_%"),
+        eq(blocker.engagementId, engagementId),
+        eq(blocker.institutionId, institutionId),
+        ne(blocker.ledgerEntryId, ledgerEntryId),
         isNull(blocker.resolvedAt),
       ),
     );

@@ -18,6 +18,8 @@ import { END_BLOCK_MESSAGE, endBlock, type EndBlock } from "./attendance";
 
 export type TermEndRefund = {
   engagementId: string;
+  /** The refund row closing wrote, for the card refund after commit; null when nothing was left to refund. */
+  refundId: string | null;
   studentProfileId: string;
   sessionsPurchased: number;
   sessionsDelivered: number;
@@ -36,7 +38,7 @@ const refundFields = () => ({
 
 export async function engagementsDueForTermEndRefund(
   institutionId: string,
-): Promise<TermEndRefund[]> {
+): Promise<Omit<TermEndRefund, "refundId">[]> {
   const rows = await db
     .select(refundFields())
     .from(engagement)
@@ -116,22 +118,24 @@ export async function closeWithRefund(
       ),
     );
 
-  const [refund] = await tx
+  const [due] = await tx
     .select(refundFields())
     .from(engagement)
     .where(and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)));
 
-  if (refund.refundMinor > 0) {
-    await record(tx, [
-      {
-        engagementId,
-        institutionId: params.institutionId,
-        type: "refund",
-        amountMinor: refund.refundMinor,
-        currency: refund.currency,
-      },
-    ]);
-  }
+  const [written] =
+    due.refundMinor > 0
+      ? await record(tx, [
+          {
+            engagementId,
+            institutionId: params.institutionId,
+            type: "refund",
+            amountMinor: due.refundMinor,
+            currency: due.currency,
+          },
+        ])
+      : [];
+  const refund = { ...due, refundId: written?.id ?? null };
 
   await tx
     .update(engagement)
@@ -203,8 +207,8 @@ export async function runTermEndRefunds(
         closeWithRefund(tx, { engagementId: candidate.engagementId, institutionId }),
       );
       if (refunded) refunds.push(refunded);
-      if (refunded && Date.now() < deadline) {
-        await refundThroughStripe({ engagementId: candidate.engagementId, institutionId }).catch((error) =>
+      if (refunded?.refundId && Date.now() < deadline) {
+        await refundThroughStripe({ id: refunded.refundId, engagementId: candidate.engagementId, institutionId }).catch((error) =>
           console.error(`[term-end] card refund for ${candidate.engagementId} left for the retry sweep`, errorFacts(error)),
         );
       }

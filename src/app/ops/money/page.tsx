@@ -213,16 +213,54 @@ function amounts(item: DiscrepancyItem): Fact[] {
   const money = (label: string, minor: number | null): Fact =>
     minor !== null && [label, <Money key={label} minor={minor} currency={item.currency} />];
   if (item.kind === "refund_failed") {
-    return [money("Failed refund", item.ledgerAmountMinor), money("Package refund waiting", item.heldRefundMinor)];
+    return item.row?.amountMinor === item.ledgerAmountMinor ? [] : [money("Failed refund", item.ledgerAmountMinor)];
   }
   return [money("Ledger", item.ledgerAmountMinor), money("Stripe", item.stripeAmountMinor)];
+}
+
+const ROW_LABEL: Partial<Record<NonNullable<DiscrepancyItem["row"]>["type"], string>> = {
+  refund: "Refund",
+  tutor_transfer: "Transfer",
+};
+
+/** Which refund or transfer the flag is about, so two on one package are never mixed up. */
+function namedRow(item: DiscrepancyItem): Fact[] {
+  const row = item.row;
+  const label = row && ROW_LABEL[row.type];
+  if (!row || !label) return [];
+  return [
+    [label, <Money key="row" minor={row.amountMinor} currency={item.currency} />],
+    [`${label} booked`, formatDayTime(row.bookedAt)],
+    row.sessionAt !== null && ["For the session on", formatDayTime(row.sessionAt)],
+    row.reference !== null && row.reference !== item.stripeReference && [`${label} id`, <StripeId key="row-ref" id={row.reference} />],
+  ];
+}
+
+function HeldRefunds({ item }: { item: DiscrepancyItem }) {
+  if (item.held.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="font-medium">Refunds held back</p>
+      <ul className="flex flex-col gap-2">
+        {item.held.map((held) => (
+          <li key={held.id} className="rounded-xl bg-surface-sunken px-3 py-2">
+            <p>
+              <Money minor={held.amountMinor} currency={item.currency} />, booked {formatDayTime(held.bookedAt)}
+            </p>
+            {held.sessionAt !== null ? <p className="text-muted">For the session on {formatDayTime(held.sessionAt)}</p> : null}
+            {held.stoppedForGood ? <p className="text-muted">Another flag stopped this one for good.</p> : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function Discrepancy({ item }: { item: DiscrepancyItem }) {
   const { title, body, note, settle } = explained(item);
   const answer = lastAnswer(item);
-  const choices = [
-    ...(settle ? [{ action: recordManualPaymentAction, ...settle }] : []),
+  const choices: NoteChoice[] = [
+    ...settle.map(({ heldRefundId, ...labels }) => ({ action: recordManualPaymentAction.bind(null, heldRefundId), ...labels })),
     ...(item.canResolve ? [RESOLVE] : []),
   ];
 
@@ -232,6 +270,7 @@ function Discrepancy({ item }: { item: DiscrepancyItem }) {
       title={title}
       facts={[
         ...people(item.engagement),
+        ...namedRow(item),
         ...amounts(item),
         item.stripeReference !== null && ["Stripe id", <StripeId key="ref" id={item.stripeReference} />],
         item.refundReference !== null && ["Refund", <StripeId key="refund" id={item.refundReference} />],
@@ -240,6 +279,7 @@ function Discrepancy({ item }: { item: DiscrepancyItem }) {
     >
       <p>{body}</p>
       {note ? <p className="text-muted">{note}</p> : null}
+      <HeldRefunds item={item} />
       {answer ? <p className="whitespace-pre-line [overflow-wrap:anywhere]">{answer}</p> : null}
     </ItemCard>
   );

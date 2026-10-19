@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, mock, test } from "node:test";
 
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { isLocalHost } from "@/server/db/local-host.mjs";
@@ -249,12 +249,14 @@ test("a student cancel of a one-time session 24 hours or more ahead closes it an
   const id = await pkg(student, "top_up");
   const sessionId = await session(id, hours(30));
 
-  assert.deepEqual(await cancelSession({ actor: student, sessionId }), {
+  const outcome = await cancelSession({ actor: student, sessionId });
+  const [refundRow] = await db.select({ id: ledgerEntry.id }).from(ledgerEntry).where(and(eq(ledgerEntry.engagementId, id), eq(ledgerEntry.type, "refund")));
+  assert.deepEqual(outcome, {
     late: false,
     keptMinor: 0,
     returnedMinor: 3_500,
     currency: "usd",
-    refund: { engagementId: id, studentProfileId: student.studentProfileId, sessionsPurchased: 1, sessionsDelivered: 0, refundMinor: 3_500, currency: "usd" },
+    refund: { engagementId: id, refundId: refundRow.id, studentProfileId: student.studentProfileId, sessionsPurchased: 1, sessionsDelivered: 0, refundMinor: 3_500, currency: "usd" },
   });
   assert.equal(await statusOf(id), "refunded");
   assert.deepEqual(await ledger(id), [

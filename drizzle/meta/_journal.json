@@ -232,6 +232,13 @@
       "when": 1792020020180,
       "tag": "0032_brave_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792440097440,
+      "tag": "0033_refund_failed_per_row",
+      "breakpoints": true
     }
   ]
 }

@@ -61,9 +61,9 @@ export type LedgerWrite = {
   stripeReference?: string | null;
 };
 
-export async function record(tx: Tx, entries: LedgerWrite[]): Promise<void> {
-  if (entries.length === 0) return;
-  await tx.insert(ledgerEntry).values(entries);
+export async function record(tx: Tx, entries: LedgerWrite[]): Promise<{ id: string }[]> {
+  if (entries.length === 0) return [];
+  return tx.insert(ledgerEntry).values(entries).returning({ id: ledgerEntry.id });
 }
 
 export type EngagementBalance = {
