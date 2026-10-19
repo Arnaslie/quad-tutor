@@ -5,7 +5,7 @@ Full source analysis in `docs/research/`. Where a decision came from independent
 agreement between reviewers who could not see each other's work, that is noted — it
 is the strongest signal in here.
 
-Last updated: 2026-10-18.
+Last updated: 2026-10-19.
 
 ---
 
@@ -181,6 +181,36 @@ drift:
 
 **Seed ~10–30 weed-out courses. Not the full catalog.** Concentration buys patience;
 a full catalog is vanity work.
+
+**Background checks through Checkr Basic are built behind `BACKGROUND_CHECKS`, which
+ships off** (user, 2026-10-19, `docs/proposals/background-check.md`). The user chose
+Checkr over running public-record searches ourselves and over people-search sites,
+which are not FCRA-safe. Checkr hosts the disclosure, the authorization and the
+adverse-action notices. We store a status, vendor ids and timestamps, never an SSN, a
+date of birth, an address history or any part of a report. With the flag off the app
+behaves exactly as before, and the Rejected entry on background checks still stands.
+Turning the flag on reverses it, for safety and not for credibility: sessions are one
+on one, in person, at a spot the tutor picks. `.edu` and grade proof still prove who
+the tutor is and that they can teach. The check answers a different question.
+
+These defaults are provisional until the owner confirms them, and the lawyer's answers
+in the proposal may change them:
+- A clear check is required to list, once the flag is on. It is a filter in the deck
+  query and never reaches `score.ts`, reliability or ranking.
+- The platform pays for the check.
+- The tutor ticks a consent box at their first grade-proof upload. The Checkr invite
+  goes out when an operator approves that first proof.
+- One check per tutor, not per course, and no re-check.
+- `needs_review` delists the tutor. Packages already paid keep running.
+- An operator may end the packages of a `not_cleared` tutor. This is the one exception
+  to "Only the student can end their package." Delivered sessions stay paid and the
+  rest refund.
+- A removed tutor keeps the pay they earned.
+- No per-tutor badge. Students see one platform-wide sentence, shown only while the
+  flag is on.
+
+The adjudication policy is the owner's to write. Until then an operator decides each
+result by hand in Checkr's dashboard and on `/ops/verifications`. No code adjudicates.
 
 ### Matching and interaction
 
