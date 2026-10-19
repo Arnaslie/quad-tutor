@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, mock, test } from "node:test";
 
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { isLocalHost } from "@/server/db/local-host.mjs";
@@ -33,7 +33,8 @@ import { sessionRatingState } from "@/server/modules/ratings/reads";
 import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
 import { packagesForStudent, sessionDetail } from "./reads";
-import { cancelSession, sessionsRemaining } from "./scheduling";
+import { bookSession, cancelSession, sessionsRemaining } from "./scheduling";
+import { availableSlots } from "./slots";
 import { closeWithRefund, endPackage } from "./termEnd";
 
 const databaseHost = new URL(process.env.DATABASE_URL ?? "postgres://unset").hostname;
@@ -289,20 +290,68 @@ test("a tutor cancel of a one-time session refunds nothing and the session goes 
 });
 
 test("a free one-time cancel racing the term-end sweep never deadlocks and leaves one full refund", async () => {
-  for (const headStartMs of [0, 1, 2, 4, 8]) {
-    const student = await person();
-    const id = await pkg(student, "top_up");
-    const sessionId = await session(id, hours(30));
+  const winners = new Set<string>();
+  for (const delayed of ["cancel", "sweep"] as const) {
+    for (const headStartMs of [0, 1, 2, 4, 8]) {
+      const student = await person();
+      const id = await pkg(student, "top_up");
+      const sessionId = await session(id, hours(30));
+      const start = <T>(who: typeof delayed, run: () => Promise<T>) =>
+        new Promise((resolve) => setTimeout(resolve, who === delayed ? headStartMs : 0)).then(run);
 
-    const results = await Promise.allSettled([
-      db.transaction((tx) => closeWithRefund(tx, { engagementId: id, institutionId })),
-      new Promise((resolve) => setTimeout(resolve, headStartMs)).then(() => cancelSession({ actor: student, sessionId })),
-    ]);
-    assert.equal(results[0].status, "fulfilled", `head start ${headStartMs}ms: ${results[0].status === "rejected" && results[0].reason}`);
-    if (results[1].status === "rejected") assert.ok(results[1].reason instanceof SessionError, String(results[1].reason));
-    assert.deepEqual((await ledger(id)).filter((row) => row.type === "refund"), [{ type: "refund", amountMinor: 3_500 }], `head start ${headStartMs}ms`);
-    assert.equal(await statusOf(id), "refunded");
+      const [sweep, cancel] = await Promise.allSettled([
+        start("sweep", () => db.transaction((tx) => closeWithRefund(tx, { engagementId: id, institutionId }))),
+        start("cancel", () => cancelSession({ actor: student, sessionId })),
+      ]);
+      const label = `${delayed} delayed ${headStartMs}ms`;
+      assert.equal(sweep.status, "fulfilled", `${label}: ${sweep.status === "rejected" && sweep.reason}`);
+      if (cancel.status === "rejected") assert.ok(cancel.reason instanceof SessionError, String(cancel.reason));
+      winners.add(cancel.status === "fulfilled" && cancel.value.refund ? "cancel" : "sweep");
+      assert.deepEqual((await ledger(id)).filter((row) => row.type === "refund"), [{ type: "refund", amountMinor: 3_500 }], label);
+      assert.equal(await statusOf(id), "refunded", label);
+    }
   }
+  assert.deepEqual([...winners].sort(), ["cancel", "sweep"], "both orders were exercised");
+});
+
+test("a booking that read a one-time package as open before a free cancel closed it is refused", async () => {
+  const student = await person();
+  const id = await pkg(student, "top_up");
+  const sessionId = await session(id, hours(30));
+  const slot = (await availableSlots({ tutorProfileId: tutor.tutorProfileId!, institutionId })).find((at) => at > hours(48))!;
+
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let locked!: () => void;
+  const tutorLocked = new Promise<void>((resolve) => (locked = resolve));
+  const holder = db.transaction(async (tx) => {
+    await tx.select({ id: tutorProfile.id }).from(tutorProfile).where(eq(tutorProfile.id, tutor.tutorProfileId!)).for("update");
+    locked();
+    await released;
+  });
+  await tutorLocked;
+
+  const booking = bookSession({ actor: student, engagementId: id, slotStartsAt: slot }).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  for (let tries = 0; tries < 200; tries += 1) {
+    const [{ waiting }] = (await db.execute(
+      sql`select count(*)::int as waiting from pg_locks where not granted and locktype = 'transactionid'`,
+    )) as unknown as { waiting: number }[];
+    if (waiting > 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.equal((await cancelSession({ actor: student, sessionId })).refund?.refundMinor, 3_500);
+  release();
+  await holder;
+
+  const refused = await booking;
+  assert.ok(refused instanceof SessionError, `the booking went through: ${String(refused)}`);
+  assert.match(refused.message, /That package is closed/);
+  const sessions = await db.select({ status: sessionBooking.status }).from(sessionBooking).where(eq(sessionBooking.engagementId, id));
+  assert.deepEqual(sessions, [{ status: "cancelled" }]);
 });
 
 test("cancelling the last session of a four-pack inside 12 hours closes it as completed and refunds $8.75", async () => {

@@ -149,6 +149,13 @@ export async function bookSession(params: {
     if (remaining <= 0) {
       throw new SessionError("You have used every session in this package.");
     }
+    // A one-time cancel closes the package under no key update, which our key share does not block,
+    // and frees its session. Read after the count, so a close the count missed is seen here.
+    const [current] = await tx
+      .select({ status: engagement.status })
+      .from(engagement)
+      .where(eq(engagement.id, target.id));
+    if (current?.status !== "active") throw new SessionError("That package is closed.");
 
     const [created] = await tx
       .insert(sessionBooking)

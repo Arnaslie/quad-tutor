@@ -192,7 +192,7 @@ drift:
   | `acceptRequest` | `student_profile`, then that `match_request` (for update of `match_request`) |
   | `purchasePackage` | `tutor_profile` (no key update), then `match_request` |
   | `purchaseTopUp` | `tutor_profile` |
-  | `bookSession` | `engagement` (for key share; re-read, refused unless `active`), then `tutor_profile` |
+  | `bookSession` | `engagement` (for key share; re-read, refused unless `active`), then `tutor_profile`. The status is read again after the count of sessions left: a one-time cancel closes the package under no key update, which the key share does not block, and frees its session |
   | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update). When the package is used up, `closeIfUsedUp` closes it under that same no-key-update lock |
   | `cancelSession` | `engagement` (for key share), then `session_booking` (for update), then `tutor_profile` when the cancel keeps part of the price. The kept share's ledger rows take the engagement for key share through their foreign key, so the cancel takes it first, in the term-end refund's order, or the two deadlock. A student cancel of a one-time session closes it in the same transaction, raising the engagement to no key update. Closing a used-up package otherwise runs after commit in its own transaction: `engagement` (for update), then its sessions |
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
