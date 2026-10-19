@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/server/db";
@@ -7,13 +7,14 @@ import type { TutorActor } from "@/server/modules/identity/actor";
 
 import { appUrl } from "./checkout-session";
 import { kycStatusOf, payoutStageOf, type KycStatus, type PayoutStage } from "./kyc";
+import type { PayoutSpeed } from "./payout-speed";
 import { errorFacts, stripeGateway, type ConnectAccount } from "./stripe";
 
-export type Payouts = { accountId: string | null; status: KycStatus; stage: PayoutStage };
+export type Payouts = { accountId: string | null; status: KycStatus; stage: PayoutStage; speed: PayoutSpeed };
 
 export async function payoutsOf(actor: TutorActor): Promise<Payouts> {
   const [row] = await db
-    .select({ accountId: tutorProfile.stripeAccountId, status: tutorProfile.kycStatus })
+    .select({ accountId: tutorProfile.stripeAccountId, status: tutorProfile.kycStatus, speed: tutorProfile.payoutSpeed })
     .from(tutorProfile)
     .where(and(eq(tutorProfile.id, actor.tutorProfileId), eq(tutorProfile.institutionId, actor.institutionId)));
   if (!row) throw new Error("No tutor profile on this campus.");
@@ -52,6 +53,43 @@ export async function onboardingLink(actor: TutorActor): Promise<string> {
   });
 }
 
+export async function convergeSpeed(account: ConnectAccount, speed: PayoutSpeed): Promise<void> {
+  if (account.payoutSpeed === speed) return;
+  try {
+    const updated = await stripeGateway().setPayoutSpeed(account.id, speed);
+    if (updated.payoutSpeed !== speed) {
+      console.error("[connect] payout speed did not take", JSON.stringify({ accountId: account.id, speed, read: updated.payoutSpeed }));
+    }
+  } catch (error) {
+    console.error("[connect] payout speed sync failed", errorFacts(error));
+  }
+}
+
+export type OffSpeed = { account: ConnectAccount; speed: PayoutSpeed };
+
+/** Each account this campus holds whose schedule is not its tutor's stored speed. */
+export async function accountsOffSpeed(institutionId: string, accounts: ConnectAccount[]): Promise<OffSpeed[]> {
+  const ours = accounts.filter((account) => account.institutionId === institutionId);
+  if (ours.length === 0) return [];
+  const held = await db
+    .select({ accountId: tutorProfile.stripeAccountId, speed: tutorProfile.payoutSpeed })
+    .from(tutorProfile)
+    .where(
+      and(
+        eq(tutorProfile.institutionId, institutionId),
+        inArray(
+          tutorProfile.stripeAccountId,
+          ours.map((account) => account.id),
+        ),
+      ),
+    );
+  const speeds = new Map(held.map((row) => [row.accountId, row.speed]));
+  return ours.flatMap((account) => {
+    const speed = speeds.get(account.id);
+    return speed && speed !== account.payoutSpeed ? [{ account, speed }] : [];
+  });
+}
+
 async function applyAccount(account: ConnectAccount, institutionId: string): Promise<KycStatus | null> {
   const tutorProfileId = account.tutorProfileId;
   if (tutorProfileId !== null && !z.uuid().safeParse(tutorProfileId).success) return null;
@@ -66,8 +104,10 @@ async function applyAccount(account: ConnectAccount, institutionId: string): Pro
         tutorProfileId ? eq(tutorProfile.id, tutorProfileId) : undefined,
       ),
     )
-    .returning({ id: tutorProfile.id });
-  return row ? status : null;
+    .returning({ speed: tutorProfile.payoutSpeed });
+  if (!row) return null;
+  await convergeSpeed(account, row.speed);
+  return status;
 }
 
 async function refreshAccount(accountId: string, institutionId: string): Promise<{ status: KycStatus; stage: PayoutStage } | null> {
@@ -87,11 +127,21 @@ export async function payoutsFor(actor: TutorActor): Promise<Payouts> {
   if (!stored.accountId) return stored;
   try {
     const fresh = await refreshAccount(stored.accountId, actor.institutionId);
-    return fresh ? { accountId: stored.accountId, ...fresh } : stored;
+    return fresh ? { ...stored, ...fresh } : stored;
   } catch (error) {
     console.error("[connect] account refresh failed", errorFacts(error));
     return stored;
   }
+}
+
+export async function choosePayoutSpeed(actor: TutorActor, speed: PayoutSpeed): Promise<Payouts> {
+  const [row] = await db
+    .update(tutorProfile)
+    .set({ payoutSpeed: speed })
+    .where(and(eq(tutorProfile.id, actor.tutorProfileId), eq(tutorProfile.institutionId, actor.institutionId)))
+    .returning({ id: tutorProfile.id });
+  if (!row) throw new Error("No tutor profile on this campus.");
+  return payoutsFor(actor);
 }
 
 export type ConnectOutcome = "kyc_synced" | "foreign";
