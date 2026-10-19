@@ -56,7 +56,6 @@ const scheduleOf = (body: URLSearchParams) =>
 
 const WEEKLY = {
   "settings[payouts][schedule][interval]": "weekly",
-  "settings[payouts][schedule][weekly_anchor]": "friday",
   "settings[payouts][schedule][weekly_payout_days][0]": "friday",
 };
 

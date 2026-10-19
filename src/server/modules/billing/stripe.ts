@@ -235,7 +235,7 @@ function sessionView(session: Stripe.Checkout.Session): CheckoutSession {
 }
 
 const PAYOUT_SCHEDULES = {
-  weekly: { interval: "weekly", weekly_anchor: "friday", weekly_payout_days: ["friday"] },
+  weekly: { interval: "weekly", weekly_payout_days: ["friday"] },
   daily: { interval: "daily" },
 } satisfies Record<PayoutSpeed, Stripe.AccountUpdateParams.Settings.Payouts.Schedule>;
 

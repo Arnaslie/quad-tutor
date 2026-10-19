@@ -790,9 +790,9 @@ take", so an account that never settles shows up rather than retrying silently. 
 lock is held across that call. Accounts made while payouts were daily move to weekly this
 way, with no script. A schedule this app does not offer, such as `manual` set in a
 Dashboard or Monday and Friday, reads as no speed and is put back. The weekly update sets
-both `weekly_anchor` and `weekly_payout_days` to Friday, since a read checks the days
-first. The update carries no fixed idempotency key: it sets an absolute value, so a repeat
-is harmless, while a key per speed would replay a stale answer after a switch back within
+only `weekly_payout_days` to Friday: Stripe refuses a request that also sends
+`weekly_anchor`. A read checks the days first and falls back to the anchor. The
+update carries no fixed idempotency key: it sets an absolute value, so a repeat is harmless, while a key per speed would replay a stale answer after a switch back within
 24 hours. A failed schedule update is logged and never blocks the KYC sync; the next
 event, view or daily pass tries again.
 
