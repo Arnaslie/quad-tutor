@@ -7,6 +7,7 @@ import { db } from "@/server/db";
 import { engagement, ledgerEntry, moneyDiscrepancy, paymentDispute, tutorProfile } from "@/server/db/schema";
 
 import { syncCheckout } from "./checkout-session";
+import { accountsOffSpeed, convergeSpeed, type OffSpeed } from "./connect";
 import { ledgerRowBlocker, recordDiscrepancy, type Ids } from "./discrepancy";
 import { handleDisputeEvent } from "./disputes";
 import { claim, release, withLease } from "./lease";
@@ -436,6 +437,7 @@ async function reconcileCampus(
   });
 
   const daily = async () => {
+    let offSpeed: OffSpeed[] = [];
     await checkKey(institutionId);
     return (
       (await each(await unstampedFlags(institutionId), (flag) => flag.id, settleUnstampedFlag)) &&
@@ -446,7 +448,13 @@ async function reconcileCampus(
       })) &&
       (await each([institutionId], (id) => `orphaned account scan of ${id}`, async (id) => {
         counts.resolved += await resolveHeldAccounts(id);
-        await flagOrphanedAccounts(id, await accounts());
+        const listed = await accounts();
+        await flagOrphanedAccounts(id, listed);
+        offSpeed = await accountsOffSpeed(id, listed);
+        return null;
+      })) &&
+      (await each(offSpeed, ({ account }) => `payout speed of ${account.id}`, async ({ account, speed }) => {
+        await convergeSpeed(account, speed);
         return null;
       }))
     );
@@ -467,7 +475,8 @@ async function reconcileCampus(
 
 /**
  * Compares each engagement active in the last week with Stripe once a day, spread over the cron runs, and once a
- * day settles the flags Stripe can now answer, refreshes open disputes and looks for Connect accounts no tutor holds.
+ * day settles the flags Stripe can now answer, refreshes open disputes, looks for Connect accounts no tutor holds and
+ * puts each held account back on its tutor's payout speed.
  * It never corrects the ledger: a divergence becomes a discrepancy, which pauses the engagement's transfers.
  */
 export async function runReconciliation(
