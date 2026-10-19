@@ -322,34 +322,40 @@ test("a booking that read a one-time package as open before a free cancel closed
 
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
-  let locked!: () => void;
-  const tutorLocked = new Promise<void>((resolve) => (locked = resolve));
+  let locked!: (pid: number) => void;
+  const holderPid = new Promise<number>((resolve) => (locked = resolve));
   const holder = db.transaction(async (tx) => {
     await tx.select({ id: tutorProfile.id }).from(tutorProfile).where(eq(tutorProfile.id, tutor.tutorProfileId!)).for("update");
-    locked();
+    const [{ pid }] = (await tx.execute(sql`select pg_backend_pid() as pid`)) as unknown as { pid: number }[];
+    locked(pid);
     await released;
   });
-  await tutorLocked;
 
-  const booking = bookSession({ actor: student, engagementId: id, slotStartsAt: slot }).then(
-    () => null,
-    (error: unknown) => error,
-  );
-  for (let tries = 0; tries < 200; tries += 1) {
-    const [{ waiting }] = (await db.execute(
-      sql`select count(*)::int as waiting from pg_locks where not granted and locktype = 'transactionid'`,
-    )) as unknown as { waiting: number }[];
-    if (waiting > 0) break;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+  try {
+    const pid = await holderPid;
+    const booking = bookSession({ actor: student, engagementId: id, slotStartsAt: slot }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    let blocked = false;
+    for (let tries = 0; tries < 500 && !blocked; tries += 1) {
+      const [row] = (await db.execute(
+        sql`select count(*)::int as n from pg_stat_activity where ${pid} = any(pg_blocking_pids(pid))`,
+      )) as unknown as { n: number }[];
+      blocked = row.n > 0;
+      if (!blocked) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(blocked, "the booking read the package and is waiting on the tutor");
+
+    assert.equal((await cancelSession({ actor: student, sessionId })).refund?.refundMinor, 3_500);
+    release();
+    const refused = await booking;
+    assert.ok(refused instanceof SessionError, `the booking went through: ${String(refused)}`);
+    assert.match(refused.message, /That package is closed/);
+  } finally {
+    release();
+    await holder;
   }
-
-  assert.equal((await cancelSession({ actor: student, sessionId })).refund?.refundMinor, 3_500);
-  release();
-  await holder;
-
-  const refused = await booking;
-  assert.ok(refused instanceof SessionError, `the booking went through: ${String(refused)}`);
-  assert.match(refused.message, /That package is closed/);
   const sessions = await db.select({ status: sessionBooking.status }).from(sessionBooking).where(eq(sessionBooking.engagementId, id));
   assert.deepEqual(sessions, [{ status: "cancelled" }]);
 });

@@ -154,7 +154,7 @@ export async function bookSession(params: {
     const [current] = await tx
       .select({ status: engagement.status })
       .from(engagement)
-      .where(eq(engagement.id, target.id));
+      .where(and(eq(engagement.id, target.id), eq(engagement.institutionId, params.actor.institutionId)));
     if (current?.status !== "active") throw new SessionError("That package is closed.");
 
     const [created] = await tx
