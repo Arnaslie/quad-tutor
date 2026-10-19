@@ -1,7 +1,8 @@
 # Tutor background checks
 
-Status: **proposal, waiting for the owner's approval.** Nothing is built. Written
-2026-10-18 against `origin/main` at `2e9d50a`. Every code reference below was checked at
+Status: **approved 2026-10-19, built behind the `BACKGROUND_CHECKS` flag, which ships
+off.** The open owner decisions below take their recommended defaults for now (see
+`docs/decisions.md`). Written 2026-10-18 against `origin/main` at `2e9d50a`. Every code reference below was checked at
 that commit. This is not legal advice. It is a research summary to take to a lawyer.
 
 ## The ask
