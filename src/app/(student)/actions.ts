@@ -330,10 +330,10 @@ export async function cancel(
 }
 
 function cancelledMessage(outcome: Awaited<ReturnType<typeof cancelSession>>): string {
-  if (outcome.keptMinor === 0) return "Cancelled. The session goes back in your package.";
   if (outcome.refund) {
     return `Cancelled. ${formatMinor(outcome.refund.refundMinor, outcome.refund.currency)} is on its way back to you.`;
   }
+  if (outcome.keptMinor === 0) return "Cancelled. The session goes back in your package.";
   return `Cancelled. ${formatMinor(outcome.returnedMinor, outcome.currency)} goes back to you when the package ends.`;
 }
 

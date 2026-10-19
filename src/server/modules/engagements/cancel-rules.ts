@@ -25,3 +25,8 @@ export function cancelSplit(
   const keptMinor = Math.floor((sessionMinor * keptShareBp(hours, by)) / 10_000);
   return { keptMinor, returnedMinor: sessionMinor - keptMinor };
 }
+
+/** A one-time session has no package to go back to, so a student cancel sends what it returns to the card. */
+export function cancelClosesPackage(sessionsPurchased: number, by: Canceller): boolean {
+  return by === "student" && sessionsPurchased === 1;
+}

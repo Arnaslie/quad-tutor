@@ -12,7 +12,7 @@ import {
   lapseCopy,
 } from "@/server/modules/engagements/answer-outcome";
 import { isLateCancel, type ViewerAction } from "@/server/modules/engagements/attendance";
-import { cancelSplit, hoursBefore } from "@/server/modules/engagements/cancel-rules";
+import { cancelClosesPackage, cancelSplit, hoursBefore } from "@/server/modules/engagements/cancel-rules";
 
 import { cancel, confirm, deny, type ActionResult } from "../../actions";
 
@@ -21,6 +21,7 @@ type CancelPrice = {
   sessionMinor: number;
   currency: string;
   lastInPackage: boolean;
+  sessionsPurchased: number;
 };
 
 export function SessionActions({
@@ -156,6 +157,15 @@ function Cancel({
                 ? "It goes back to your card now, and can take 5 to 10 days to show."
                 : "It goes back to your card when the package ends: at the end of term, or sooner if you end it yourself."}{" "}
               The session counts as used.
+            </p>
+          </>
+        ) : cancelClosesPackage(price.sessionsPurchased, "student") ? (
+          <>
+            <p className="font-medium">
+              Cancel now and you get all {money(split.returnedMinor)} back.
+            </p>
+            <p className="text-muted">
+              It goes back to your card now, and can take 5 to 10 days to show.
             </p>
           </>
         ) : (

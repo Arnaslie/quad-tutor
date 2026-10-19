@@ -592,7 +592,7 @@ export async function sessionDetail(params: {
     denialNote: row.denialNote,
     viewerRole: row.role,
     sessionsPurchased: row.sessionsPurchased,
-    sessionsRemaining: remaining,
+    sessionsRemaining: row.engagementStatus === "active" ? remaining : 0,
     sessionMinor: perSessionMinor(row),
     currency: row.currency,
     lastInPackage: remaining === 0 && others.open === 0,

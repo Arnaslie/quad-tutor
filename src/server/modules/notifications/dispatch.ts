@@ -92,6 +92,7 @@ const sessionParties = {
   tutorName: tutorUser.name,
   code: courseCodeAlias.code,
   title: course.title,
+  sessionsPurchased: engagement.sessionsPurchased,
 };
 
 type SessionRow = Awaited<ReturnType<typeof sessionQuery>>[number];
@@ -118,6 +119,7 @@ function addressed(row: SessionRow, side: Side) {
     courseLabel: row.code ?? row.title,
     scheduledAt: row.scheduledAt,
     sessionId: row.sessionId,
+    sessionsPurchased: row.sessionsPurchased,
   };
 }
 

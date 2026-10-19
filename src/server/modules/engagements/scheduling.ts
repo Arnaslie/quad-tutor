@@ -28,9 +28,9 @@ import {
   isLateCancel,
   remindedAtForNewBooking,
 } from "./attendance";
-import { cancelSplit, hoursBefore } from "./cancel-rules";
+import { cancelClosesPackage, cancelSplit, hoursBefore } from "./cancel-rules";
 import { recognise } from "./confirmation";
-import { closeIfUsedUp, type TermEndRefund } from "./termEnd";
+import { closeIfUsedUp, closeWithRefund, type TermEndRefund } from "./termEnd";
 
 export async function sessionsRemaining(params: {
   exec?: Executor;
@@ -248,12 +248,22 @@ export async function cancelSession(params: {
       });
     }
 
+    // Raises the engagement's key share to no key update, as a confirmation closing a used-up package does.
+    const refund = cancelClosesPackage(session.sessionsPurchased, session.role)
+      ? await closeWithRefund(tx, {
+          engagementId: session.engagementId,
+          institutionId: session.institutionId,
+          lock: "no key update",
+        })
+      : null;
+
     return {
       late,
       keptMinor,
       returnedMinor,
       currency: session.currency,
       engagementId: session.engagementId,
+      refund,
     };
   });
 
@@ -261,14 +271,15 @@ export async function cancelSession(params: {
   // The cancel has committed either way; a package left open here is refunded at term end or when ended.
   const ids = { engagementId: cancelled.engagementId, institutionId: params.actor.institutionId };
   const refund =
-    cancelled.keptMinor > 0
+    cancelled.refund ??
+    (cancelled.keptMinor > 0
       ? await db
           .transaction((tx) => closeIfUsedUp(tx, ids))
           .catch((error: unknown) => {
             console.error(`[cancel] closing ${ids.engagementId} left for the term-end sweep`, error);
             return null;
           })
-      : null;
+      : null);
 
   return {
     late: cancelled.late,
