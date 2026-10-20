@@ -364,7 +364,9 @@ test("a tester can buy and end student-refund's package and top up student-done"
   const [request] = await requestsForStudent(refunder);
   const slots = await slotsForRequest({ actor: refunder, requestId: request.id });
   const { engagementId } = await buyPackage({ actor: refunder, requestId: request.id, anchorExamId: null, slotStartsAt: slots.at(-1)! });
-  assert.deepEqual(await endPackage({ actor: refunder, engagementId }), {
+  const { refundId, ...ended } = (await endPackage({ actor: refunder, engagementId }))!;
+  assert.match(refundId ?? "", /^[0-9a-f-]{36}$/, "names the refund row it wrote");
+  assert.deepEqual(ended, {
     engagementId,
     studentProfileId: refunder.studentProfileId,
     sessionsPurchased: 8,

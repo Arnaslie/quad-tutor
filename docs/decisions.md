@@ -82,8 +82,8 @@ How the money moves:
   delivered session, against the fee meter. The kept share rounds down, so an odd
   cent goes back to the student. The session stays `cancelled`, but it counts as used:
   it is not back in the package.
-- **The rest of its price stays deferred.** It goes back to the card in the package's
-  one refund: at term end, when the student ends the package, or straight away when
+- **The rest of its price stays deferred.** It goes back to the card in the package
+  refund: at term end, when the student ends the package, or straight away when
   the cancel leaves nothing to book and nothing scheduled or disputed. When the
   package is used up by a later confirmation instead, the refund row is written then
   and the refund retry sweep sends it on its next run.
@@ -96,11 +96,10 @@ How the money moves:
 - **A package with no attended session closes `refunded`** even when a kept cancel
   paid the tutor. The status says nothing was delivered, not that nothing was earned;
   the ledger says what was.
-- **Why the partial refund waits.** The ledger allows one refund per engagement
-  (`moneyViolations`, the refund retry and the discrepancy flags all rely on it), so a
-  cancel cannot send its own card refund. The package refund is what the ledger
-  still defers, purchase less `session_earned` less refunds, which covers both
-  undelivered sessions and the returned share of kept cancels.
+- **The partial refund waits for the package refund.** The package refund is what the
+  ledger still defers, purchase less `session_earned` less refunds, which covers both
+  undelivered sessions and the returned share of kept cancels. (It waited because the
+  ledger allowed one refund per engagement. Since 2026-10-19 it allows many, below.)
 - **A tutor cancel moves no money.** The session goes back in the package. When the
   student is refunded in the end, the platform has already paid the card fee to
   collect, and it absorbs that, as it does for every refund.
@@ -202,7 +201,7 @@ drift:
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
   | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation or a priced cancel could hold (inside 24h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
   | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment` and the Checkout Session id matches), then its `held` `session_booking` rows. An amount or currency mismatch cancels both and inserts a `money_discrepancy` row in the same transaction |
-  | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the unstamped `refund` row, calls Stripe, then stamps `re_…` with `where stripe_reference is null`. The retry sweep runs each campus under a `sweep_lease` row (a timestamp claimed by one conditional upsert, not a lock) |
+  | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the one unstamped `refund` row it names by id, calls Stripe, then stamps `re_…` with `where stripe_reference is null`. A held refund ops pays by hand is stamped with the same guard repeated on the row, since the subquery that finds it is not re-checked after a lock wait. The retry sweep runs each campus under a `sweep_lease` row (a timestamp claimed by one conditional upsert, not a lock) |
   | transfer sweep | `engagement` (no key update) alone. Re-reads what is owed and the pause after the lock, inserts the unstamped `tutor_transfer` row and commits; Stripe is called after commit, and the stamp `where stripe_reference is null` is the only guard after that. Each campus runs under its own `sweep_lease` row |
 
   The rules behind it:
@@ -790,8 +789,8 @@ on an engagement with no `processor_fee` row (no charge was ever recorded, as wi
 with a fee is never flagged on a 404, so a key for the wrong account cannot flag paid
 refunds en masse. A refusal first re-lists the refunds and settles with ours if Stripe
 already holds one. A refund refused with none, or that fails later (closed or lost card),
-writes a `refund_failed` discrepancy keyed on the PaymentIntent, and the row keeps any
-`re_…` it was tried against.
+writes a `refund_failed` discrepancy keyed on that refund row (its id in `stripe_reference`),
+and the row keeps any `re_…` it was tried against.
 
 Code never re-sends a refund to that card. A discrepancy carries `ledger_entry_id` when it
 is about a ledger refund row (a failure or a foreign refund), and any discrepancy on a row
@@ -799,40 +798,59 @@ stops that row's automatic refund whether or not it is resolved. A refund of a p
 that was never booked has no row; a `refund_failed` on its PaymentIntent stops that
 PaymentIntent's refunds the same way. The halt is per row or per PaymentIntent, never per
 engagement: a failed refund of a stray payment on a superseded Checkout Session does not
-hold up the engagement's own term-end or end-early refund. The retry sweep reports rows it
-skips as `blocked`, so a halted row stays visible in the cron response. A Dashboard refund
-that fails has no row of ours, so its `refund_failed` names only the PaymentIntent. It holds
-the engagement's own refund rather than stopping it: the term-end or end-early refund waits,
-counted as `blocked`, until ops answers the flag, so it is not sent to a card that just
-bounced one. Resolving the flag releases that refund to the card. Settling it by hand
-stamps the held refund row `manual:<discrepancy id>` in the same transaction, so it stays
-the engagement's one refund and no sweep sends it; settled before the package ends, there
-is no row yet and the flag only resolves. A row that fails on a `refund_failed` ops already
-resolved reopens it at that row's amount, because the money it names is new. So does a
-further Dashboard refund that fails on the same PaymentIntent, at its own amount, and it
-holds the package refund again. The flag records the id of every refund whose failure it
-carries in `failed_refund_ids`, and only a refund not in that list is news: the
-reconciliation replays every failed refund on the PaymentIntent each day, so an amount
+hold up the engagement's own refunds. The retry sweep reports rows it skips as `blocked`,
+so a halted row stays visible in the cron response.
+
+**An engagement can carry many refund rows** (user, 2026-10-19). Each is its own unit: it
+is sent on its own key `refund:<ledger_entry_id>`, its failure is flagged on that row, and
+every ops answer names one row. The money check no longer allows one refund per
+engagement. It checks that refunds together never exceed the purchase, that deferred
+money never goes below zero, and that it is zero once the package is closed. A refund on
+the charge is foreign only when no refund row of the engagement accounts for it: one
+tagged with another of its rows, or a Dashboard refund ops booked onto one or answered, is not.
+
+A Dashboard refund that fails has no row of ours, so its `refund_failed` is keyed on the
+PaymentIntent and names no row. It holds every unsent refund of the engagement rather than
+stopping them: each waits, counted as `blocked`, until ops answers the flag, so none is sent
+to a card that just bounced one. Its card on `/ops/money` lists each held refund with its
+amount, when it was booked and the session it is for. Ops pays one by hand with its own
+button, which stamps that row `manual:<discrepancy id>:<row id>` and the operator in
+`recorded_by_user_id`; the flag resolves once it holds nothing more. Resolving it instead
+releases the rest to the card. With nothing held, the flag can only be resolved. A refund
+of one of our rows that Stripe took and the card then bounced holds the rest the same way,
+on that row's card. Paying a held refund there never resolves it, since the row still owes
+its own refund: ops resolves it once that is paid. A create Stripe refused names no bounce
+and holds nothing. Each by-hand payment adds its amount and note to the flag's note, which
+the final answer keeps. A further
+Dashboard refund that fails on the same PaymentIntent reopens that flag at its own amount
+and keeps ops' last note. A failure of one of our rows never lands on it: each row's failure
+has its own card, which says what that row owes. The flag records the id of every refund
+whose failure it carries in `failed_refund_ids`, and only a refund not in that list is news:
+the reconciliation replays every failed refund on the PaymentIntent each day, so an amount
 cannot tell a new failure from an old one, and two failures of different amounts would
-reopen the flag every day. A reopen keeps the note ops resolved it with, unless the news
-is a row of ours failing. So a flag that names the package refund and still carries a note
-was answered after that refund failed, and its card does not ask ops to pay it again. A
-newest-failure test cannot tell this: a Dashboard refund that bounces before ops answers
-would read as answered. Ops pays the
-student another way and records it with `recordManualSettlement` in `billing/ops.ts`
-(formerly `recordManualRefund`), which resolves the discrepancy and, when it names an
-unstamped refund or transfer row, stamps that row `manual:<discrepancy id>` in the same
-transaction. A row Stripe stamped in the meantime refuses the settlement, since the money
-moved there. A flag on a refund made in the Dashboard instead stamps the row with that
-refund's `re_…`, since it is the refund that happened, so the reconciliation counts it and
-the row references the Stripe object. The row keeps its amount, as a stamp is the only
-update a row takes: a Dashboard refund smaller or larger than the row leaves the
-difference on the PaymentIntent's charge flag, which ops clears by refunding the rest in
-the Dashboard or resolves. The row stays the engagement's one row of its kind, no sweep
-sees a stamped row, and `db:check-money` accepts only `re_…` or `manual:…` on a refund
-row. A flag naming an unstamped refund or transfer row can only be settled, never just
-resolved: resolved, the row would stay stopped, unsent and unstamped for good, and the
-transfer sweep would count it as sent.
+reopen the flag every day.
+
+A live Dashboard refund found by one row is flagged on that row, and the engagement's other
+unsent refunds wait behind it until ops books it. Ops pays the student another way and
+records it with `recordManualSettlement` in `billing/ops.ts`, which resolves the
+discrepancy and, when it names an unstamped refund or transfer row, stamps that row
+`manual:<discrepancy id>` in the same transaction. A row Stripe stamped in the meantime
+refuses the settlement, since the money moved there. A flag on a refund made in the
+Dashboard instead stamps the row with that refund's `re_…`, since it is the refund that
+happened, so the reconciliation counts it and the row references the Stripe object. The row
+keeps its amount, as a stamp is the only update a row takes: a Dashboard refund smaller or
+larger than the row leaves the difference on the PaymentIntent's charge flag, which ops
+clears by refunding the rest in the Dashboard or resolves. No sweep sees a stamped row, and
+`db:check-money` accepts only `re_…` or `manual:…` on a refund row. A flag naming an
+unstamped refund or transfer row can only be settled, never just resolved: resolved, the
+row would stay stopped, unsent and unstamped for good, and the transfer sweep would count
+it as sent.
+
+Migration 0034 re-keys the `refund_failed` flags that already named a row from their
+PaymentIntent to that row. A flag that had also carried a Dashboard failure on the same
+PaymentIntent keeps that refund's id in `failed_refund_ids`, so its next daily replay opens
+a new PaymentIntent flag for it. That is accepted: before launch every such flag is test
+money.
 
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.** Transfers
 go per engagement once the tutor is verified and the engagement has no open discrepancy or
