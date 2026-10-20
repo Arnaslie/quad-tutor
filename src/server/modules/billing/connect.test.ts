@@ -9,7 +9,8 @@ import { isLocalHost } from "@/server/db/local-host.mjs";
 import { institution, studentProfile, tutorProfile, user } from "@/server/db/schema";
 import type { TutorActor } from "@/server/modules/identity/actor";
 
-import { ensureConnectAccount, onboardingLink, payoutsFor } from "./connect";
+import { choosePayoutSpeed, ensureConnectAccount, onboardingLink, payoutsFor } from "./connect";
+import type { PayoutSpeed } from "./payout-speed";
 import { GatewayError, fakeStripe, signWebhookPayload, stripeGateway } from "./stripe";
 import { handleStripeWebhook } from "./webhook";
 
@@ -48,7 +49,7 @@ async function tutor(institutionId = home): Promise<TutorActor> {
 
 async function profile(actor: TutorActor) {
   const [row] = await db
-    .select({ accountId: tutorProfile.stripeAccountId, status: tutorProfile.kycStatus })
+    .select({ accountId: tutorProfile.stripeAccountId, status: tutorProfile.kycStatus, speed: tutorProfile.payoutSpeed })
     .from(tutorProfile)
     .where(eq(tutorProfile.id, actor.tutorProfileId));
   return row;
@@ -56,6 +57,21 @@ async function profile(actor: TutorActor) {
 
 async function deliver(event: { payload: string; signature: string }) {
   return handleStripeWebhook(event.payload, event.signature);
+}
+
+async function scheduleCalls(work: () => Promise<unknown>): Promise<[string, PayoutSpeed][]> {
+  const calls: [string, PayoutSpeed][] = [];
+  const real = stripeGateway().setPayoutSpeed;
+  stripeGateway().setPayoutSpeed = (accountId, speed) => {
+    calls.push([accountId, speed]);
+    return real(accountId, speed);
+  };
+  try {
+    await work();
+  } finally {
+    stripeGateway().setPayoutSpeed = real;
+  }
+  return calls;
 }
 
 before(async () => {
@@ -101,11 +117,16 @@ test("onboarding mints a link back to /tutor/payouts, and the return page re-rea
   assert.equal((await payoutsFor(actor)).status, "not_started");
 
   await fakeStripe.setAccount(link.accountId, "verified");
-  assert.deepEqual(await payoutsFor(actor), { accountId: link.accountId, status: "verified", stage: "verified" });
+  assert.deepEqual(await payoutsFor(actor), { accountId: link.accountId, status: "verified", stage: "verified", speed: "weekly" });
   assert.equal((await profile(actor)).status, "verified");
 
   await fakeStripe.setAccount(link.accountId, "rejected");
-  assert.deepEqual(await payoutsFor(actor), { accountId: link.accountId, status: "restricted", stage: "needs_support" });
+  assert.deepEqual(await payoutsFor(actor), {
+    accountId: link.accountId,
+    status: "restricted",
+    stage: "needs_support",
+    speed: "weekly",
+  });
 });
 
 test("account.updated on the Connect secret maps each state, and a stale payload never wins", async () => {
@@ -173,4 +194,74 @@ test("an account whose metadata names another tutor, or that Stripe won't let us
     stripeGateway().retrieveAccount = retrieve;
   }
   assert.equal((await stripeGateway().retrieveAccount(accountId)).tutorProfileId, actor.tutorProfileId);
+});
+
+test("a tutor starts on weekly, and an account still on the old daily schedule is moved to weekly once", async () => {
+  const actor = await tutor();
+  assert.equal((await profile(actor)).speed, "weekly");
+  const accountId = await ensureConnectAccount(actor);
+  assert.equal((await stripeGateway().retrieveAccount(accountId)).payoutSpeed, "weekly");
+
+  await fakeStripe.setPayoutSchedule(accountId, "daily");
+  assert.deepEqual(await scheduleCalls(() => payoutsFor(actor)), [[accountId, "weekly"]]);
+  assert.equal((await stripeGateway().retrieveAccount(accountId)).payoutSpeed, "weekly");
+  assert.deepEqual(await scheduleCalls(() => payoutsFor(actor)), []);
+});
+
+test("choosing daily sends daily to Stripe, and switching back sends weekly", async () => {
+  const actor = await tutor();
+  const accountId = await ensureConnectAccount(actor);
+
+  const toDaily = await scheduleCalls(async () => assert.equal((await choosePayoutSpeed(actor, "daily")).speed, "daily"));
+  assert.deepEqual(toDaily, [[accountId, "daily"]]);
+  assert.equal((await profile(actor)).speed, "daily");
+  assert.equal((await stripeGateway().retrieveAccount(accountId)).payoutSpeed, "daily");
+
+  assert.deepEqual(await scheduleCalls(() => choosePayoutSpeed(actor, "daily")), []);
+  assert.deepEqual(await scheduleCalls(() => choosePayoutSpeed(actor, "weekly")), [[accountId, "weekly"]]);
+  assert.equal((await stripeGateway().retrieveAccount(accountId)).payoutSpeed, "weekly");
+});
+
+test("a speed chosen before payout setup reaches the account once it exists", async () => {
+  const actor = await tutor();
+  assert.deepEqual(await scheduleCalls(() => choosePayoutSpeed(actor, "daily")), []);
+  const accountId = await ensureConnectAccount(actor);
+  assert.deepEqual(await scheduleCalls(() => payoutsFor(actor)), [[accountId, "daily"]]);
+  assert.equal((await stripeGateway().retrieveAccount(accountId)).payoutSpeed, "daily");
+});
+
+test("account.updated puts back the stored speed, and a repeated event sends nothing", async () => {
+  const actor = await tutor();
+  const accountId = await ensureConnectAccount(actor);
+  await choosePayoutSpeed(actor, "daily");
+  await fakeStripe.setPayoutSchedule(accountId, null);
+  const event = await fakeStripe.accountEvent(accountId);
+
+  const calls = await scheduleCalls(async () => {
+    assert.deepEqual(await deliver(event), { status: 200, outcome: "kyc_synced", institutionId: home });
+    assert.deepEqual(await deliver(event), { status: 200, outcome: "kyc_synced", institutionId: home });
+  });
+  assert.deepEqual(calls, [[accountId, "daily"]]);
+  assert.equal((await stripeGateway().retrieveAccount(accountId)).payoutSpeed, "daily");
+});
+
+test("Stripe refusing the schedule change never blocks the KYC sync", async () => {
+  const actor = await tutor();
+  const accountId = await ensureConnectAccount(actor);
+  await fakeStripe.setPayoutSchedule(accountId, "daily");
+  await fakeStripe.setAccount(accountId, "verified");
+  const real = stripeGateway().setPayoutSpeed;
+  const error = console.error;
+  stripeGateway().setPayoutSpeed = async () => {
+    throw new GatewayError("This account cannot be updated", { status: 400, type: "invalid_request_error" });
+  };
+  console.error = () => {};
+  try {
+    assert.deepEqual(await deliver(await fakeStripe.accountEvent(accountId)), { status: 200, outcome: "kyc_synced", institutionId: home });
+  } finally {
+    stripeGateway().setPayoutSpeed = real;
+    console.error = error;
+  }
+  assert.deepEqual(await profile(actor), { accountId, status: "verified", speed: "weekly" });
+  assert.equal((await stripeGateway().retrieveAccount(accountId)).payoutSpeed, "daily");
 });
