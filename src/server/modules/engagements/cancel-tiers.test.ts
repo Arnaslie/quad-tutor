@@ -33,7 +33,7 @@ import { sessionRatingState } from "@/server/modules/ratings/reads";
 import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
 import { packagesForStudent, sessionDetail } from "./reads";
-import { bookSession, cancelSession, sessionsRemaining } from "./scheduling";
+import { CancelQuoteChanged, bookSession, cancelSession, sessionsRemaining } from "./scheduling";
 import { availableSlots } from "./slots";
 import { closeWithRefund, endPackage } from "./termEnd";
 
@@ -174,6 +174,37 @@ test("a student cancel of a four-pack session 24 hours or more ahead moves no mo
   assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
   assert.equal(await left(id), 4);
   assert.deepEqual(await facts(student), []);
+});
+
+test("a quote shown before the 24 hour line and submitted after it is refused with the new price, and nothing moves", async () => {
+  const student = await person();
+  const id = await pkg(student);
+  const sessionId = await session(id, hours(23.97));
+
+  await assert.rejects(cancelSession({ actor: student, sessionId, shownKeptMinor: 0 }), (error: unknown) => {
+    assert.ok(error instanceof CancelQuoteChanged);
+    assert.deepEqual(error.quote, { keptMinor: 1_750, returnedMinor: 1_750, late: false });
+    return true;
+  });
+  assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
+  assert.equal(await left(id), 3, "the session is still booked");
+
+  const outcome = await cancelSession({ actor: student, sessionId, shownKeptMinor: 1_750 });
+  assert.equal(outcome.keptMinor, 1_750, "the new quote, once shown, goes through");
+});
+
+test("a quote shown before the 12 hour line and submitted after it is refused with the late price", async () => {
+  const student = await person();
+  const id = await pkg(student);
+  const sessionId = await session(id, hours(11.97));
+
+  await assert.rejects(cancelSession({ actor: student, sessionId, shownKeptMinor: 1_750 }), (error: unknown) => {
+    assert.ok(error instanceof CancelQuoteChanged);
+    assert.deepEqual(error.quote, { keptMinor: 2_625, returnedMinor: 875, late: true });
+    return true;
+  });
+  assert.deepEqual(await facts(student), [], "a refused cancel writes no late cancel");
+  assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
 });
 
 test("a student cancel 12 to 24 hours ahead of a $35 session pays the tutor half, and the other half refunds when the package ends", async () => {

@@ -111,6 +111,10 @@ Copy says what happens before it happens. The cancel form shows "Cancel now and 
 get $X back. $Y goes to <tutor>." and when the money reaches the card. The tutor's
 cancel email says what they will be paid for the session. The student's booking and
 reminder emails give the tiers instead of "cancelling is free until 12 hours before".
+The form posts the kept share it showed. If the server's clock puts the cancel in a
+different tier, because a line passed while the card was open or the phone's clock is
+off, the cancel is refused, nothing moves, and the form shows the server's new quote
+to confirm. Instant cash-out treats a changed fee quote the same way.
 
 **A single session exists, but only for an existing pair.** One session, full
 price, offered to a student whose packages with that tutor in a course have nothing
