@@ -355,18 +355,22 @@ export async function endEarly(
   }
   if (!refund) return { ok: false, error: "That package is already closed." };
 
-  if (refund.refundId) {
-    refundAfterCommit([{ id: refund.refundId, engagementId: refund.engagementId, institutionId: actor.institutionId }]);
-  }
+  const rows = [refund, ...refund.charged];
+  refundAfterCommit(
+    rows.flatMap(({ refundId: id }) =>
+      id ? [{ id, engagementId: refund.engagementId, institutionId: actor.institutionId }] : [],
+    ),
+  );
   notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   revalidatePath("/sessions/[id]", "page");
 
+  const backMinor = refund.refundMinor + refund.charged.reduce((sum, charge) => sum + charge.returnedMinor, 0);
   return {
     ok: true,
     message:
-      refund.refundMinor > 0
-        ? `Package ended. ${formatMinor(refund.refundMinor, refund.currency)} is on its way back to you.`
+      backMinor > 0
+        ? `Package ended. ${formatMinor(backMinor, refund.currency)} is on its way back to your card.`
         : "Package ended.",
   };
 }

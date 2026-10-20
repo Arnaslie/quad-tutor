@@ -34,3 +34,31 @@ export function cancelSplit(
 export function cancelRefundsCard(sessionsPurchased: number, hours: number, by: Canceller): boolean {
   return by === "tutor" || sessionsPurchased === 1 || keptShareBp(hours, by) > 0;
 }
+
+/** When the student ends a package, the tutor keeps this share of what is left, rounded down to the cent. */
+export const END_FEE_BP = 1_000;
+
+export function endFeeMinor(remainingMinor: number): number {
+  return Math.floor((remainingMinor * END_FEE_BP) / 10_000);
+}
+
+/**
+ * Ending a package charges each session under 24 hours away at its cancel tier, then keeps the end fee from
+ * what the ledger still defers beyond those sessions. The two never overlap.
+ */
+export function endSplit(
+  deferredMinor: number,
+  sessionMinor: number,
+  hoursToEachSession: number[],
+): { backMinor: number; tutorMinor: number } {
+  const priced = hoursToEachSession
+    .map((hours) => cancelSplit(sessionMinor, hours, "student"))
+    .filter((split) => split.keptMinor > 0);
+  const restMinor = deferredMinor - priced.length * sessionMinor;
+  const feeMinor = endFeeMinor(restMinor);
+  const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+  return {
+    backMinor: sum(priced.map((split) => split.returnedMinor)) + restMinor - feeMinor,
+    tutorMinor: sum(priced.map((split) => split.keptMinor)) + feeMinor,
+  };
+}

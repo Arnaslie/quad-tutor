@@ -231,7 +231,7 @@ after(async () => {
 
 test("ending early writes the refund row unstamped, then refunds it through Stripe once and stamps the re_", async () => {
   const { actor, engagementId, checkoutSessionId } = await bought();
-  assert.equal((await endPackage({ actor, engagementId }))?.refundMinor, 14_000);
+  assert.equal((await endPackage({ actor, engagementId }))?.refundMinor, 12_600);
   const row = await refundRow(engagementId);
   assert.equal(row.stripeReference, null, "the locked transaction never calls Stripe");
 
@@ -239,7 +239,7 @@ test("ending early writes the refund row unstamped, then refunds it through Stri
   const [refund] = await fakeStripe.refunds(checkoutSessionId);
   assert.deepEqual(
     { amountMinor: refund.amountMinor, ledgerEntryId: refund.ledgerEntryId, engagementId: refund.engagementId, institutionId: refund.institutionId },
-    { amountMinor: 14_000, ledgerEntryId: row.id, engagementId, institutionId: home.institutionId },
+    { amountMinor: 12_600, ledgerEntryId: row.id, engagementId, institutionId: home.institutionId },
   );
   assert.equal((await refundRow(engagementId)).stripeReference, refund.id);
 
@@ -298,7 +298,7 @@ test("an errored create is retried on a fresh key, since the first key replays t
   await age(engagementId);
   assert.deepEqual(await sweep(), { settled: 1, flagged: 0, failed: 0 });
   const [refund] = await fakeStripe.refunds(checkoutSessionId);
-  assert.equal(refund.amountMinor, 14_000);
+  assert.equal(refund.amountMinor, 12_600);
   assert.equal((await refundRow(engagementId)).stripeReference, refund.id);
 });
 
@@ -334,7 +334,7 @@ test("a refund that fails after creation is flagged for ops, keeps its stamp, an
   assert.deepEqual(await deliver(created.id, "charge.refund.updated"), failed);
   assert.deepEqual(await handleStripeWebhook(late.payload, late.signature), failed, "a stale charge.refunded re-reads the refund and sees it failed");
   const row = await refundRow(engagementId);
-  assert.deepEqual(await discrepancies(engagementId), [{ kind: "refund_failed", stripeReference: row.id, ledgerAmountMinor: 14_000 }], "keyed on the row, as a payment can carry many");
+  assert.deepEqual(await discrepancies(engagementId), [{ kind: "refund_failed", stripeReference: row.id, ledgerAmountMinor: 12_600 }], "keyed on the row, as a payment can carry many");
   assert.equal((await refundRow(engagementId)).stripeReference, created.id);
 
   await age(engagementId);
@@ -361,7 +361,7 @@ test("a create Stripe refuses outright is flagged, and resolving the flag never 
     assert.equal(await send(engagementId), "refund_failed");
   });
   assert.equal((await refundRow(engagementId)).stripeReference, null);
-  assert.deepEqual((await discrepancies(engagementId)).map((d) => [d.kind, d.ledgerAmountMinor]), [["refund_failed", 14_000]]);
+  assert.deepEqual((await discrepancies(engagementId)).map((d) => [d.kind, d.ledgerAmountMinor]), [["refund_failed", 12_600]]);
 
   await db.update(moneyDiscrepancy).set({ resolvedAt: new Date() }).where(eq(moneyDiscrepancy.engagementId, engagementId));
   await age(engagementId);
@@ -434,7 +434,7 @@ test("a refund on the charge that is not ours, such as one made in the Dashboard
     assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
   });
   assert.equal(calls, 0);
-  assert.deepEqual(await discrepancies(engagementId), [{ kind: "ledger_vs_stripe_charge", stripeReference: dashboard.id, ledgerAmountMinor: 14_000 }]);
+  assert.deepEqual(await discrepancies(engagementId), [{ kind: "ledger_vs_stripe_charge", stripeReference: dashboard.id, ledgerAmountMinor: 12_600 }]);
   assert.equal((await refundRow(engagementId)).stripeReference, null);
   assert.equal((await fakeStripe.refunds(checkoutSessionId)).length, 1);
 });
@@ -447,7 +447,7 @@ test("an already-refunded answer is settled with the refund Stripe holds, not fl
     .select({ pi: ledgerEntry.stripeReference })
     .from(ledgerEntry)
     .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, "package_purchase")));
-  const earlier = await realRefund({ paymentIntentId: paid.pi!, engagementId, institutionId: home.institutionId, amountMinor: 14_000, ledgerEntryId: row.id, idempotencyKey: `refund:${row.id}:earlier` });
+  const earlier = await realRefund({ paymentIntentId: paid.pi!, engagementId, institutionId: home.institutionId, amountMinor: 12_600, ledgerEntryId: row.id, idempotencyKey: `refund:${row.id}:earlier` });
 
   const list = stripeGateway().listRefunds;
   let blind = true;
@@ -480,7 +480,7 @@ test("an engagement bought before Stripe is closed on the ledger and never sent 
     .returning({ id: engagement.id });
   await db.insert(ledgerEntry).values({ engagementId: legacy.id, institutionId: home.institutionId, type: "package_purchase", amountMinor: 14_000 });
 
-  assert.equal((await endPackage({ actor, engagementId: legacy.id }))?.refundMinor, 14_000);
+  assert.equal((await endPackage({ actor, engagementId: legacy.id }))?.refundMinor, 12_600);
   await age(legacy.id);
   const untouchable = async () => { throw new Error("no Stripe call for a pre-Stripe engagement"); };
   await patched("refund", untouchable, () =>
@@ -528,7 +528,7 @@ test("a PaymentIntent Stripe does not know is retried for a day, then flagged an
 
   await age(seeded.id, 25 * 3_600_000);
   assert.deepEqual(await sweep(), { settled: 0, flagged: 1, failed: 0 });
-  assert.deepEqual(await discrepancies(seeded.id), [{ kind: "refund_failed", stripeReference: (await refundRow(seeded.id)).id, ledgerAmountMinor: 14_000 }]);
+  assert.deepEqual(await discrepancies(seeded.id), [{ kind: "refund_failed", stripeReference: (await refundRow(seeded.id)).id, ledgerAmountMinor: 12_600 }]);
   assert.deepEqual(await sweep(), { settled: 0, flagged: 0, failed: 0 });
 });
 
@@ -623,7 +623,7 @@ test("a refund held behind a failed Dashboard refund goes out once ops resolves,
   const row = await refundRow(engagementId);
   const [answered, own] = await flags();
   assert.deepEqual(answered, { ...dashboard, open: false, note: "card checked" }, "the Dashboard refund's answer stands");
-  assert.deepEqual({ ...own, id: typeof own.id }, { id: "string", key: row.id, ledgerEntryId: row.id, ledgerAmountMinor: 14_000, open: true, note: null });
+  assert.deepEqual({ ...own, id: typeof own.id }, { id: "string", key: row.id, ledgerEntryId: row.id, ledgerAmountMinor: 12_600, open: true, note: null });
 
   assert.equal(await creates(async () => {
     assert.equal(await send(engagementId), "skipped");
@@ -647,7 +647,7 @@ async function twoRefunds() {
     .from(ledgerEntry)
     .where(and(eq(ledgerEntry.engagementId, bought_.engagementId), eq(ledgerEntry.type, "refund")))
     .orderBy(ledgerEntry.occurredAt);
-  assert.deepEqual(rows.map((r) => [r.id === early.id, r.amountMinor]), [[true, 875], [false, 13_125]]);
+  assert.deepEqual(rows.map((r) => [r.id === early.id, r.amountMinor]), [[true, 875], [false, 11_813]]);
   const refs = rows.map((r) => ({ ...ids(bought_.engagementId), id: r.id }));
   const stamps = async () =>
     (await db.select({ id: ledgerEntry.id, reference: ledgerEntry.stripeReference }).from(ledgerEntry).where(inArray(ledgerEntry.id, refs.map((r) => r.id))))
@@ -674,7 +674,7 @@ test("each refund row of one engagement goes out once on its own key, and one ro
   });
   assert.deepEqual(keys, [`refund:${refs[1].id}`], "the first was created by the lost call, outside this count");
   const refunds = await fakeStripe.refunds(checkoutSessionId);
-  assert.deepEqual(refunds.map((r) => [r.ledgerEntryId, r.amountMinor]), [[refs[0].id, 875], [refs[1].id, 13_125]]);
+  assert.deepEqual(refunds.map((r) => [r.ledgerEntryId, r.amountMinor]), [[refs[0].id, 875], [refs[1].id, 11_813]]);
   assert.deepEqual(await stamps(), refunds.map((r) => r.id));
   assert.deepEqual(await discrepancies(engagementId), []);
   await assertMoneyInvariants(home.institutionId);
@@ -698,7 +698,7 @@ test("one refund row failing flags that row alone, and the engagement's other re
     .orderBy(moneyDiscrepancy.detectedAt);
   assert.deepEqual(flags, [
     { key: refs[0].id, row: refs[0].id, amount: 875, failed: [] },
-    { key: refs[1].id, row: refs[1].id, amount: 13_125, failed: [sent.id] },
+    { key: refs[1].id, row: refs[1].id, amount: 11_813, failed: [sent.id] },
   ]);
   assert.deepEqual(await stamps(), [null, sent.id]);
 
@@ -736,7 +736,7 @@ test("a Dashboard refund one row finds holds the engagement's other refunds unti
   assert.deepEqual(await recordManualSettlement({ operator: await operator(), discrepancyId: booking.id, note: "support refunded in the Dashboard" }), { ok: true });
   assert.equal(await refundThroughStripe(refs[1]), "refunded", "the booked Dashboard refund is no longer foreign");
   const refunds = await fakeStripe.refunds(checkoutSessionId);
-  assert.deepEqual(refunds.map((r) => r.amountMinor), [875, 13_125]);
+  assert.deepEqual(refunds.map((r) => r.amountMinor), [875, 11_813]);
   assert.deepEqual(await stamps(), [dashboard.id, refunds[1].id]);
   await assertMoneyInvariants(home.institutionId);
 });
@@ -761,7 +761,7 @@ test("a row whose refund bounced holds the other unsent refund, which ops pays b
     .select({ open: sql<boolean>`${moneyDiscrepancy.resolvedAt} is null`, note: moneyDiscrepancy.resolutionNote })
     .from(moneyDiscrepancy)
     .where(eq(moneyDiscrepancy.id, card.id));
-  assert.deepEqual(flag, { open: true, note: "$8.75: Zelle" }, "the bounced $131.25 is still owed");
+  assert.deepEqual(flag, { open: true, note: "$8.75: Zelle" }, "the bounced $118.13 is still owed");
   assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: card.id, note: "Venmo" }), { ok: true });
   await assertMoneyInvariants(home.institutionId);
 });
@@ -783,7 +783,7 @@ test("a Dashboard refund whose flag ops already answered is not foreign to the e
   });
 
   assert.equal(await refundThroughStripe(refs[1]), "refunded");
-  assert.deepEqual((await fakeStripe.refunds(checkoutSessionId)).map((r) => r.amountMinor), [500, 13_125]);
+  assert.deepEqual((await fakeStripe.refunds(checkoutSessionId)).map((r) => r.amountMinor), [500, 11_813]);
 });
 
 test("money invariants hold after every refund path", async () => {

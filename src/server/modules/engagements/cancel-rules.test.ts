@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cancelRefundsCard, cancelSplit, hoursBefore, keptShareBp } from "./cancel-rules";
+import { cancelRefundsCard, cancelSplit, endFeeMinor, endSplit, hoursBefore, keptShareBp } from "./cancel-rules";
 
 test("a student cancelling 24 hours or more ahead keeps nothing back from the session", () => {
   assert.equal(keptShareBp(72, "student"), 0);
@@ -47,4 +47,16 @@ test("only a student cancel 24 hours or more ahead in a multi-session package pu
   assert.equal(cancelRefundsCard(1, 72, "student"), true);
   assert.equal(cancelRefundsCard(4, 72, "tutor"), true);
   assert.equal(cancelRefundsCard(1, 0.5, "tutor"), true);
+});
+
+test("the end fee is 10% of what is left, rounded down to the cent", () => {
+  assert.equal(endFeeMinor(10_500), 1_050);
+  assert.equal(endFeeMinor(10_509), 1_050);
+  assert.equal(endFeeMinor(9), 0);
+});
+
+test("ending charges a session inside 24 hours at its tier and takes 10% of the rest, never both from one session", () => {
+  assert.deepEqual(endSplit(10_500, 3_500, [72, 100]), { backMinor: 9_450, tutorMinor: 1_050 });
+  assert.deepEqual(endSplit(10_500, 3_500, [20, 72]), { backMinor: 1_750 + 6_300, tutorMinor: 1_750 + 700 });
+  assert.deepEqual(endSplit(10_500, 3_500, [6]), { backMinor: 875 + 6_300, tutorMinor: 2_625 + 700 });
 });

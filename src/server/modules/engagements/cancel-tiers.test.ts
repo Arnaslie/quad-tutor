@@ -63,14 +63,27 @@ async function person(): Promise<Actor> {
   return { userId: id, name: id, email: `${id}@example.test`, institutionId, studentProfileId: profile.id, tutorProfileId: null };
 }
 
-async function pkg(student: Actor, kind: "exam_anchored" | "top_up" = "exam_anchored"): Promise<string> {
+async function newTutor(): Promise<{ actor: TutorActor; claimId: string }> {
+  const base = await person();
+  const [profile] = await db.insert(tutorProfile).values({ userId: base.userId, institutionId }).returning({ id: tutorProfile.id });
+  await db.insert(tutorAvailability).values(
+    [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ tutorProfileId: profile.id, institutionId, weekday, startMinute: 0, endMinute: 24 * 60 })),
+  );
+  const [claim] = await db
+    .insert(tutorCourse)
+    .values({ tutorProfileId: profile.id, institutionId, courseId, takenTermId: termId, gradeEarned: "A", status: "active" })
+    .returning({ id: tutorCourse.id });
+  return { actor: { ...base, tutorProfileId: profile.id }, claimId: claim.id };
+}
+
+async function pkg(student: Actor, kind: "exam_anchored" | "top_up" = "exam_anchored", claimId = tutorCourseId): Promise<string> {
   const single = kind === "top_up";
   const [row] = await db
     .insert(engagement)
     .values({
       institutionId,
       studentProfileId: student.studentProfileId,
-      tutorCourseId,
+      tutorCourseId: claimId,
       courseOfferingId: offeringId,
       kind,
       sessionsPurchased: single ? 1 : 4,
@@ -130,17 +143,7 @@ before(async () => {
   const [offering] = await db.insert(courseOffering).values({ institutionId, courseId, termId, section: "001" }).returning({ id: courseOffering.id });
   offeringId = offering.id;
 
-  const base = await person();
-  const [profile] = await db.insert(tutorProfile).values({ userId: base.userId, institutionId }).returning({ id: tutorProfile.id });
-  await db.insert(tutorAvailability).values(
-    [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ tutorProfileId: profile.id, institutionId, weekday, startMinute: 0, endMinute: 24 * 60 })),
-  );
-  const [claim] = await db
-    .insert(tutorCourse)
-    .values({ tutorProfileId: profile.id, institutionId, courseId, takenTermId: termId, gradeEarned: "A", status: "active" })
-    .returning({ id: tutorCourse.id });
-  tutor = { ...base, tutorProfileId: profile.id };
-  tutorCourseId = claim.id;
+  ({ actor: tutor, claimId: tutorCourseId } = await newTutor());
 });
 
 after(async () => {
@@ -215,8 +218,8 @@ test("a student cancel 12 to 24 hours ahead of a $35 session pays the tutor half
   assert.equal(await statusOf(id), "active");
 
   const [preview] = (await packagesForStudent(student)).filter((row) => row.engagementId === id);
-  assert.equal(preview.ending.refundMinor, 10_500, "ending gives back only the three sessions left");
-  assert.equal((await endPackage({ actor: student, engagementId: id }))?.refundMinor, 10_500);
+  assert.equal(preview.ending.backMinor, 9_450, "ending gives back the three sessions left, less the 10% end fee");
+  assert.equal((await endPackage({ actor: student, engagementId: id }))?.refundMinor, 9_450);
   assert.equal(await statusOf(id), "refunded", "nothing was attended");
 });
 
@@ -479,14 +482,50 @@ test("a kept cancel racing the term-end sweep never deadlocks, and the two refun
   }
 });
 
-test("ending the package is refused while a session is inside 24 hours, so the end never dodges the cancel price", async () => {
+test("ending with a session 20 hours away charges it at its tier, and the 10% fee only on the three after it", async () => {
+  const student = await person();
+  const id = await pkg(student, "exam_anchored", (await newTutor()).claimId);
+  const soon = await session(id, hours(20));
+
+  const [preview] = (await packagesForStudent(student)).filter((row) => row.engagementId === id);
+  assert.deepEqual(
+    { back: preview.ending.backMinor, tutor: preview.ending.tutorMinor, blocked: preview.ending.blocked },
+    { back: 11_200, tutor: 2_800, blocked: null },
+  );
+
+  const ended = await endPackage({ actor: student, engagementId: id });
+  assert.equal(ended?.refundMinor, 9_450);
+  assert.equal(ended?.feeMinor, 1_050);
+  assert.deepEqual(ended?.charged.map(({ keptMinor, returnedMinor }) => ({ keptMinor, returnedMinor })), [
+    { keptMinor: 1_750, returnedMinor: 1_750 },
+  ]);
+  assert.deepEqual(await ledger(id), [
+    { type: "package_purchase", amountMinor: 14_000 },
+    { type: "platform_fee", amountMinor: 175 },
+    { type: "refund", amountMinor: 1_750 },
+    { type: "refund", amountMinor: 9_450 },
+    { type: "session_earned", amountMinor: 1_050 },
+    { type: "session_earned", amountMinor: 1_750 },
+    { type: "tutor_accrued", amountMinor: 1_050 },
+    { type: "tutor_accrued", amountMinor: 1_575 },
+  ]);
+  const [row] = await db.select({ status: sessionBooking.status }).from(sessionBooking).where(eq(sessionBooking.id, soon));
+  assert.equal(row.status, "cancelled");
+  assert.deepEqual(await facts(student), [], "outside 12 hours it is not a late cancel");
+  assert.equal(await statusOf(id), "refunded");
+});
+
+test("ending with a session 6 hours away keeps 75% of it, which is a late cancel, and 10% of the rest", async () => {
   const student = await person();
   const id = await pkg(student);
-  await session(id, hours(20));
+  await session(id, hours(6));
 
-  await assert.rejects(endPackage({ actor: student, engagementId: id }), /less than 24 hours away\. Cancel it first/);
-  assert.equal(await statusOf(id), "active");
-  assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
+  const ended = await endPackage({ actor: student, engagementId: id });
+  assert.deepEqual(
+    { refund: ended?.refundMinor, fee: ended?.feeMinor, charged: ended?.charged.map((charge) => charge.returnedMinor) },
+    { refund: 9_450, fee: 1_050, charged: [875] },
+  );
+  assert.deepEqual(await facts(student), ["late_cancelled"]);
 });
 
 test("a cancel the tutor was paid for can never be rated", async () => {

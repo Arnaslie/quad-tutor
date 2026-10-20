@@ -13,8 +13,10 @@ import { SWEEP_BUDGET_MS, refundThroughStripe } from "@/server/modules/billing/r
 import { errorFacts } from "@/server/modules/billing/stripe";
 import type { Actor } from "@/server/modules/identity/actor";
 
-import { SessionError, deliveredCount, heldAgainstPackage } from "./access";
+import { SessionError, deliveredCount, heldAgainstPackage, loadParticipation, lockSession } from "./access";
 import { END_BLOCK_MESSAGE, endBlock, type EndBlock } from "./attendance";
+import { chargeCancel, type CancelCharge } from "./cancel-charge";
+import { endFeeMinor, hoursBefore, keptShareBp } from "./cancel-rules";
 
 export type TermEndRefund = {
   engagementId: string;
@@ -65,10 +67,13 @@ export class EndPackageError extends SessionError {
 
 type EngagementLock = "update" | "no key update";
 
+/** A package the student ended also carries what the tutor kept: the end fee, and each session charged at its tier. */
+export type EndedPackage = TermEndRefund & { feeMinor: number; charged: CancelCharge[] };
+
 export async function closeWithRefund(
   tx: Tx,
   params: { engagementId: string; institutionId: string; endedBy?: Actor; lock?: EngagementLock },
-): Promise<TermEndRefund | null> {
+): Promise<EndedPackage | null> {
   const { engagementId, endedBy } = params;
   const now = new Date();
 
@@ -89,7 +94,7 @@ export async function closeWithRefund(
   if (target.status !== "active") return null;
 
   const sessions = await tx
-    .select({ status: sessionBooking.status, scheduledAt: sessionBooking.scheduledAt })
+    .select({ id: sessionBooking.id, status: sessionBooking.status, scheduledAt: sessionBooking.scheduledAt })
     .from(sessionBooking)
     .where(
       and(
@@ -99,8 +104,18 @@ export async function closeWithRefund(
       ),
     );
   const block = endBlock(sessions, now);
-  if (block && (endedBy || block.reason !== "cancel_costs")) {
-    throw new EndPackageError(block);
+  if (block) throw new EndPackageError(block);
+
+  const charged: CancelCharge[] = [];
+  if (endedBy) {
+    const priced = sessions.filter(
+      (session) => session.status === "scheduled" && keptShareBp(hoursBefore(session.scheduledAt, now), "student") > 0,
+    );
+    for (const { id } of priced) {
+      await lockSession(tx, id);
+      const session = await loadParticipation({ exec: tx, sessionId: id, actor: endedBy });
+      charged.push(await chargeCancel(tx, session, endedBy.userId, now));
+    }
   }
 
   await tx
@@ -123,19 +138,18 @@ export async function closeWithRefund(
     .from(engagement)
     .where(and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)));
 
-  const [written] =
-    due.refundMinor > 0
-      ? await record(tx, [
-          {
-            engagementId,
-            institutionId: params.institutionId,
-            type: "refund",
-            amountMinor: due.refundMinor,
-            currency: due.currency,
-          },
-        ])
-      : [];
-  const refund = { ...due, refundId: written?.id ?? null };
+  // The tutor's pay, not the platform's: no platform_fee row, so the fee meter never sees it.
+  const feeMinor = endedBy ? endFeeMinor(due.refundMinor) : 0;
+  const entry = { engagementId, institutionId: params.institutionId, currency: due.currency };
+  if (feeMinor > 0) {
+    await record(tx, [
+      { ...entry, type: "session_earned", amountMinor: feeMinor },
+      { ...entry, type: "tutor_accrued", amountMinor: feeMinor },
+    ]);
+  }
+  const refundMinor = due.refundMinor - feeMinor;
+  const [written] = refundMinor > 0 ? await record(tx, [{ ...entry, type: "refund", amountMinor: refundMinor }]) : [];
+  const refund = { ...due, refundMinor, refundId: written?.id ?? null, feeMinor, charged };
 
   await tx
     .update(engagement)
@@ -179,7 +193,7 @@ export async function closeIfUsedUp(
 export async function endPackage(params: {
   actor: Actor;
   engagementId: string;
-}): Promise<TermEndRefund | null> {
+}): Promise<EndedPackage | null> {
   return db.transaction((tx) =>
     closeWithRefund(tx, {
       engagementId: params.engagementId,

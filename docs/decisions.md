@@ -44,14 +44,27 @@ guarantee as the way out of a bad fit. Ending runs the term-end refund on demand
 - The package closes as `completed` if anything was delivered, otherwise as
   `refunded`.
 
-It moves only deferred money: no fee, no payout, and the fee meter is not touched.
-Ending writes no reliability fact. It is refused while a session is less than 24
-hours away, past its start and unconfirmed, or disputed. A cancel inside 24 hours has
-a price (see below), and ending the package must not dodge it, so the refusal tells
-the student to cancel that session first. A late cancel stays something only the
-cancel action records, and a session that may have happened is never refunded. Only
-the student can end their package. (The window was the 12-hour late-cancel window
-until 2026-10-18.)
+**Ending a package costs 10% of what is left, and the tutor keeps it** (user,
+2026-10-20). The fee is `END_FEE_BP` of what the ledger still defers, the price of the
+sessions not yet completed, at the same rate however many are left. Four $35 sessions
+with one done leave $105: the fee is $10.50 and $94.50 goes to the card. The fee
+rounds down to the cent. It is the tutor's pay, written as `session_earned` and
+`tutor_accrued` with no session and no `platform_fee` row, so no refund claws it back
+and it never counts toward the fee milestone. It is charged only when the student
+ends the package: never at term end, and never on a refund the tutor caused.
+
+Three parts are defaults the user has not yet confirmed (2026-10-20): the rounding,
+the 24-hour handling below, and the confirmation copy. A session less than 24 hours
+away no longer blocks ending. It is cancelled at its
+cancel tier first, exactly as if the student cancelled it, late-cancel fact included
+under 12 hours, and the 10% is taken from what is left after it, so one session never
+pays both. Before confirming, the student sees "You get $X back. $Y goes to <tutor>."
+The rule is `endSplit()` in `cancel-rules.ts`, shared by the preview and the server.
+(Ending was refused inside 24 hours from 2026-10-18 to 2026-10-20.)
+
+Ending is still refused while a session is past its start and unconfirmed, or
+disputed: a session that may have happened is never refunded. Ending writes no
+reliability fact of its own. Only the student can end their package.
 
 **Unused sessions refund at term end, or when the student ends the package.**
 Breakage income is a trap on a campus where everyone talks.
@@ -179,7 +192,7 @@ drift:
   old and the new line go back to 10% (accepted 2026-10-16).
 - **Reversals follow the tutor's pay.** A term-end refund, and a package the student
   ends early, return only money no session earned, which never charged a fee, so
-  neither touches the meter. A disputed session charges nothing while it holds;
+  neither touches the meter. The end fee is the tutor's in full and charges none. A disputed session charges nothing while it holds;
   resolved as attended, it is charged at resolution against the meter as it stands
   then; resolved as not attended, never. Nothing today reverses a recognised session.
   If something ever does, and takes the tutor's pay back with it, it reverses the fee
@@ -198,7 +211,7 @@ drift:
   | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update). When the package is used up, `closeIfUsedUp` closes it under that same no-key-update lock |
   | `cancelSession` | `engagement` (for key share), then `session_booking` (for update), then `tutor_profile` when the cancel keeps part of the price. The kept share's and the refund's ledger rows take the engagement for key share through their foreign key, so the cancel takes it first, in the term-end refund's order, or the two deadlock. Closing a used-up package runs after commit in its own transaction: `engagement` (for update), then its sessions |
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
-  | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation or a priced cancel could hold (inside 24h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
+  | `endPackage` | `engagement` (for update), then each `session_booking` under 24 hours away (for update) and `tutor_profile` (no key update) to charge it as a cancel, then its other scheduled `session_booking` rows. It refuses first any session a confirmation could hold (started but unanswered, or disputed), so it never waits on a session a confirmation has locked. Shares `closeWithRefund` with the term-end refund |
   | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment` and the Checkout Session id matches), then its `held` `session_booking` rows. An amount or currency mismatch cancels both and inserts a `money_discrepancy` row in the same transaction |
   | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the one unstamped `refund` row it names by id, calls Stripe, then stamps `re_…` with `where stripe_reference is null`. A held refund ops pays by hand is stamped with the same guard repeated on the row, since the subquery that finds it is not re-checked after a lock wait. The retry sweep runs each campus under a `sweep_lease` row (a timestamp claimed by one conditional upsert, not a lock) |
   | transfer sweep | `engagement` (no key update) alone. Re-reads what is owed and the pause after the lock, inserts the unstamped `tutor_transfer` row and commits; Stripe is called after commit, and the stamp `where stripe_reference is null` is the only guard after that. Each campus runs under its own `sweep_lease` row |

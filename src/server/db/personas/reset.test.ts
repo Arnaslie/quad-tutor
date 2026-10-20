@@ -180,7 +180,8 @@ test("each student persona sees its package, what it paid and whether it can end
       sessionsDelivered: pkg.sessionsDelivered,
       sessionsRemaining: pkg.sessionsRemaining,
       pricePaidMinor: pkg.pricePaidMinor,
-      refundMinor: pkg.ending.refundMinor,
+      backMinor: pkg.ending.backMinor,
+      tutorMinor: pkg.ending.tutorMinor,
       blocked: pkg.ending.blocked?.reason ?? null,
     }));
   const accepted = async (key: string) =>
@@ -210,7 +211,8 @@ test("each student persona sees its package, what it paid and whether it can end
       sessionsDelivered: 2,
       sessionsRemaining: 1,
       pricePaidMinor: 12_000,
-      refundMinor: 6_000,
+      backMinor: 5_400,
+      tutorMinor: 600,
       blocked: null,
     },
   ]);
@@ -224,7 +226,8 @@ test("each student persona sees its package, what it paid and whether it can end
       sessionsDelivered: 1,
       sessionsRemaining: 2,
       pricePaidMinor: 18_000,
-      refundMinor: 13_500,
+      backMinor: 12_150,
+      tutorMinor: 1_350,
       blocked: "awaiting_answer",
     },
   ]);
@@ -253,7 +256,8 @@ test("each student persona sees its package, what it paid and whether it can end
       sessionsDelivered: 1,
       sessionsRemaining: 1,
       pricePaidMinor: 20_000,
-      refundMinor: 5_000,
+      backMinor: 4_500,
+      tutorMinor: 500,
       blocked: null,
     },
   ]);
@@ -371,8 +375,10 @@ test("a tester can buy and end student-refund's package and top up student-done"
     studentProfileId: refunder.studentProfileId,
     sessionsPurchased: 8,
     sessionsDelivered: 0,
-    refundMinor: 18_000,
+    refundMinor: 16_200,
     currency: "usd",
+    feeMinor: 1_800,
+    charged: [],
   });
 
   const done = await student("student-done");

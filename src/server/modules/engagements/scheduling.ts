@@ -4,15 +4,12 @@ import { db } from "@/server/db";
 import {
   courseOffering,
   engagement,
-  reliabilityEvent,
   sessionBooking,
   studentProfile,
   term,
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
-import { record } from "@/server/modules/billing/ledger";
-import { perSessionMinor } from "@/server/modules/billing/pricing";
 import type { RefundRef } from "@/server/modules/billing/refunds";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
@@ -30,8 +27,7 @@ import {
   isLateCancel,
   remindedAtForNewBooking,
 } from "./attendance";
-import { cancelRefundsCard, cancelSplit, hoursBefore } from "./cancel-rules";
-import { recognise } from "./confirmation";
+import { chargeCancel } from "./cancel-charge";
 import { closeIfUsedUp } from "./termEnd";
 
 export async function sessionsRemaining(params: {
@@ -224,64 +220,8 @@ export async function cancelSession(params: {
       );
     }
 
-    const late = isLateCancel(session.scheduledAt, now);
-    const hours = hoursBefore(session.scheduledAt, now);
-    const { keptMinor, returnedMinor } = cancelSplit(perSessionMinor(session), hours, session.role);
-    const toCard = cancelRefundsCard(session.sessionsPurchased, hours, session.role);
-
-    await tx
-      .update(sessionBooking)
-      .set({
-        status: "cancelled",
-
-        cancelledAt: now,
-        cancelledByUserId: params.actor.userId,
-      })
-      .where(
-        and(
-          eq(sessionBooking.id, session.sessionId),
-          eq(sessionBooking.status, "scheduled"),
-        ),
-      );
-
-    // TODO(v1): the tutor side of this is `cancelled_at` + `cancelled_by_user_id`
-
-    if (keptMinor > 0) await recognise(tx, session, keptMinor);
-
-    // Naming the session marks it used, so it never goes back in the package.
-    const [refund] =
-      toCard && returnedMinor > 0
-        ? await record(tx, [
-            {
-              engagementId: session.engagementId,
-              institutionId: session.institutionId,
-              sessionId: session.sessionId,
-              type: "refund",
-              amountMinor: returnedMinor,
-              currency: session.currency,
-            },
-          ])
-        : [];
-
-    if (late && session.role === "student") {
-      await tx.insert(reliabilityEvent).values({
-        userId: session.studentUserId,
-        institutionId: session.institutionId,
-        sessionId: session.sessionId,
-        type: "late_cancelled",
-        occurredAt: now,
-      });
-    }
-
-    return {
-      late,
-      keptMinor,
-      returnedMinor,
-      currency: session.currency,
-      engagementId: session.engagementId,
-      used: keptMinor > 0 || toCard,
-      refundId: refund?.id ?? null,
-    };
+    const charge = await chargeCancel(tx, session, params.actor.userId, now);
+    return { ...charge, currency: session.currency, engagementId: session.engagementId };
   });
 
   // Its own transaction, so the engagement is locked before its sessions as the term-end sweep does.

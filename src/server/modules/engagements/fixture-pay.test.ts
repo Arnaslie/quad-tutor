@@ -119,7 +119,7 @@ test("ending a fixture package books its refund and never sends it to Stripe", a
     assert.deepEqual(await retryUnstampedRefunds(w.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, blocked: 0, failed: 0 });
   });
   const [refund] = await rows(engagementId, "refund");
-  assert.deepEqual([refund.amountMinor, refund.stripeReference], [14_000, null]);
+  assert.deepEqual([refund.amountMinor, refund.stripeReference], [12_600, null]);
   assert.deepEqual(await checkMoneyInvariants(w.institutionId), []);
 });
 

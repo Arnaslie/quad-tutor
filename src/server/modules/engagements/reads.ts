@@ -46,6 +46,7 @@ import {
   type EndBlock,
   type ViewerAction,
 } from "./attendance";
+import { endSplit, hoursBefore } from "./cancel-rules";
 import { releaseLapsedConfirmations } from "./confirmation";
 import { sessionsRemaining } from "./scheduling";
 
@@ -226,7 +227,9 @@ export type StudentPackage = {
 };
 
 export type PackageEnding = {
-  refundMinor: number;
+  /** What ending now sends to the card, and what stays with the tutor. */
+  backMinor: number;
+  tutorMinor: number;
   cancels: Date[];
   blocked: EndBlock | null;
 };
@@ -526,13 +529,16 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
   const now = new Date();
   return packages.map(({ refundMinor, ...pkg }) => {
     const sessions = open.filter((row) => row.engagementId === pkg.engagementId);
+    const cancels = sessions.filter((row) => row.status === "scheduled").map((row) => row.scheduledAt);
     return {
       ...pkg,
       ending: {
-        refundMinor,
-        cancels: sessions
-          .filter((row) => row.status === "scheduled")
-          .map((row) => row.scheduledAt),
+        ...endSplit(
+          refundMinor,
+          perSessionMinor(pkg),
+          cancels.map((when) => hoursBefore(when, now)).filter((hours) => hours > 0),
+        ),
+        cancels,
         blocked: endBlock(sessions, now),
       },
     };

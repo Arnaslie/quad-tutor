@@ -14,6 +14,7 @@ import { Button } from "@/components/button";
 import { Card } from "@/components/card";
 import { formatDayTime } from "@/components/format";
 import { Money } from "@/components/money";
+import { END_FEE_BP, FULL_REFUND_HOURS } from "@/server/modules/engagements/cancel-rules";
 
 import { endEarly, type ActionResult } from "../actions";
 
@@ -42,14 +43,16 @@ export function EndedNotice({ children }: { children: ReactNode }) {
 export function EndPackage({
   engagementId,
   tutorName,
-  refundMinor,
+  backMinor,
+  tutorMinor,
   currency,
   delivered,
   cancels,
 }: {
   engagementId: string;
   tutorName: string;
-  refundMinor: number;
+  backMinor: number;
+  tutorMinor: number;
   currency: string;
   delivered: number;
   cancels: string[];
@@ -81,15 +84,29 @@ export function EndPackage({
       <input type="hidden" name="engagementId" value={engagementId} />
 
       <p className="font-medium">
-        {refundMinor > 0 ? (
+        {backMinor > 0 ? (
           <>
-            You get <Money minor={refundMinor} currency={currency} /> back for
-            everything you have not used.
+            You get <Money minor={backMinor} currency={currency} /> back.
+            {tutorMinor > 0 ? (
+              <>
+                {" "}
+                <Money minor={tutorMinor} currency={currency} /> goes to {tutorName}.
+              </>
+            ) : null}
           </>
         ) : (
           "Nothing is left to refund."
         )}
       </p>
+
+      {tutorMinor > 0 ? (
+        <p className="text-muted">
+          {tutorName} keeps {END_FEE_BP / 100}% of what you have not used, and
+          part of any session less than {FULL_REFUND_HOURS} hours away, as if
+          you cancelled it. Your refund goes to your card now, and can take 5
+          to 10 days to show.
+        </p>
+      ) : null}
 
       {delivered > 0 ? (
         <p className="text-muted">
