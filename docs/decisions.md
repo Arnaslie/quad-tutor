@@ -52,8 +52,9 @@ rounds down to the cent. It is the tutor's pay, written as `session_earned` and
 `tutor_accrued` with no session and no `platform_fee` row, so no refund claws it back
 and it never counts toward the fee milestone. It is charged only when the student
 ends the package: never at term end, and never on a refund the tutor caused. A
-package whose term is over but which the sweep has not closed yet ends as the sweep
-would: no fee, and sessions under 24 hours away are cancelled free. The money check
+package whose term is over but which the sweep has not closed yet refunds as the sweep
+would: no fee, and sessions under 24 hours away are cancelled free. Unlike the sweep,
+the student cancelled those sessions, so the tutor is emailed for each. The money check
 reads the rows that name no session as the end fee: one per package, all of it
 `tutor_accrued` with no `platform_fee`, and never more than 10% of what was left.
 
