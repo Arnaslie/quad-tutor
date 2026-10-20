@@ -1,5 +1,5 @@
 {
-  "id": "d3c99b73-aef3-424e-b42c-eaee2e6aa2d6",
+  "id": "e7561d09-cd24-4a34-9ff5-b5ddef54bbfc",
   "prevId": "7433539a-ab1c-4010-973e-87cd2e3f3c7e",
   "version": "7",
   "dialect": "postgresql",
@@ -100,24 +100,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "account_user_id_user_id_fk": {
           "name": "account_user_id_user_id_fk",
           "tableFrom": "account",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -175,24 +175,24 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "college_institution_id_institution_id_fk": {
           "name": "college_institution_id_institution_id_fk",
           "tableFrom": "college",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -256,9 +256,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "course_college_idx": {
           "name": "course_college_idx",
@@ -271,37 +271,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "course_institution_id_institution_id_fk": {
           "name": "course_institution_id_institution_id_fk",
           "tableFrom": "course",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "course_college_id_college_id_fk": {
           "name": "course_college_id_college_id_fk",
           "tableFrom": "course",
+          "tableTo": "college",
           "columnsFrom": [
             "college_id"
           ],
-          "tableTo": "college",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -364,63 +364,63 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "course_code_alias_institution_id_institution_id_fk": {
           "name": "course_code_alias_institution_id_institution_id_fk",
           "tableFrom": "course_code_alias",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "course_code_alias_course_id_course_id_fk": {
           "name": "course_code_alias_course_id_course_id_fk",
           "tableFrom": "course_code_alias",
+          "tableTo": "course",
           "columnsFrom": [
             "course_id"
           ],
-          "tableTo": "course",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "course_code_alias_valid_from_term_id_term_id_fk": {
           "name": "course_code_alias_valid_from_term_id_term_id_fk",
           "tableFrom": "course_code_alias",
+          "tableTo": "term",
           "columnsFrom": [
             "valid_from_term_id"
           ],
-          "tableTo": "term",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "course_code_alias_valid_to_term_id_term_id_fk": {
           "name": "course_code_alias_valid_to_term_id_term_id_fk",
           "tableFrom": "course_code_alias",
+          "tableTo": "term",
           "columnsFrom": [
             "valid_to_term_id"
           ],
-          "tableTo": "term",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -495,9 +495,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "course_offering_course_idx": {
           "name": "course_offering_course_idx",
@@ -510,63 +510,63 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "course_offering_institution_id_institution_id_fk": {
           "name": "course_offering_institution_id_institution_id_fk",
           "tableFrom": "course_offering",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "course_offering_course_id_course_id_fk": {
           "name": "course_offering_course_id_course_id_fk",
           "tableFrom": "course_offering",
+          "tableTo": "course",
           "columnsFrom": [
             "course_id"
           ],
-          "tableTo": "course",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "course_offering_term_id_term_id_fk": {
           "name": "course_offering_term_id_term_id_fk",
           "tableFrom": "course_offering",
+          "tableTo": "term",
           "columnsFrom": [
             "term_id"
           ],
-          "tableTo": "term",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "course_offering_professor_id_professor_id_fk": {
           "name": "course_offering_professor_id_professor_id_fk",
           "tableFrom": "course_offering",
+          "tableTo": "professor",
           "columnsFrom": [
             "professor_id"
           ],
-          "tableTo": "professor",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -637,9 +637,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "demand_signal_unique_idx": {
           "name": "demand_signal_unique_idx",
@@ -658,50 +658,50 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "demand_signal_institution_id_institution_id_fk": {
           "name": "demand_signal_institution_id_institution_id_fk",
           "tableFrom": "demand_signal",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "demand_signal_student_profile_id_student_profile_id_fk": {
           "name": "demand_signal_student_profile_id_student_profile_id_fk",
           "tableFrom": "demand_signal",
+          "tableTo": "student_profile",
           "columnsFrom": [
             "student_profile_id"
           ],
-          "tableTo": "student_profile",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "demand_signal_course_offering_id_course_offering_id_fk": {
           "name": "demand_signal_course_offering_id_course_offering_id_fk",
           "tableFrom": "demand_signal",
+          "tableTo": "course_offering",
           "columnsFrom": [
             "course_offering_id"
           ],
-          "tableTo": "course_offering",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -843,9 +843,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "engagement_match_request_idx": {
           "name": "engagement_match_request_idx",
@@ -858,10 +858,10 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"engagement\".\"status\" <> 'cancelled'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "engagement_student_idx": {
           "name": "engagement_student_idx",
@@ -880,9 +880,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "engagement_tutor_course_idx": {
           "name": "engagement_tutor_course_idx",
@@ -895,99 +895,99 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "engagement_institution_id_institution_id_fk": {
           "name": "engagement_institution_id_institution_id_fk",
           "tableFrom": "engagement",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "engagement_student_profile_id_student_profile_id_fk": {
           "name": "engagement_student_profile_id_student_profile_id_fk",
           "tableFrom": "engagement",
+          "tableTo": "student_profile",
           "columnsFrom": [
             "student_profile_id"
           ],
-          "tableTo": "student_profile",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "engagement_tutor_course_id_tutor_course_id_fk": {
           "name": "engagement_tutor_course_id_tutor_course_id_fk",
           "tableFrom": "engagement",
+          "tableTo": "tutor_course",
           "columnsFrom": [
             "tutor_course_id"
           ],
-          "tableTo": "tutor_course",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "engagement_course_offering_id_course_offering_id_fk": {
           "name": "engagement_course_offering_id_course_offering_id_fk",
           "tableFrom": "engagement",
+          "tableTo": "course_offering",
           "columnsFrom": [
             "course_offering_id"
           ],
-          "tableTo": "course_offering",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "engagement_match_request_id_match_request_id_fk": {
           "name": "engagement_match_request_id_match_request_id_fk",
           "tableFrom": "engagement",
+          "tableTo": "match_request",
           "columnsFrom": [
             "match_request_id"
           ],
-          "tableTo": "match_request",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "engagement_anchor_exam_id_exam_id_fk": {
           "name": "engagement_anchor_exam_id_exam_id_fk",
           "tableFrom": "engagement",
+          "tableTo": "exam",
           "columnsFrom": [
             "anchor_exam_id"
           ],
-          "tableTo": "exam",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "engagement_stripe_checkout_session_id_unique": {
           "name": "engagement_stripe_checkout_session_id_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "stripe_checkout_session_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -1049,50 +1049,50 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "enrollment_institution_id_institution_id_fk": {
           "name": "enrollment_institution_id_institution_id_fk",
           "tableFrom": "enrollment",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "enrollment_student_profile_id_student_profile_id_fk": {
           "name": "enrollment_student_profile_id_student_profile_id_fk",
           "tableFrom": "enrollment",
+          "tableTo": "student_profile",
           "columnsFrom": [
             "student_profile_id"
           ],
-          "tableTo": "student_profile",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "enrollment_course_offering_id_course_offering_id_fk": {
           "name": "enrollment_course_offering_id_course_offering_id_fk",
           "tableFrom": "enrollment",
+          "tableTo": "course_offering",
           "columnsFrom": [
             "course_offering_id"
           ],
-          "tableTo": "course_offering",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1149,37 +1149,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "exam_institution_id_institution_id_fk": {
           "name": "exam_institution_id_institution_id_fk",
           "tableFrom": "exam",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "exam_course_offering_id_course_offering_id_fk": {
           "name": "exam_course_offering_id_course_offering_id_fk",
           "tableFrom": "exam",
+          "tableTo": "course_offering",
           "columnsFrom": [
             "course_offering_id"
           ],
-          "tableTo": "course_offering",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1237,10 +1237,10 @@
       "uniqueConstraints": {
         "institution_slug_unique": {
           "name": "institution_slug_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "slug"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -1276,15 +1276,15 @@
         "institution_email_institution_id_institution_id_fk": {
           "name": "institution_email_institution_id_institution_id_fk",
           "tableFrom": "institution_email",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1386,9 +1386,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "ledger_entry_session_earned_idx": {
           "name": "ledger_entry_session_earned_idx",
@@ -1401,10 +1401,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"ledger_entry\".\"type\" = 'session_earned'",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "ledger_entry_stripe_reference_idx": {
           "name": "ledger_entry_stripe_reference_idx",
@@ -1417,10 +1417,10 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"ledger_entry\".\"stripe_reference\" is not null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "ledger_entry_corrects_entry_idx": {
           "name": "ledger_entry_corrects_entry_idx",
@@ -1433,77 +1433,77 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"ledger_entry\".\"corrects_entry_id\" is not null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "ledger_entry_institution_id_institution_id_fk": {
           "name": "ledger_entry_institution_id_institution_id_fk",
           "tableFrom": "ledger_entry",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "ledger_entry_engagement_id_engagement_id_fk": {
           "name": "ledger_entry_engagement_id_engagement_id_fk",
           "tableFrom": "ledger_entry",
+          "tableTo": "engagement",
           "columnsFrom": [
             "engagement_id"
           ],
-          "tableTo": "engagement",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "ledger_entry_session_id_session_booking_id_fk": {
           "name": "ledger_entry_session_id_session_booking_id_fk",
           "tableFrom": "ledger_entry",
+          "tableTo": "session_booking",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "session_booking",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "ledger_entry_corrects_entry_id_ledger_entry_id_fk": {
           "name": "ledger_entry_corrects_entry_id_ledger_entry_id_fk",
           "tableFrom": "ledger_entry",
+          "tableTo": "ledger_entry",
           "columnsFrom": [
             "corrects_entry_id"
           ],
-          "tableTo": "ledger_entry",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "ledger_entry_recorded_by_user_id_user_id_fk": {
           "name": "ledger_entry_recorded_by_user_id_user_id_fk",
           "tableFrom": "ledger_entry",
+          "tableTo": "user",
           "columnsFrom": [
             "recorded_by_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1618,9 +1618,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "match_request_student_idx": {
           "name": "match_request_student_idx",
@@ -1639,9 +1639,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "match_request_tutor_course_idx": {
           "name": "match_request_tutor_course_idx",
@@ -1660,63 +1660,63 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "match_request_institution_id_institution_id_fk": {
           "name": "match_request_institution_id_institution_id_fk",
           "tableFrom": "match_request",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "match_request_student_profile_id_student_profile_id_fk": {
           "name": "match_request_student_profile_id_student_profile_id_fk",
           "tableFrom": "match_request",
+          "tableTo": "student_profile",
           "columnsFrom": [
             "student_profile_id"
           ],
-          "tableTo": "student_profile",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "match_request_tutor_course_id_tutor_course_id_fk": {
           "name": "match_request_tutor_course_id_tutor_course_id_fk",
           "tableFrom": "match_request",
+          "tableTo": "tutor_course",
           "columnsFrom": [
             "tutor_course_id"
           ],
-          "tableTo": "tutor_course",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "match_request_course_offering_id_course_offering_id_fk": {
           "name": "match_request_course_offering_id_course_offering_id_fk",
           "tableFrom": "match_request",
+          "tableTo": "course_offering",
           "columnsFrom": [
             "course_offering_id"
           ],
-          "tableTo": "course_offering",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1798,9 +1798,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "message_sender_created_idx": {
           "name": "message_sender_created_idx",
@@ -1819,50 +1819,50 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "message_institution_id_institution_id_fk": {
           "name": "message_institution_id_institution_id_fk",
           "tableFrom": "message",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_thread_id_message_thread_id_fk": {
           "name": "message_thread_id_message_thread_id_fk",
           "tableFrom": "message",
+          "tableTo": "message_thread",
           "columnsFrom": [
             "thread_id"
           ],
-          "tableTo": "message_thread",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_sender_user_id_user_id_fk": {
           "name": "message_sender_user_id_user_id_fk",
           "tableFrom": "message",
+          "tableTo": "user",
           "columnsFrom": [
             "sender_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1969,9 +1969,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "message_report_thread_idx": {
           "name": "message_report_thread_idx",
@@ -1984,9 +1984,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "message_report_open_rating_idx": {
           "name": "message_report_open_rating_idx",
@@ -1999,77 +1999,77 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"message_report\".\"reviewed_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "message_report_institution_id_institution_id_fk": {
           "name": "message_report_institution_id_institution_id_fk",
           "tableFrom": "message_report",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_report_thread_id_message_thread_id_fk": {
           "name": "message_report_thread_id_message_thread_id_fk",
           "tableFrom": "message_report",
+          "tableTo": "message_thread",
           "columnsFrom": [
             "thread_id"
           ],
-          "tableTo": "message_thread",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_report_session_rating_id_session_rating_id_fk": {
           "name": "message_report_session_rating_id_session_rating_id_fk",
           "tableFrom": "message_report",
+          "tableTo": "session_rating",
           "columnsFrom": [
             "session_rating_id"
           ],
-          "tableTo": "session_rating",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_report_reporter_user_id_user_id_fk": {
           "name": "message_report_reporter_user_id_user_id_fk",
           "tableFrom": "message_report",
+          "tableTo": "user",
           "columnsFrom": [
             "reporter_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_report_reviewed_by_user_id_user_id_fk": {
           "name": "message_report_reviewed_by_user_id_user_id_fk",
           "tableFrom": "message_report",
+          "tableTo": "user",
           "columnsFrom": [
             "reviewed_by_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2162,9 +2162,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "message_thread_tutor_course_idx": {
           "name": "message_thread_tutor_course_idx",
@@ -2177,50 +2177,50 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "message_thread_institution_id_institution_id_fk": {
           "name": "message_thread_institution_id_institution_id_fk",
           "tableFrom": "message_thread",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_thread_student_profile_id_student_profile_id_fk": {
           "name": "message_thread_student_profile_id_student_profile_id_fk",
           "tableFrom": "message_thread",
+          "tableTo": "student_profile",
           "columnsFrom": [
             "student_profile_id"
           ],
-          "tableTo": "student_profile",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_thread_tutor_course_id_tutor_course_id_fk": {
           "name": "message_thread_tutor_course_id_tutor_course_id_fk",
           "tableFrom": "message_thread",
+          "tableTo": "tutor_course",
           "columnsFrom": [
             "tutor_course_id"
           ],
-          "tableTo": "tutor_course",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2290,63 +2290,63 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "message_thread_access_institution_id_institution_id_fk": {
           "name": "message_thread_access_institution_id_institution_id_fk",
           "tableFrom": "message_thread_access",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_thread_access_thread_id_message_thread_id_fk": {
           "name": "message_thread_access_thread_id_message_thread_id_fk",
           "tableFrom": "message_thread_access",
+          "tableTo": "message_thread",
           "columnsFrom": [
             "thread_id"
           ],
-          "tableTo": "message_thread",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_thread_access_report_id_message_report_id_fk": {
           "name": "message_thread_access_report_id_message_report_id_fk",
           "tableFrom": "message_thread_access",
+          "tableTo": "message_report",
           "columnsFrom": [
             "report_id"
           ],
-          "tableTo": "message_report",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "message_thread_access_operator_user_id_user_id_fk": {
           "name": "message_thread_access_operator_user_id_user_id_fk",
           "tableFrom": "message_thread_access",
+          "tableTo": "user",
           "columnsFrom": [
             "operator_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2473,9 +2473,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "money_discrepancy_engagement_idx": {
           "name": "money_discrepancy_engagement_idx",
@@ -2488,9 +2488,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "money_discrepancy_ledger_entry_idx": {
           "name": "money_discrepancy_ledger_entry_idx",
@@ -2503,9 +2503,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "money_discrepancy_kind_reference_idx": {
           "name": "money_discrepancy_kind_reference_idx",
@@ -2524,74 +2524,74 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"money_discrepancy\".\"stripe_reference\" is not null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "money_discrepancy_institution_id_institution_id_fk": {
           "name": "money_discrepancy_institution_id_institution_id_fk",
           "tableFrom": "money_discrepancy",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "money_discrepancy_engagement_id_engagement_id_fk": {
           "name": "money_discrepancy_engagement_id_engagement_id_fk",
           "tableFrom": "money_discrepancy",
+          "tableTo": "engagement",
           "columnsFrom": [
             "engagement_id"
           ],
-          "tableTo": "engagement",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "money_discrepancy_ledger_entry_id_ledger_entry_id_fk": {
           "name": "money_discrepancy_ledger_entry_id_ledger_entry_id_fk",
           "tableFrom": "money_discrepancy",
+          "tableTo": "ledger_entry",
           "columnsFrom": [
             "ledger_entry_id"
           ],
-          "tableTo": "ledger_entry",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "money_discrepancy_resolved_by_user_id_user_id_fk": {
           "name": "money_discrepancy_resolved_by_user_id_user_id_fk",
           "tableFrom": "money_discrepancy",
+          "tableTo": "user",
           "columnsFrom": [
             "resolved_by_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "money_discrepancy_refund_reference_unique": {
           "name": "money_discrepancy_refund_reference_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "refund_reference"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -2627,28 +2627,28 @@
         "operator_user_id_user_id_fk": {
           "name": "operator_user_id_user_id_fk",
           "tableFrom": "operator",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "operator_institution_id_institution_id_fk": {
           "name": "operator_institution_id_institution_id_fk",
           "tableFrom": "operator",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -2781,9 +2781,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "payment_dispute_engagement_idx": {
           "name": "payment_dispute_engagement_idx",
@@ -2796,60 +2796,60 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "payment_dispute_institution_id_institution_id_fk": {
           "name": "payment_dispute_institution_id_institution_id_fk",
           "tableFrom": "payment_dispute",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "payment_dispute_engagement_id_engagement_id_fk": {
           "name": "payment_dispute_engagement_id_engagement_id_fk",
           "tableFrom": "payment_dispute",
+          "tableTo": "engagement",
           "columnsFrom": [
             "engagement_id"
           ],
-          "tableTo": "engagement",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "payment_dispute_resolved_by_user_id_user_id_fk": {
           "name": "payment_dispute_resolved_by_user_id_user_id_fk",
           "tableFrom": "payment_dispute",
+          "tableTo": "user",
           "columnsFrom": [
             "resolved_by_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "payment_dispute_stripe_dispute_id_unique": {
           "name": "payment_dispute_stripe_dispute_id_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "stripe_dispute_id"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -2898,24 +2898,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "professor_institution_id_institution_id_fk": {
           "name": "professor_institution_id_institution_id_fk",
           "tableFrom": "professor",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2986,50 +2986,50 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "reliability_event_institution_id_institution_id_fk": {
           "name": "reliability_event_institution_id_institution_id_fk",
           "tableFrom": "reliability_event",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "reliability_event_user_id_user_id_fk": {
           "name": "reliability_event_user_id_user_id_fk",
           "tableFrom": "reliability_event",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "reliability_event_session_id_session_booking_id_fk": {
           "name": "reliability_event_session_id_session_booking_id_fk",
           "tableFrom": "reliability_event",
+          "tableTo": "session_booking",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "session_booking",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3104,34 +3104,34 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "session_user_id_user_id_fk": {
           "name": "session_user_id_user_id_fk",
           "tableFrom": "session",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "session_token_unique": {
           "name": "session_token_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "token"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -3324,9 +3324,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "session_engagement_idx": {
           "name": "session_engagement_idx",
@@ -3339,9 +3339,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "session_scheduled_idx": {
           "name": "session_scheduled_idx",
@@ -3354,50 +3354,50 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "session_booking_institution_id_institution_id_fk": {
           "name": "session_booking_institution_id_institution_id_fk",
           "tableFrom": "session_booking",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "session_booking_engagement_id_engagement_id_fk": {
           "name": "session_booking_engagement_id_engagement_id_fk",
           "tableFrom": "session_booking",
+          "tableTo": "engagement",
           "columnsFrom": [
             "engagement_id"
           ],
-          "tableTo": "engagement",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "session_booking_cancelled_by_user_id_user_id_fk": {
           "name": "session_booking_cancelled_by_user_id_user_id_fk",
           "tableFrom": "session_booking",
+          "tableTo": "user",
           "columnsFrom": [
             "cancelled_by_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3498,9 +3498,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "session_rating_counted_idx": {
           "name": "session_rating_counted_idx",
@@ -3519,10 +3519,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"session_rating\".\"removed_at\" is null and \"session_rating\".\"released_at\" is not null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "session_rating_pending_idx": {
           "name": "session_rating_pending_idx",
@@ -3541,10 +3541,10 @@
             }
           ],
           "isUnique": false,
-          "with": {},
-          "method": "btree",
           "where": "\"session_rating\".\"released_at\" is null and \"session_rating\".\"removed_at\" is null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         },
         "session_rating_student_idx": {
           "name": "session_rating_student_idx",
@@ -3557,76 +3557,76 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "session_rating_institution_id_institution_id_fk": {
           "name": "session_rating_institution_id_institution_id_fk",
           "tableFrom": "session_rating",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "session_rating_session_id_session_booking_id_fk": {
           "name": "session_rating_session_id_session_booking_id_fk",
           "tableFrom": "session_rating",
+          "tableTo": "session_booking",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "session_booking",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "session_rating_tutor_course_id_tutor_course_id_fk": {
           "name": "session_rating_tutor_course_id_tutor_course_id_fk",
           "tableFrom": "session_rating",
+          "tableTo": "tutor_course",
           "columnsFrom": [
             "tutor_course_id"
           ],
-          "tableTo": "tutor_course",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "session_rating_student_profile_id_student_profile_id_fk": {
           "name": "session_rating_student_profile_id_student_profile_id_fk",
           "tableFrom": "session_rating",
+          "tableTo": "student_profile",
           "columnsFrom": [
             "student_profile_id"
           ],
-          "tableTo": "student_profile",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "session_rating_removed_by_user_id_user_id_fk": {
           "name": "session_rating_removed_by_user_id_user_id_fk",
           "tableFrom": "session_rating",
+          "tableTo": "user",
           "columnsFrom": [
             "removed_by_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3705,63 +3705,63 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "session_rating_access_institution_id_institution_id_fk": {
           "name": "session_rating_access_institution_id_institution_id_fk",
           "tableFrom": "session_rating_access",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "session_rating_access_session_rating_id_session_rating_id_fk": {
           "name": "session_rating_access_session_rating_id_session_rating_id_fk",
           "tableFrom": "session_rating_access",
+          "tableTo": "session_rating",
           "columnsFrom": [
             "session_rating_id"
           ],
-          "tableTo": "session_rating",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "session_rating_access_report_id_message_report_id_fk": {
           "name": "session_rating_access_report_id_message_report_id_fk",
           "tableFrom": "session_rating_access",
+          "tableTo": "message_report",
           "columnsFrom": [
             "report_id"
           ],
-          "tableTo": "message_report",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "session_rating_access_operator_user_id_user_id_fk": {
           "name": "session_rating_access_operator_user_id_user_id_fk",
           "tableFrom": "session_rating_access",
+          "tableTo": "user",
           "columnsFrom": [
             "operator_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3813,37 +3813,37 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "student_profile_user_id_user_id_fk": {
           "name": "student_profile_user_id_user_id_fk",
           "tableFrom": "student_profile",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "student_profile_institution_id_institution_id_fk": {
           "name": "student_profile_institution_id_institution_id_fk",
           "tableFrom": "student_profile",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3880,15 +3880,15 @@
         "sweep_lease_institution_id_institution_id_fk": {
           "name": "sweep_lease_institution_id_institution_id_fk",
           "tableFrom": "sweep_lease",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3959,24 +3959,24 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "term_institution_id_institution_id_fk": {
           "name": "term_institution_id_institution_id_fk",
           "tableFrom": "term",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4039,37 +4039,37 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "tutor_availability_institution_id_institution_id_fk": {
           "name": "tutor_availability_institution_id_institution_id_fk",
           "tableFrom": "tutor_availability",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tutor_availability_tutor_profile_id_tutor_profile_id_fk": {
           "name": "tutor_availability_tutor_profile_id_tutor_profile_id_fk",
           "tableFrom": "tutor_availability",
+          "tableTo": "tutor_profile",
           "columnsFrom": [
             "tutor_profile_id"
           ],
-          "tableTo": "tutor_profile",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4224,9 +4224,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tutor_course_unique_idx": {
           "name": "tutor_course_unique_idx",
@@ -4245,9 +4245,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tutor_course_course_idx": {
           "name": "tutor_course_course_idx",
@@ -4260,89 +4260,89 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "tutor_course_institution_id_institution_id_fk": {
           "name": "tutor_course_institution_id_institution_id_fk",
           "tableFrom": "tutor_course",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tutor_course_tutor_profile_id_tutor_profile_id_fk": {
           "name": "tutor_course_tutor_profile_id_tutor_profile_id_fk",
           "tableFrom": "tutor_course",
+          "tableTo": "tutor_profile",
           "columnsFrom": [
             "tutor_profile_id"
           ],
-          "tableTo": "tutor_profile",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tutor_course_course_id_course_id_fk": {
           "name": "tutor_course_course_id_course_id_fk",
           "tableFrom": "tutor_course",
+          "tableTo": "course",
           "columnsFrom": [
             "course_id"
           ],
-          "tableTo": "course",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tutor_course_taken_term_id_term_id_fk": {
           "name": "tutor_course_taken_term_id_term_id_fk",
           "tableFrom": "tutor_course",
+          "tableTo": "term",
           "columnsFrom": [
             "taken_term_id"
           ],
-          "tableTo": "term",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tutor_course_taken_under_professor_id_professor_id_fk": {
           "name": "tutor_course_taken_under_professor_id_professor_id_fk",
           "tableFrom": "tutor_course",
+          "tableTo": "professor",
           "columnsFrom": [
             "taken_under_professor_id"
           ],
-          "tableTo": "professor",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tutor_course_reviewed_by_user_id_user_id_fk": {
           "name": "tutor_course_reviewed_by_user_id_user_id_fk",
           "tableFrom": "tutor_course",
+          "tableTo": "user",
           "columnsFrom": [
             "reviewed_by_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4406,6 +4406,14 @@
           "notNull": true,
           "default": "'not_started'"
         },
+        "payout_speed": {
+          "name": "payout_speed",
+          "type": "payout_speed",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'weekly'"
+        },
         "expected_graduation_on": {
           "name": "expected_graduation_on",
           "type": "date",
@@ -4432,9 +4440,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tutor_profile_stripe_account_idx": {
           "name": "tutor_profile_stripe_account_idx",
@@ -4447,38 +4455,38 @@
             }
           ],
           "isUnique": true,
-          "with": {},
-          "method": "btree",
           "where": "\"tutor_profile\".\"stripe_account_id\" is not null",
-          "concurrently": false
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "tutor_profile_user_id_user_id_fk": {
           "name": "tutor_profile_user_id_user_id_fk",
           "tableFrom": "tutor_profile",
+          "tableTo": "user",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tutor_profile_institution_id_institution_id_fk": {
           "name": "tutor_profile_institution_id_institution_id_fk",
           "tableFrom": "tutor_profile",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4543,10 +4551,10 @@
       "uniqueConstraints": {
         "user_email_unique": {
           "name": "user_email_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "email"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4595,50 +4603,50 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "user_block_blocker_user_id_user_id_fk": {
           "name": "user_block_blocker_user_id_user_id_fk",
           "tableFrom": "user_block",
+          "tableTo": "user",
           "columnsFrom": [
             "blocker_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "user_block_blocked_user_id_user_id_fk": {
           "name": "user_block_blocked_user_id_user_id_fk",
           "tableFrom": "user_block",
+          "tableTo": "user",
           "columnsFrom": [
             "blocked_user_id"
           ],
-          "tableTo": "user",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "user_block_institution_id_institution_id_fk": {
           "name": "user_block_institution_id_institution_id_fk",
           "tableFrom": "user_block",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -4710,9 +4718,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {},
@@ -4789,47 +4797,47 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "verification_file_tutor_course_id_tutor_course_id_fk": {
           "name": "verification_file_tutor_course_id_tutor_course_id_fk",
           "tableFrom": "verification_file",
+          "tableTo": "tutor_course",
           "columnsFrom": [
             "tutor_course_id"
           ],
-          "tableTo": "tutor_course",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "verification_file_institution_id_institution_id_fk": {
           "name": "verification_file_institution_id_institution_id_fk",
           "tableFrom": "verification_file",
+          "tableTo": "institution",
           "columnsFrom": [
             "institution_id"
           ],
-          "tableTo": "institution",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "verification_file_pathname_unique": {
           "name": "verification_file_pathname_unique",
+          "nullsNotDistinct": false,
           "columns": [
             "pathname"
-          ],
-          "nullsNotDistinct": false
+          ]
         }
       },
       "policies": {},
@@ -4917,6 +4925,14 @@
         "top_up"
       ]
     },
+    "public.payout_speed": {
+      "name": "payout_speed",
+      "schema": "public",
+      "values": [
+        "weekly",
+        "daily"
+      ]
+    },
     "public.proof_kind": {
       "name": "proof_kind",
       "schema": "public",
@@ -4998,10 +5014,10 @@
     }
   },
   "schemas": {},
-  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
+  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},
