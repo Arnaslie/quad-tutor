@@ -16,17 +16,18 @@ import {
   denyAttendance,
 } from "@/server/modules/engagements/confirmation";
 import {
-  cancelSessionInput,
   confirmAttendanceInput,
   denyAttendanceInput,
   endPackageInput,
   engagementSlotInput,
+  studentCancelInput,
   studentNote,
   topUpInput,
 } from "@/server/modules/engagements/input";
 import { SessionError } from "@/server/modules/engagements/access";
+import { CancelQuoteChanged } from "@/server/modules/engagements/cancel-charge";
 import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
-import { endPackage } from "@/server/modules/engagements/termEnd";
+import { EndQuoteChanged, endPackage, endQuote, type EndQuote } from "@/server/modules/engagements/termEnd";
 import { checkoutRedirect, resumeCheckout } from "@/server/modules/billing/checkout-session";
 import { formatMinor } from "@/server/modules/billing/pricing";
 import { refundEachThroughStripe, type RefundRef } from "@/server/modules/billing/refunds";
@@ -53,7 +54,7 @@ export type ActionResult =
       message?: string;
       answered?: { answer: "confirmed" | "denied"; outcome: AnswerOutcome };
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; requote?: CancelQuoteChanged["quote"]; endRequote?: EndQuote };
 
 function toResult(error: unknown): ActionResult {
   if (
@@ -62,7 +63,12 @@ function toResult(error: unknown): ActionResult {
     error instanceof SessionError ||
     error instanceof RatingError
   ) {
-    return { ok: false, error: error.message };
+    return {
+      ok: false,
+      error: error.message,
+      ...(error instanceof CancelQuoteChanged ? { requote: error.quote } : {}),
+      ...(error instanceof EndQuoteChanged ? { endRequote: error.quote } : {}),
+    };
   }
   throw error;
 }
@@ -309,12 +315,15 @@ export async function cancel(
 ): Promise<ActionResult> {
   const actor = await requireActor();
 
-  const parsed = cancelSessionInput.safeParse({ sessionId: formData.get("sessionId") });
+  const parsed = studentCancelInput.safeParse({
+    sessionId: formData.get("sessionId"),
+    shownKeptMinor: formData.get("shownKeptMinor"),
+  });
   if (!parsed.success) return { ok: false, error: "That session no longer exists." };
 
   let outcome: Awaited<ReturnType<typeof cancelSession>>;
   try {
-    outcome = await cancelSession({ actor, sessionId: parsed.data.sessionId });
+    outcome = await cancelSession({ actor, ...parsed.data });
   } catch (error) {
     return toResult(error);
   }
@@ -344,12 +353,15 @@ export async function endEarly(
 ): Promise<ActionResult> {
   const actor = await requireActor();
 
-  const parsed = endPackageInput.safeParse({ engagementId: formData.get("engagementId") });
+  const parsed = endPackageInput.safeParse({
+    engagementId: formData.get("engagementId"),
+    shownBackMinor: formData.get("shownBackMinor"),
+  });
   if (!parsed.success) return { ok: false, error: "That package no longer exists." };
 
   let refund: Awaited<ReturnType<typeof endPackage>>;
   try {
-    refund = await endPackage({ actor, engagementId: parsed.data.engagementId });
+    refund = await endPackage({ actor, ...parsed.data });
   } catch (error) {
     return toResult(error);
   }
@@ -365,7 +377,7 @@ export async function endEarly(
   revalidatePath("/sessions");
   revalidatePath("/sessions/[id]", "page");
 
-  const backMinor = refund.refundMinor + refund.charged.reduce((sum, charge) => sum + charge.returnedMinor, 0);
+  const { backMinor } = endQuote(refund);
   return {
     ok: true,
     message:

@@ -187,6 +187,8 @@ export type CancelOutcome = {
 export async function cancelSession(params: {
   actor: Actor;
   sessionId: string;
+  /** The kept share the cancel form showed. A different one on the server's clock refuses the cancel. */
+  shownKeptMinor?: number;
 }): Promise<CancelOutcome> {
   const now = new Date();
 
@@ -220,7 +222,7 @@ export async function cancelSession(params: {
       );
     }
 
-    const charge = await chargeCancel(tx, session, params.actor.userId, now);
+    const charge = await chargeCancel(tx, session, params.actor.userId, now, params.shownKeptMinor);
     return { ...charge, currency: session.currency, engagementId: session.engagementId };
   });
 

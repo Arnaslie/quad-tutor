@@ -33,9 +33,10 @@ import { sessionRatingState } from "@/server/modules/ratings/reads";
 import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
 import { packagesForStudent, sessionDetail } from "./reads";
+import { CancelQuoteChanged } from "./cancel-charge";
 import { bookSession, cancelSession, sessionsRemaining } from "./scheduling";
 import { availableSlots } from "./slots";
-import { closeWithRefund, endPackage } from "./termEnd";
+import { EndQuoteChanged, closeWithRefund, endPackage, endQuote } from "./termEnd";
 
 const databaseHost = new URL(process.env.DATABASE_URL ?? "postgres://unset").hostname;
 if (!isLocalHost(databaseHost)) {
@@ -195,6 +196,37 @@ test("a student cancel of a four-pack session 24 hours or more ahead moves no mo
   assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
   assert.equal(await left(id), 4);
   assert.deepEqual(await facts(student), []);
+});
+
+test("a quote shown before the 24 hour line and submitted after it is refused with the new price, and nothing moves", async () => {
+  const student = await person();
+  const id = await pkg(student);
+  const sessionId = await session(id, hours(23.97));
+
+  await assert.rejects(cancelSession({ actor: student, sessionId, shownKeptMinor: 0 }), (error: unknown) => {
+    assert.ok(error instanceof CancelQuoteChanged);
+    assert.deepEqual(error.quote, { keptMinor: 1_750, returnedMinor: 1_750, toCard: true, late: false });
+    return true;
+  });
+  assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
+  assert.equal(await left(id), 3, "the session is still booked");
+
+  const outcome = await cancelSession({ actor: student, sessionId, shownKeptMinor: 1_750 });
+  assert.equal(outcome.keptMinor, 1_750, "the new quote, once shown, goes through");
+});
+
+test("a quote shown before the 12 hour line and submitted after it is refused with the late price", async () => {
+  const student = await person();
+  const id = await pkg(student);
+  const sessionId = await session(id, hours(11.97));
+
+  await assert.rejects(cancelSession({ actor: student, sessionId, shownKeptMinor: 1_750 }), (error: unknown) => {
+    assert.ok(error instanceof CancelQuoteChanged);
+    assert.deepEqual(error.quote, { keptMinor: 2_625, returnedMinor: 875, toCard: true, late: true });
+    return true;
+  });
+  assert.deepEqual(await facts(student), [], "a refused cancel writes no late cancel");
+  assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
 });
 
 test("a student cancel 12 to 24 hours ahead of a $35 session pays the tutor half and sends the other half to the card now", async () => {
@@ -515,6 +547,28 @@ test("ending with a session 20 hours away charges it at its tier, and the 10% fe
   assert.equal(await statusOf(id), "refunded");
 });
 
+test("an end quoted before a session crossed the 24 hour line is rolled back with the new amounts", async () => {
+  const student = await person();
+  const id = await pkg(student, "exam_anchored", (await newTutor()).claimId);
+  const soon = await session(id, hours(24.03));
+  const [preview] = (await packagesForStudent(student)).filter((row) => row.engagementId === id);
+  assert.deepEqual({ back: preview.ending.backMinor, tutor: preview.ending.tutorMinor }, { back: 12_600, tutor: 1_400 });
+
+  await db.update(sessionBooking).set({ scheduledAt: hours(23.97) }).where(eq(sessionBooking.id, soon));
+  await assert.rejects(endPackage({ actor: student, engagementId: id, shownBackMinor: 12_600 }), (error: unknown) => {
+    assert.ok(error instanceof EndQuoteChanged);
+    assert.deepEqual(error.quote, { backMinor: 11_200, tutorMinor: 2_800 });
+    return true;
+  });
+  assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
+  assert.equal(await statusOf(id), "active");
+  const [row] = await db.select({ status: sessionBooking.status }).from(sessionBooking).where(eq(sessionBooking.id, soon));
+  assert.equal(row.status, "scheduled");
+
+  const ended = await endPackage({ actor: student, engagementId: id, shownBackMinor: 11_200 });
+  assert.deepEqual(ended && endQuote(ended), { backMinor: 11_200, tutorMinor: 2_800 });
+});
+
 test("ending with a session 6 hours away keeps 75% of it, which is a late cancel, and 10% of the rest", async () => {
   const student = await person();
   const id = await pkg(student);
@@ -551,18 +605,19 @@ async function cancelEmails(): Promise<string> {
 
 test("the cancel email tells the tutor what a kept cancel pays, and tells the student what a tutor cancel sends to their card", async () => {
   const student = await person();
-  const id = await pkg(student);
+  const own = await newTutor();
+  const id = await pkg(student, "exam_anchored", own.claimId);
   const kept = await session(id, hours(20), { bookedNotifiedAt: new Date() });
   await cancelSession({ actor: student, sessionId: kept });
-  await cancelSession({ actor: tutor, sessionId: await session(id, hours(5), { bookedNotifiedAt: new Date() }) });
+  await cancelSession({ actor: own.actor, sessionId: await session(id, hours(5), { bookedNotifiedAt: new Date() }) });
   const [accrued] = await db
     .select({ amountMinor: ledgerEntry.amountMinor })
     .from(ledgerEntry)
     .where(and(eq(ledgerEntry.sessionId, kept), eq(ledgerEntry.type, "tutor_accrued")));
 
   const sent = await cancelEmails();
-  assert.ok([1_575, 1_663].includes(accrued.amountMinor), "half of $35, less the 10% or 5% fee");
-  assert.ok(sent.includes(`That time is open again. You'll be paid $${(accrued.amountMinor / 100).toFixed(2)} for this session.`));
+  assert.equal(accrued.amountMinor, 1_575, "half of $35, less a new tutor's 10% fee");
+  assert.ok(sent.includes("That time is open again. You'll be paid $15.75 for this session."));
   assert.match(sent, /You get \$35\.00 back on your card for this session\. It can take 5 to 10 days to show\./);
   assert.doesNotMatch(sent, /back in your package/);
   assert.doesNotMatch(sent, /late cancel/i);

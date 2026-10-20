@@ -5,7 +5,7 @@ import { reliabilityEvent, sessionBooking } from "@/server/db/schema";
 import { record } from "@/server/modules/billing/ledger";
 import { perSessionMinor } from "@/server/modules/billing/pricing";
 
-import type { Participation } from "./access";
+import { SessionError, type Participation } from "./access";
 import { isLateCancel } from "./attendance";
 import { cancelRefundsCard, cancelSplit, hoursBefore } from "./cancel-rules";
 import { recognise } from "./confirmation";
@@ -21,17 +21,31 @@ export type CancelCharge = {
   refundId: string | null;
 };
 
-/** Cancels a scheduled session the caller has locked, with the engagement locked before it. */
+/** The session crossed a cancel line between the quote the student saw and the submit. Nothing was cancelled. */
+export class CancelQuoteChanged extends SessionError {
+  constructor(readonly quote: { keptMinor: number; returnedMinor: number; toCard: boolean; late: boolean }) {
+    super("The session is closer now, so cancelling costs something different. Nothing was cancelled. Check the new amount and cancel again.");
+  }
+}
+
+/**
+ * Cancels a scheduled session the caller has locked, with the engagement locked before it. `shownKeptMinor` is
+ * the kept share the student was shown; a different one on the server's clock refuses before anything is written.
+ */
 export async function chargeCancel(
   tx: Tx,
   session: Participation,
   cancelledByUserId: string,
   now: Date,
+  shownKeptMinor?: number,
 ): Promise<CancelCharge> {
   const late = isLateCancel(session.scheduledAt, now);
   const hours = hoursBefore(session.scheduledAt, now);
   const { keptMinor, returnedMinor } = cancelSplit(perSessionMinor(session), hours, session.role);
   const toCard = cancelRefundsCard(session.sessionsPurchased, hours, session.role);
+  if (shownKeptMinor !== undefined && shownKeptMinor !== keptMinor) {
+    throw new CancelQuoteChanged({ keptMinor, returnedMinor, toCard, late });
+  }
 
   await tx
     .update(sessionBooking)

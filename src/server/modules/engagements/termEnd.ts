@@ -41,6 +41,7 @@ const refundFields = () => ({
 export async function engagementsDueForTermEndRefund(
   institutionId: string,
 ): Promise<Omit<TermEndRefund, "refundId">[]> {
+  // Every package still open, refund or not: one that cancels used up and whose close after commit failed owes nothing.
   const rows = await db
     .select(refundFields())
     .from(engagement)
@@ -54,7 +55,7 @@ export async function engagementsDueForTermEndRefund(
       ),
     );
 
-  return rows.filter((row) => row.refundMinor > 0);
+  return rows;
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -190,17 +191,40 @@ export async function closeIfUsedUp(
   return closeWithRefund(tx, { ...ids, lock });
 }
 
+export type EndQuote = { backMinor: number; tutorMinor: number };
+
+export function endQuote(ended: EndedPackage): EndQuote {
+  const sum = (pick: (charge: CancelCharge) => number) => ended.charged.reduce((total, charge) => total + pick(charge), 0);
+  return {
+    backMinor: ended.refundMinor + sum((charge) => charge.returnedMinor),
+    tutorMinor: ended.feeMinor + sum((charge) => charge.keptMinor),
+  };
+}
+
+/** What ending gives back differs from what the student was shown. Nothing was ended. */
+export class EndQuoteChanged extends SessionError {
+  constructor(readonly quote: EndQuote) {
+    super("What ending gives back changed since you opened this. Nothing was ended. Check the new amount and end again.");
+  }
+}
+
 export async function endPackage(params: {
   actor: Actor;
   engagementId: string;
+  /** What the end form said goes back to the card. A different amount rolls the end back. */
+  shownBackMinor?: number;
 }): Promise<EndedPackage | null> {
-  return db.transaction((tx) =>
-    closeWithRefund(tx, {
+  return db.transaction(async (tx) => {
+    const ended = await closeWithRefund(tx, {
       engagementId: params.engagementId,
       institutionId: params.actor.institutionId,
       endedBy: params.actor,
-    }),
-  );
+    });
+    if (ended && params.shownBackMinor !== undefined && endQuote(ended).backMinor !== params.shownBackMinor) {
+      throw new EndQuoteChanged(endQuote(ended));
+    }
+    return ended;
+  });
 }
 
 export type TermEndSweep = { refunds: TermEndRefund[]; held: number; failed: number };
@@ -220,7 +244,7 @@ export async function runTermEndRefunds(
       const refunded = await db.transaction((tx) =>
         closeWithRefund(tx, { engagementId: candidate.engagementId, institutionId }),
       );
-      if (refunded) refunds.push(refunded);
+      if (refunded && refunded.refundMinor > 0) refunds.push(refunded);
       if (refunded?.refundId && Date.now() < deadline) {
         await refundThroughStripe({ id: refunded.refundId, engagementId: candidate.engagementId, institutionId }).catch((error) =>
           console.error(`[term-end] card refund for ${candidate.engagementId} left for the retry sweep`, errorFacts(error)),

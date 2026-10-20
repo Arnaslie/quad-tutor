@@ -59,10 +59,12 @@ export function EndPackage({
 }) {
   const onEnded = useContext(EndedContext);
   const [open, setOpen] = useState(false);
+  const [quote, setQuote] = useState({ backMinor, tutorMinor });
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
     async (previous, formData) => {
       const result = await endEarly(previous, formData);
       if (result.ok) onEnded(result.message ?? "Package ended.");
+      else if (result.endRequote) setQuote(result.endRequote);
       return result;
     },
     null,
@@ -82,15 +84,16 @@ export function EndPackage({
       className="flex w-full flex-col gap-3 border-t border-border pt-3 text-sm"
     >
       <input type="hidden" name="engagementId" value={engagementId} />
+      <input type="hidden" name="shownBackMinor" value={quote.backMinor} />
 
       <p className="font-medium">
-        {backMinor > 0 ? (
+        {quote.backMinor > 0 ? (
           <>
-            You get <Money minor={backMinor} currency={currency} /> back.
-            {tutorMinor > 0 ? (
+            You get <Money minor={quote.backMinor} currency={currency} /> back.
+            {quote.tutorMinor > 0 ? (
               <>
                 {" "}
-                <Money minor={tutorMinor} currency={currency} /> goes to {tutorName}.
+                <Money minor={quote.tutorMinor} currency={currency} /> goes to {tutorName}.
               </>
             ) : null}
           </>
@@ -99,7 +102,7 @@ export function EndPackage({
         )}
       </p>
 
-      {tutorMinor > 0 ? (
+      {quote.tutorMinor > 0 ? (
         <p className="text-muted">
           {tutorName} keeps {END_FEE_BP / 100}% of what you have not used, and
           part of any session less than {FULL_REFUND_HOURS} hours away, as if
