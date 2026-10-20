@@ -188,9 +188,18 @@ export type CancelOutcome = {
   refunds: RefundRef[];
 };
 
+/** The session crossed a cancel line between the quote the student saw and the submit. Nothing was cancelled. */
+export class CancelQuoteChanged extends SessionError {
+  constructor(readonly quote: { keptMinor: number; returnedMinor: number; toCard: boolean; late: boolean }) {
+    super("The session is closer now, so cancelling costs something different. Nothing was cancelled. Check the new amount and cancel again.");
+  }
+}
+
 export async function cancelSession(params: {
   actor: Actor;
   sessionId: string;
+  /** The kept share the cancel form showed. A different one on the server's clock refuses the cancel. */
+  shownKeptMinor?: number;
 }): Promise<CancelOutcome> {
   const now = new Date();
 
@@ -228,6 +237,9 @@ export async function cancelSession(params: {
     const hours = hoursBefore(session.scheduledAt, now);
     const { keptMinor, returnedMinor } = cancelSplit(perSessionMinor(session), hours, session.role);
     const toCard = cancelRefundsCard(session.sessionsPurchased, hours, session.role);
+    if (params.shownKeptMinor !== undefined && params.shownKeptMinor !== keptMinor) {
+      throw new CancelQuoteChanged({ keptMinor, returnedMinor, toCard, late });
+    }
 
     await tx
       .update(sessionBooking)

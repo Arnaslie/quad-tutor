@@ -39,6 +39,7 @@ const refundFields = () => ({
 export async function engagementsDueForTermEndRefund(
   institutionId: string,
 ): Promise<Omit<TermEndRefund, "refundId">[]> {
+  // Every package still open, refund or not: one that cancels used up and whose close after commit failed owes nothing.
   const rows = await db
     .select(refundFields())
     .from(engagement)
@@ -52,7 +53,7 @@ export async function engagementsDueForTermEndRefund(
       ),
     );
 
-  return rows.filter((row) => row.refundMinor > 0);
+  return rows;
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -206,7 +207,7 @@ export async function runTermEndRefunds(
       const refunded = await db.transaction((tx) =>
         closeWithRefund(tx, { engagementId: candidate.engagementId, institutionId }),
       );
-      if (refunded) refunds.push(refunded);
+      if (refunded && refunded.refundMinor > 0) refunds.push(refunded);
       if (refunded?.refundId && Date.now() < deadline) {
         await refundThroughStripe({ id: refunded.refundId, engagementId: candidate.engagementId, institutionId }).catch((error) =>
           console.error(`[term-end] card refund for ${candidate.engagementId} left for the retry sweep`, errorFacts(error)),

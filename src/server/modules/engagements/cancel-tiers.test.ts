@@ -33,7 +33,7 @@ import { sessionRatingState } from "@/server/modules/ratings/reads";
 import { SessionError } from "./access";
 import { confirmAttendance } from "./confirmation";
 import { packagesForStudent, sessionDetail } from "./reads";
-import { bookSession, cancelSession, sessionsRemaining } from "./scheduling";
+import { CancelQuoteChanged, bookSession, cancelSession, sessionsRemaining } from "./scheduling";
 import { availableSlots } from "./slots";
 import { closeWithRefund, endPackage } from "./termEnd";
 
@@ -63,14 +63,27 @@ async function person(): Promise<Actor> {
   return { userId: id, name: id, email: `${id}@example.test`, institutionId, studentProfileId: profile.id, tutorProfileId: null };
 }
 
-async function pkg(student: Actor, kind: "exam_anchored" | "top_up" = "exam_anchored"): Promise<string> {
+async function newTutor(): Promise<{ actor: TutorActor; claimId: string }> {
+  const base = await person();
+  const [profile] = await db.insert(tutorProfile).values({ userId: base.userId, institutionId }).returning({ id: tutorProfile.id });
+  await db.insert(tutorAvailability).values(
+    [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ tutorProfileId: profile.id, institutionId, weekday, startMinute: 0, endMinute: 24 * 60 })),
+  );
+  const [claim] = await db
+    .insert(tutorCourse)
+    .values({ tutorProfileId: profile.id, institutionId, courseId, takenTermId: termId, gradeEarned: "A", status: "active" })
+    .returning({ id: tutorCourse.id });
+  return { actor: { ...base, tutorProfileId: profile.id }, claimId: claim.id };
+}
+
+async function pkg(student: Actor, kind: "exam_anchored" | "top_up" = "exam_anchored", claimId = tutorCourseId): Promise<string> {
   const single = kind === "top_up";
   const [row] = await db
     .insert(engagement)
     .values({
       institutionId,
       studentProfileId: student.studentProfileId,
-      tutorCourseId,
+      tutorCourseId: claimId,
       courseOfferingId: offeringId,
       kind,
       sessionsPurchased: single ? 1 : 4,
@@ -130,17 +143,7 @@ before(async () => {
   const [offering] = await db.insert(courseOffering).values({ institutionId, courseId, termId, section: "001" }).returning({ id: courseOffering.id });
   offeringId = offering.id;
 
-  const base = await person();
-  const [profile] = await db.insert(tutorProfile).values({ userId: base.userId, institutionId }).returning({ id: tutorProfile.id });
-  await db.insert(tutorAvailability).values(
-    [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ tutorProfileId: profile.id, institutionId, weekday, startMinute: 0, endMinute: 24 * 60 })),
-  );
-  const [claim] = await db
-    .insert(tutorCourse)
-    .values({ tutorProfileId: profile.id, institutionId, courseId, takenTermId: termId, gradeEarned: "A", status: "active" })
-    .returning({ id: tutorCourse.id });
-  tutor = { ...base, tutorProfileId: profile.id };
-  tutorCourseId = claim.id;
+  ({ actor: tutor, claimId: tutorCourseId } = await newTutor());
 });
 
 after(async () => {
@@ -192,6 +195,37 @@ test("a student cancel of a four-pack session 24 hours or more ahead moves no mo
   assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
   assert.equal(await left(id), 4);
   assert.deepEqual(await facts(student), []);
+});
+
+test("a quote shown before the 24 hour line and submitted after it is refused with the new price, and nothing moves", async () => {
+  const student = await person();
+  const id = await pkg(student);
+  const sessionId = await session(id, hours(23.97));
+
+  await assert.rejects(cancelSession({ actor: student, sessionId, shownKeptMinor: 0 }), (error: unknown) => {
+    assert.ok(error instanceof CancelQuoteChanged);
+    assert.deepEqual(error.quote, { keptMinor: 1_750, returnedMinor: 1_750, toCard: true, late: false });
+    return true;
+  });
+  assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
+  assert.equal(await left(id), 3, "the session is still booked");
+
+  const outcome = await cancelSession({ actor: student, sessionId, shownKeptMinor: 1_750 });
+  assert.equal(outcome.keptMinor, 1_750, "the new quote, once shown, goes through");
+});
+
+test("a quote shown before the 12 hour line and submitted after it is refused with the late price", async () => {
+  const student = await person();
+  const id = await pkg(student);
+  const sessionId = await session(id, hours(11.97));
+
+  await assert.rejects(cancelSession({ actor: student, sessionId, shownKeptMinor: 1_750 }), (error: unknown) => {
+    assert.ok(error instanceof CancelQuoteChanged);
+    assert.deepEqual(error.quote, { keptMinor: 2_625, returnedMinor: 875, toCard: true, late: true });
+    return true;
+  });
+  assert.deepEqual(await facts(student), [], "a refused cancel writes no late cancel");
+  assert.deepEqual(await ledger(id), [{ type: "package_purchase", amountMinor: 14_000 }]);
 });
 
 test("a student cancel 12 to 24 hours ahead of a $35 session pays the tutor half and sends the other half to the card now", async () => {
@@ -512,18 +546,19 @@ async function cancelEmails(): Promise<string> {
 
 test("the cancel email tells the tutor what a kept cancel pays, and tells the student what a tutor cancel sends to their card", async () => {
   const student = await person();
-  const id = await pkg(student);
+  const own = await newTutor();
+  const id = await pkg(student, "exam_anchored", own.claimId);
   const kept = await session(id, hours(20), { bookedNotifiedAt: new Date() });
   await cancelSession({ actor: student, sessionId: kept });
-  await cancelSession({ actor: tutor, sessionId: await session(id, hours(5), { bookedNotifiedAt: new Date() }) });
+  await cancelSession({ actor: own.actor, sessionId: await session(id, hours(5), { bookedNotifiedAt: new Date() }) });
   const [accrued] = await db
     .select({ amountMinor: ledgerEntry.amountMinor })
     .from(ledgerEntry)
     .where(and(eq(ledgerEntry.sessionId, kept), eq(ledgerEntry.type, "tutor_accrued")));
 
   const sent = await cancelEmails();
-  assert.ok([1_575, 1_663].includes(accrued.amountMinor), "half of $35, less the 10% or 5% fee");
-  assert.ok(sent.includes(`That time is open again. You'll be paid $${(accrued.amountMinor / 100).toFixed(2)} for this session.`));
+  assert.equal(accrued.amountMinor, 1_575, "half of $35, less a new tutor's 10% fee");
+  assert.ok(sent.includes("That time is open again. You'll be paid $15.75 for this session."));
   assert.match(sent, /You get \$35\.00 back on your card for this session\. It can take 5 to 10 days to show\./);
   assert.doesNotMatch(sent, /back in your package/);
   assert.doesNotMatch(sent, /late cancel/i);

@@ -109,11 +109,15 @@ function Cancel({
   otherPartyName: string;
   price: CancelPrice;
 }) {
+  const [split, setSplit] = useState<(ReturnType<typeof cancelSplit> & { toCard: boolean; late: boolean }) | null>(null);
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
-    cancel,
+    async (previous, formData) => {
+      const result = await cancel(previous, formData);
+      if (!result.ok && result.requote) setSplit(result.requote);
+      return result;
+    },
     null,
   );
-  const [split, setSplit] = useState<(ReturnType<typeof cancelSplit> & { toCard: boolean; late: boolean }) | null>(null);
 
   if (state?.ok) return <Result state={state} />;
 
@@ -145,6 +149,7 @@ function Cancel({
   return (
     <form action={action} className="flex flex-col gap-3">
       <input type="hidden" name="sessionId" value={sessionId} />
+      <input type="hidden" name="shownKeptMinor" value={split.keptMinor} />
 
       <Card className="flex flex-col gap-2 text-sm">
         {split.keptMinor > 0 ? (

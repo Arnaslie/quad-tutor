@@ -99,7 +99,10 @@ How the money moves:
   completed or used up by a cancel, `closeIfUsedUp` closes it after commit and
   refunds whatever the ledger still defers, which is only the odd cents per-session
   rounding left. The refunds together never pass the price: each is taken from what
-  the ledger still defers.
+  the ledger still defers. It closes `completed` if any session was attended, and
+  `refunded` if none was, even when every session was cancelled (2026-10-20). If the
+  close after commit fails, the term-end sweep closes the package, since it now takes
+  every open package past its term, not only those with money left to refund.
 - **A package with no attended session closes `refunded`** even when a kept cancel
   paid the tutor. The status says nothing was delivered, not that nothing was earned;
   the ledger says what was.
@@ -113,6 +116,10 @@ get $X back. $Y goes to <tutor>." and when the money reaches the card. The tutor
 cancel email says what they will be paid for the session, and the student's says what
 goes back to their card. The student's booking and
 reminder emails give the tiers instead of "cancelling is free until 12 hours before".
+The form posts the kept share it showed. If the server's clock puts the cancel in a
+different tier, because a line passed while the card was open or the phone's clock is
+off, the cancel is refused, nothing moves, and the form shows the server's new quote
+to confirm. Instant cash-out treats a changed fee quote the same way.
 
 **A single session exists, but only for an existing pair.** One session, full
 price, offered to a student whose packages with that tutor in a course have nothing

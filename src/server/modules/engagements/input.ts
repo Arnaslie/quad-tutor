@@ -8,6 +8,7 @@ export const sessionRef = z.object({
 
 export const confirmAttendanceInput = sessionRef;
 export const cancelSessionInput = sessionRef;
+export const studentCancelInput = sessionRef.extend({ shownKeptMinor: z.coerce.number().int().min(0) });
 
 export const denyAttendanceInput = sessionRef.extend({
   note: z.string().trim().max(500).optional(),

@@ -16,16 +16,16 @@ import {
   denyAttendance,
 } from "@/server/modules/engagements/confirmation";
 import {
-  cancelSessionInput,
   confirmAttendanceInput,
   denyAttendanceInput,
   endPackageInput,
   engagementSlotInput,
+  studentCancelInput,
   studentNote,
   topUpInput,
 } from "@/server/modules/engagements/input";
 import { SessionError } from "@/server/modules/engagements/access";
-import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
+import { CancelQuoteChanged, bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
 import { endPackage } from "@/server/modules/engagements/termEnd";
 import { checkoutRedirect, resumeCheckout } from "@/server/modules/billing/checkout-session";
 import { formatMinor } from "@/server/modules/billing/pricing";
@@ -53,7 +53,7 @@ export type ActionResult =
       message?: string;
       answered?: { answer: "confirmed" | "denied"; outcome: AnswerOutcome };
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; requote?: CancelQuoteChanged["quote"] };
 
 function toResult(error: unknown): ActionResult {
   if (
@@ -62,7 +62,7 @@ function toResult(error: unknown): ActionResult {
     error instanceof SessionError ||
     error instanceof RatingError
   ) {
-    return { ok: false, error: error.message };
+    return { ok: false, error: error.message, ...(error instanceof CancelQuoteChanged ? { requote: error.quote } : {}) };
   }
   throw error;
 }
@@ -309,12 +309,15 @@ export async function cancel(
 ): Promise<ActionResult> {
   const actor = await requireActor();
 
-  const parsed = cancelSessionInput.safeParse({ sessionId: formData.get("sessionId") });
+  const parsed = studentCancelInput.safeParse({
+    sessionId: formData.get("sessionId"),
+    shownKeptMinor: formData.get("shownKeptMinor"),
+  });
   if (!parsed.success) return { ok: false, error: "That session no longer exists." };
 
   let outcome: Awaited<ReturnType<typeof cancelSession>>;
   try {
-    outcome = await cancelSession({ actor, sessionId: parsed.data.sessionId });
+    outcome = await cancelSession({ actor, ...parsed.data });
   } catch (error) {
     return toResult(error);
   }
