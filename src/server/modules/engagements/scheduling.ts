@@ -191,7 +191,7 @@ export type CancelOutcome = {
 /** The session crossed a cancel line between the quote the student saw and the submit. Nothing was cancelled. */
 export class CancelQuoteChanged extends SessionError {
   constructor(readonly quote: { keptMinor: number; returnedMinor: number; toCard: boolean; late: boolean }) {
-    super("The session is closer now, so cancelling costs something different. Nothing was cancelled. Check the new amount and cancel again.");
+    super("The amount changed since you opened this. Nothing was cancelled. Check the new amount and cancel again.");
   }
 }
 
