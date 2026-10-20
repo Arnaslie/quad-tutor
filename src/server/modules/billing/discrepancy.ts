@@ -1,4 +1,4 @@
-import { and, eq, isNull, like, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, like, ne, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import { db } from "@/server/db";
@@ -128,23 +128,46 @@ export const ledgerRowBlocker = (
       ),
     );
 
+type FlagColumns = {
+  kind: AnyColumn;
+  engagementId: AnyColumn;
+  institutionId: AnyColumn;
+  ledgerEntryId: AnyColumn;
+  stripeReference: AnyColumn;
+  failedRefundIds: AnyColumn;
+};
+
 /**
- * A refund of the purchase that failed with no ledger row of ours (one made in the Dashboard) holds every unsent
- * refund of the engagement until ops resolves it, so none is sent to a card that just bounced one.
+ * Whether a failed refund holds one of the engagement's other unsent refunds back from the card, so none goes to a
+ * card that just bounced one: a Dashboard refund on the purchase's PaymentIntent (no row of ours), or a refund of
+ * one of our rows that Stripe took and the card then bounced. A create Stripe refused names no bounce, and a
+ * failed refund of a stray payment is not this purchase's, so neither holds anything.
  */
-export const failedDashboardRefund = (paymentIntentId: AnyColumn, institutionId: AnyColumn) =>
+export const holdsRefund = (
+  flag: FlagColumns,
+  row: { id: AnyColumn; engagementId: AnyColumn; institutionId: AnyColumn },
+  purchasePaymentIntentId: AnyColumn,
+) =>
+  and(
+    eq(flag.kind, "refund_failed"),
+    eq(flag.engagementId, row.engagementId),
+    eq(flag.institutionId, row.institutionId),
+    sql`${row.id} is distinct from ${flag.ledgerEntryId}`,
+    or(
+      and(isNull(flag.ledgerEntryId), eq(flag.stripeReference, purchasePaymentIntentId)),
+      and(isNotNull(flag.ledgerEntryId), sql`cardinality(${flag.failedRefundIds}) > 0`),
+    ),
+  );
+
+/** An open failed refund that holds this row. Resolving it sends the row to the card. */
+export const heldByBounce = (
+  row: { id: AnyColumn; engagementId: AnyColumn; institutionId: AnyColumn },
+  purchasePaymentIntentId: AnyColumn,
+) =>
   db
     .select({ id: blocker.id })
     .from(blocker)
-    .where(
-      and(
-        eq(blocker.kind, "refund_failed"),
-        eq(blocker.stripeReference, paymentIntentId),
-        eq(blocker.institutionId, institutionId),
-        isNull(blocker.ledgerEntryId),
-        isNull(blocker.resolvedAt),
-      ),
-    );
+    .where(and(holdsRefund(blocker, row, purchasePaymentIntentId), isNull(blocker.resolvedAt)));
 
 /**
  * A live refund made in the Dashboard stops the first refund row that finds it. The engagement's other unsent

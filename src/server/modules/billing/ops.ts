@@ -24,7 +24,8 @@ import { courseLabel } from "@/server/modules/messaging/threads";
 
 import { purchaseBooked, retriesRefund, uniqueViolation } from "./checkout-session";
 import { FORFEITED_PREFIX, MANUAL_PREFIX, paymentRefundBlocker, type Ids } from "./discrepancy";
-import { blockedRefunds, heldBehindPayment, heldBehindPayments, stoppedForGood } from "./refunds";
+import { formatMinor } from "./pricing";
+import { blockedRefunds, heldBy, heldByFlags, stoppedForGood } from "./refunds";
 import { blockedEngagements, paused } from "./transfers";
 
 type DiscrepancyKind = (typeof moneyDiscrepancyKind.enumValues)[number];
@@ -40,6 +41,8 @@ export type DiscrepancyItem = {
   kind: Exclude<DiscrepancyKind, "orphaned_account">;
   /** Null when the flag is keyed on our own id (a transfers gap, a failed refund row) rather than a Stripe object. */
   stripeReference: string | null;
+  /** The purchase's PaymentIntent, so a card keyed on our own id still names the payment. */
+  paymentIntentId: string | null;
   refundReference: string | null;
   ledgerAmountMinor: number | null;
   stripeAmountMinor: number | null;
@@ -47,7 +50,7 @@ export type DiscrepancyItem = {
   detectedAt: Date;
   /** The row the flag names. A Dashboard refund booked onto it may be for a different amount. */
   row: (RowFacts & { type: LedgerType; reference: string | null }) | null;
-  /** Unsent refunds a failed Dashboard refund holds back from the card. Each is paid by hand on its own. */
+  /** Unsent refunds a failed refund holds back from the card. Each is paid by hand on its own. */
   held: (RowFacts & { stoppedForGood: boolean })[];
   /** Ops' note from when they last answered this flag, which a failed refund reopening it keeps. Free text. */
   lastAnswer: string | null;
@@ -111,6 +114,8 @@ const LIMIT = 100;
 const namedRow = alias(ledgerEntry, "named_row");
 const answer = alias(ledgerEntry, "answer");
 const failedFlag = alias(moneyDiscrepancy, "failed_flag");
+const settledRow = alias(ledgerEntry, "settled_row");
+const paid = alias(ledgerEntry, "paid");
 
 /** A refund or transfer row a discrepancy stopped before Stripe stamped it. */
 const namesUnstampedRow = () =>
@@ -128,12 +133,21 @@ const namesUnstampedRow = () =>
       ),
   );
 
-/** A failed Dashboard refund: it names no row of ours, and holds the refunds of the payment it was made on. */
-const onPayment = () =>
-  sql<boolean>`(${moneyDiscrepancy.kind} = 'refund_failed' and ${moneyDiscrepancy.ledgerEntryId} is null)`;
+/** The flag is a failed refund holding one of the engagement's unsent refunds back from the card (`holdsRefund`). */
+const holds = (where?: SQL) => sql<boolean>`exists(${heldBy(moneyDiscrepancy.id, where)})`;
 
-const holds = (where?: SQL) =>
-  sql<boolean>`(${onPayment()} and exists(${heldBehindPayment(moneyDiscrepancy.stripeReference, moneyDiscrepancy.institutionId, where)}))`;
+/** Notes from paying held refunds one at a time, kept when the flag is answered. */
+const answered = (note: string | SQL) =>
+  sql`case when ${moneyDiscrepancy.resolutionNote} is not null and exists(${db
+    .select({ id: settledRow.id })
+    .from(settledRow)
+    .where(
+      and(
+        eq(settledRow.institutionId, moneyDiscrepancy.institutionId),
+        sql`${settledRow.stripeReference} like ${MANUAL_PREFIX} || ${moneyDiscrepancy.id}::text || ':%'`,
+      ),
+    )})
+    then ${moneyDiscrepancy.resolutionNote} || E'\n' || ${note} else ${note} end`;
 
 /**
  * The refund this flag is about failed at Stripe, and is answered on the payment's refund_failed flag: the refund of
@@ -198,9 +212,18 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
         id: moneyDiscrepancy.id,
         kind: moneyDiscrepancy.kind,
         engagementId: moneyDiscrepancy.engagementId,
-        institutionId: moneyDiscrepancy.institutionId,
         stripeReference: sql<string | null>`nullif(nullif(${moneyDiscrepancy.stripeReference}, ${moneyDiscrepancy.engagementId}::text), ${moneyDiscrepancy.ledgerEntryId}::text)`,
-        paymentIntentId: sql<string | null>`case when ${onPayment()} then ${moneyDiscrepancy.stripeReference} end`,
+        paymentIntentId: sql<string | null>`(${db
+          .select({ reference: paid.stripeReference })
+          .from(paid)
+          .where(
+            and(
+              eq(paid.engagementId, moneyDiscrepancy.engagementId),
+              eq(paid.institutionId, moneyDiscrepancy.institutionId),
+              eq(paid.type, "package_purchase"),
+            ),
+          )
+          .limit(1)})`,
         refundReference: moneyDiscrepancy.refundReference,
         ledgerAmountMinor: moneyDiscrepancy.ledgerAmountMinor,
         stripeAmountMinor: moneyDiscrepancy.stripeAmountMinor,
@@ -280,13 +303,10 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
     Promise.all(campuses.map(blockedEngagements)),
   ]);
 
-  const heldRows = await heldBehindPayments(
-    campuses,
-    flags.flatMap((flag) => (flag.paymentIntentId ? [flag.paymentIntentId] : [])),
-  );
-  const heldBy = (flag: { paymentIntentId: string | null; institutionId: string }) =>
+  const heldRows = await heldByFlags(flags.flatMap((flag) => (flag.kind === "refund_failed" ? [flag.id] : [])));
+  const heldOn = (flagId: string) =>
     heldRows
-      .filter((row) => row.paymentIntentId === flag.paymentIntentId && row.institutionId === flag.institutionId)
+      .filter((row) => row.flagId === flagId)
       .map(({ id, amountMinor, bookedAt, sessionAt, stoppedForGood }) => ({ id, amountMinor, bookedAt, sessionAt, stoppedForGood }));
 
   const context = await contexts(campuses, [
@@ -297,9 +317,9 @@ export async function moneyForOperator(operator: OperatorActor): Promise<MoneyFo
 
   return {
     discrepancies: flags.flatMap((flag) => {
-      const { engagementId, kind, institutionId, paymentIntentId, rowId, rowType, rowMinor, rowBookedAt, rowSessionAt, rowReference, refund, ...rest } = flag;
+      const { engagementId, kind, rowId, rowType, rowMinor, rowBookedAt, rowSessionAt, rowReference, refund, ...rest } = flag;
       if (kind === "orphaned_account") return [];
-      const held = heldBy({ paymentIntentId, institutionId });
+      const held = heldOn(flag.id);
       const row =
         rowId && rowType && rowMinor !== null && rowBookedAt
           ? { id: rowId, type: rowType, amountMinor: rowMinor, bookedAt: rowBookedAt, sessionAt: rowSessionAt, reference: rowReference }
@@ -338,7 +358,7 @@ export async function resolveDiscrepancy(params: {
   const scope = openOnCampus(params.operator, params.discrepancyId);
   const resolved = await db
     .update(moneyDiscrepancy)
-    .set({ resolvedAt: new Date(), resolutionNote: params.note, resolvedByUserId: params.operator.userId })
+    .set({ resolvedAt: new Date(), resolutionNote: answered(params.note), resolvedByUserId: params.operator.userId })
     .where(and(scope, not(strandsRow())))
     .returning({ id: moneyDiscrepancy.id });
   if (resolved.length > 0) return DONE;
@@ -350,9 +370,10 @@ export async function resolveDiscrepancy(params: {
  * Ops paid the student or the tutor another way. The row the flag names is stamped `manual:<discrepancy id>` in the
  * same transaction, so no sweep sees it again. A flag on a refund made in the Dashboard stamps the row with that
  * `re_…` instead: it is the refund that happened, and the reconciliation then counts it. Any gap between its amount
- * and the row's is ops' to settle. One that then failed at Stripe is never booked: the student is paid by hand on
- * the payment's refund_failed flag, one held refund at a time (`heldRefundId`), each stamped
- * `manual:<discrepancy id>:<row id>` with the operator; the flag resolves once it holds nothing more.
+ * and the row's is ops' to settle. A failed refund that holds the engagement's other refunds pays them by hand one
+ * at a time (`heldRefundId`): each is stamped `manual:<discrepancy id>:<row id>` with the operator, its note is
+ * added to the flag's. A failed Dashboard refund resolves once it holds nothing more; a bounced row of ours still owes
+ * its own refund, so ops resolves that one.
  */
 export async function recordManualSettlement(params: {
   operator: OperatorActor;
@@ -368,7 +389,6 @@ export async function recordManualSettlement(params: {
         ledgerEntryId: moneyDiscrepancy.ledgerEntryId,
         stripeReference: moneyDiscrepancy.stripeReference,
         settleable: settleable(),
-        onPayment: onPayment(),
       })
       .from(moneyDiscrepancy)
       .where(scope)
@@ -378,14 +398,12 @@ export async function recordManualSettlement(params: {
     const resolve = (where?: SQL) =>
       tx
         .update(moneyDiscrepancy)
-        .set({ resolvedAt: new Date(), resolutionNote: params.note, resolvedByUserId: params.operator.userId })
+        .set({ resolvedAt: new Date(), resolutionNote: answered(params.note), resolvedByUserId: params.operator.userId })
         .where(and(scope, where));
 
     if (params.heldRefundId) {
-      if (!found.onPayment || !found.stripeReference) return refused("not_settleable");
-      const paymentIntentId = found.stripeReference;
-      const stillHeld = () => heldBehindPayment(sql`${paymentIntentId}`, sql`${found.institutionId}::uuid`);
-      const stamped = await tx
+      const stillHeld = () => heldBy(sql`${params.discrepancyId}::uuid`);
+      const [stamped] = await tx
         .update(ledgerEntry)
         .set({ stripeReference: `${MANUAL_PREFIX}${params.discrepancyId}:${params.heldRefundId}`, recordedByUserId: params.operator.userId })
         // The conditions on the row itself are checked again after a wait on its lock; the subquery is not.
@@ -397,11 +415,20 @@ export async function recordManualSettlement(params: {
             inArray(ledgerEntry.id, stillHeld()),
           ),
         )
-        .returning({ id: ledgerEntry.id });
+        .returning({ amountMinor: ledgerEntry.amountMinor, currency: ledgerEntry.currency });
       // Stripe stamped the row since it was read: the money moved there, so settling by hand would pay twice.
-      if (stamped.length === 0) return refused("not_settleable");
-      await tx.update(moneyDiscrepancy).set({ resolutionNote: params.note }).where(scope);
-      await resolve(notExists(stillHeld()));
+      if (!stamped) return refused("not_settleable");
+      const line = `${formatMinor(stamped.amountMinor, stamped.currency)}: ${params.note}`;
+      await tx
+        .update(moneyDiscrepancy)
+        .set({ resolutionNote: sql`coalesce(${moneyDiscrepancy.resolutionNote} || E'\n', '') || ${line}` })
+        .where(scope);
+      // A bounced row of ours still owes its own refund, which ops answers by resolving.
+      if (found.ledgerEntryId) return DONE;
+      await tx
+        .update(moneyDiscrepancy)
+        .set({ resolvedAt: new Date(), resolvedByUserId: params.operator.userId })
+        .where(and(scope, notExists(stillHeld())));
       return DONE;
     }
 

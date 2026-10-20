@@ -37,18 +37,23 @@ export type DiscrepancyCopy = { title: string; body: string; note: string | null
 
 const SETTLE: SettleChoice = { label: "Record manual payment", pending: "Recording…", heldRefundId: null };
 
-/** One button per held refund. Two of the same amount are told apart by the day each was booked. */
+/** One button per held refund. Two of the same amount are told apart by when each was booked, then by order. */
 function settleHeld(item: DiscrepancyItem): SettleChoice[] {
-  return item.held.map((held) => {
+  const labels = item.held.map((held) => {
     const amount = formatMinor(held.amountMinor, item.currency);
     const twin = item.held.some((other) => other.id !== held.id && other.amountMinor === held.amountMinor);
-    return {
-      label: `Record ${amount}${twin ? ` from ${formatDayTime(held.bookedAt)}` : ""} as paid by hand`,
-      pending: "Recording…",
-      heldRefundId: held.id,
-    };
+    return `Record ${amount}${twin ? ` from ${formatDayTime(held.bookedAt)}` : ""} as paid by hand`;
   });
+  return item.held.map((held, index) => ({
+    label: labels.indexOf(labels[index]) === labels.lastIndexOf(labels[index]) ? labels[index] : `${labels[index]} (${index + 1})`,
+    pending: "Recording…",
+    heldRefundId: held.id,
+  }));
 }
+
+const holds = (which: string) =>
+  `It holds the package's ${which} listed here, so none is sent to the same card. For each one you pay the student another way, record it on its button.`;
+const STOPPED_TOO = "Another flag also stopped one of them. If that card offers to book or record it, answer it there instead, so it is not paid twice.";
 
 export function explained(item: DiscrepancyItem): DiscrepancyCopy {
   const { title, body, note = null } = KIND[item.kind];
@@ -63,7 +68,9 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
         item.refund === "failed"
           ? "That Dashboard refund then failed at Stripe, so the student did not get it. Pay them another way and record it on the failed refund card for this payment. Once that card is recorded, resolve this."
           : item.canSettle
-            ? "Booking it records the Dashboard refund as this refund. If the Ledger and Stripe amounts on this card differ, settle the difference yourself."
+            ? item.ledgerAmountMinor === item.stripeAmountMinor
+              ? "Booking it records the Dashboard refund as this refund."
+              : "Booking it records the Dashboard refund as this refund, though the Ledger and Stripe amounts on this card differ. The package's other refunds still go out in full after it, so settle the difference with the student yourself."
             : null,
       settle: item.canSettle ? [{ label: "Book this Dashboard refund", pending: "Booking…", heldRefundId: null }] : [],
     };
@@ -109,10 +116,7 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     return {
       ...plain,
       note:
-        `${dashboard} It holds the package's refunds listed here, so none is sent to the same card. For each one you pay the student another way, record it on its button. ` +
-        (item.refund === "holding_stopped"
-          ? "Another flag has also stopped one of them for good, so that one can only be paid by hand."
-          : "Resolving sends the rest to the same card."),
+        `${dashboard} ${holds("refunds")} ` + (item.refund === "holding_stopped" ? STOPPED_TOO : "Resolving sends the rest to the same card."),
       settle: settleHeld(item),
     };
   }
@@ -120,8 +124,12 @@ export function explained(item: DiscrepancyItem): DiscrepancyCopy {
     return {
       ...plain,
       body: "Stripe could not deliver the refund to the student, and nothing sends it again.",
-      note: `The package owes them ${formatMinor(item.row.amountMinor, item.currency)}. Pay them that another way, then resolve this with a note on how you paid.`,
-      settle: [],
+      note:
+        `The package owes them ${formatMinor(item.row.amountMinor, item.currency)} for this refund. Pay them that another way, then resolve this with a note on how you paid.` +
+        (item.held.length === 0
+          ? ""
+          : ` ${holds("other refunds")} ` + (item.refund === "holding_stopped" ? STOPPED_TOO : "Resolving sends the rest to the same card.")),
+      settle: settleHeld(item),
     };
   }
   const stopped = item.canSettle && item.row ? STOPPED_ROW[item.row.type] : undefined;

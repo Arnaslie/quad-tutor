@@ -248,7 +248,7 @@ function HeldRefunds({ item }: { item: DiscrepancyItem }) {
               <Money minor={held.amountMinor} currency={item.currency} />, booked {formatDayTime(held.bookedAt)}
             </p>
             {held.sessionAt !== null ? <p className="text-muted">For the session on {formatDayTime(held.sessionAt)}</p> : null}
-            {held.stoppedForGood ? <p className="text-muted">Another flag stopped this one for good.</p> : null}
+            {held.stoppedForGood ? <p className="text-muted">Another flag stopped this one too. Answer it there if that card offers a way.</p> : null}
           </li>
         ))}
       </ul>
@@ -273,6 +273,7 @@ function Discrepancy({ item }: { item: DiscrepancyItem }) {
         ...namedRow(item),
         ...amounts(item),
         item.stripeReference !== null && ["Stripe id", <StripeId key="ref" id={item.stripeReference} />],
+        item.stripeReference === null && item.paymentIntentId !== null && ["Payment", <StripeId key="payment" id={item.paymentIntentId} />],
         item.refundReference !== null && ["Refund", <StripeId key="refund" id={item.refundReference} />],
       ]}
       action={choices.length > 0 ? <NoteForm id={item.id} hint={NOTE_HINT} choices={choices} /> : null}

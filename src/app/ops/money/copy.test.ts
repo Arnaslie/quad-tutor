@@ -9,6 +9,7 @@ const item = (overrides: Partial<DiscrepancyItem>): DiscrepancyItem => ({
   id: "d1",
   kind: "ledger_vs_stripe_charge",
   stripeReference: null,
+  paymentIntentId: null,
   refundReference: null,
   ledgerAmountMinor: 14_000,
   stripeAmountMinor: null,
@@ -65,7 +66,7 @@ test("a Dashboard refund offers booking only while its refund row is unsent", ()
   assert.deepEqual(explained(item({ ...dashboard, canSettle: true, canResolve: false })), {
     title: "A refund was made in the Stripe Dashboard",
     body: "Someone refunded this payment in the Dashboard, so this refund was stopped rather than sent a second time. Other refunds on this package wait until it is answered.",
-    note: "Booking it records the Dashboard refund as this refund. If the Ledger and Stripe amounts on this card differ, settle the difference yourself.",
+    note: "Booking it records the Dashboard refund as this refund, though the Ledger and Stripe amounts on this card differ. The package's other refunds still go out in full after it, so settle the difference with the student yourself.",
     settle: [{ label: "Book this Dashboard refund", pending: "Booking…", heldRefundId: null }],
   });
   assert.deepEqual(explained(item(dashboard)), {
@@ -133,7 +134,7 @@ test("a failed refund with no row of ours tells an unbooked payment from a Dashb
   });
 });
 
-test("a failed Dashboard refund offers one button per refund it holds, and says when one can only be paid by hand", () => {
+test("a failed Dashboard refund offers one button per refund it holds, and warns when another flag also stopped one", () => {
   const failed = { kind: "refund_failed", stripeReference: "pi_1", paymentBooked: true } as const;
   const held = [heldRefund("h1", 875), heldRefund("h2", 9_625)];
   assert.deepEqual(explained(item({ ...failed, held, refund: "holding" })), {
@@ -148,7 +149,7 @@ test("a failed Dashboard refund offers one button per refund it holds, and says 
   const stopped = [heldRefund("h1", 875), heldRefund("h2", 9_625, new Date(0), true)];
   assert.equal(
     explained(item({ ...failed, held: stopped, refund: "holding_stopped", canResolve: false })).note,
-    `${DASHBOARD} It holds the package's refunds listed here, so none is sent to the same card. For each one you pay the student another way, record it on its button. Another flag has also stopped one of them for good, so that one can only be paid by hand.`,
+    `${DASHBOARD} It holds the package's refunds listed here, so none is sent to the same card. For each one you pay the student another way, record it on its button. Another flag also stopped one of them. If that card offers to book or record it, answer it there instead, so it is not paid twice.`,
   );
 });
 
@@ -165,7 +166,7 @@ test("a refund that bounced after Stripe stamped it offers only resolving, while
   assert.deepEqual(explained(item({ ...failed, ledgerAmountMinor: 10_500, canResolve: true })), {
     title: "A refund to the student failed",
     body: "Stripe could not deliver the refund to the student, and nothing sends it again.",
-    note: "The package owes them $105.00. Pay them that another way, then resolve this with a note on how you paid.",
+    note: "The package owes them $105.00 for this refund. Pay them that another way, then resolve this with a note on how you paid.",
     settle: [],
   });
   assert.deepEqual(explained(item({ ...failed, row: refundRow(10_500), canSettle: true, canResolve: false })), {
@@ -186,7 +187,7 @@ test("a reopened flag shows ops' last answer word for word, and a flag never ans
 test("a booked Dashboard refund that bounced says what its row owes, not what the Dashboard refunded", () => {
   assert.equal(
     explained(item({ kind: "refund_failed", row: refundRow(10_500, "re_dash"), ledgerAmountMinor: 5_000 })).note,
-    "The package owes them $105.00. Pay them that another way, then resolve this with a note on how you paid.",
+    "The package owes them $105.00 for this refund. Pay them that another way, then resolve this with a note on how you paid.",
   );
 });
 

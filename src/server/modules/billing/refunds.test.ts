@@ -33,7 +33,7 @@ import { acceptRequest, requestTutors } from "@/server/modules/matching/requests
 import { checkoutRedirect, syncCheckout } from "./checkout-session";
 import { recordRefundFailure } from "./discrepancy";
 import { assertMoneyInvariants } from "./invariants";
-import { recordManualSettlement, resolveDiscrepancy } from "./ops";
+import { moneyForOperator, recordManualSettlement, resolveDiscrepancy } from "./ops";
 import { blockedRefunds, refundThroughStripe, retryUnstampedRefunds } from "./refunds";
 import { GatewayError, fakeStripe, stripeGateway, type Gateway } from "./stripe";
 import { handleStripeWebhook } from "./webhook";
@@ -739,6 +739,51 @@ test("a Dashboard refund one row finds holds the engagement's other refunds unti
   assert.deepEqual(refunds.map((r) => r.amountMinor), [875, 13_125]);
   assert.deepEqual(await stamps(), [dashboard.id, refunds[1].id]);
   await assertMoneyInvariants(home.institutionId);
+});
+
+test("a row whose refund bounced holds the other unsent refund, which ops pays by hand without answering the bounce", async () => {
+  const { checkoutSessionId, refs, stamps } = await twoRefunds();
+  assert.equal(await refundThroughStripe(refs[1]), "refunded");
+  const [sent] = await fakeStripe.refunds(checkoutSessionId);
+  await fakeStripe.failRefund(sent.id);
+  await deliver(sent.id, "refund.failed");
+
+  assert.equal(await creates(async () => {
+    assert.equal(await refundThroughStripe(refs[0]), "skipped", "not sent to the card that just bounced one");
+  }), 0);
+  const ops = await operator();
+  const [card] = (await moneyForOperator(ops)).discrepancies.filter((d) => d.row?.id === refs[1].id);
+  assert.deepEqual(card.held.map((h) => [h.id, h.amountMinor]), [[refs[0].id, 875]]);
+
+  assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: card.id, note: "Zelle", heldRefundId: refs[0].id }), { ok: true });
+  assert.deepEqual(await stamps(), [`manual:${card.id}:${refs[0].id}`, sent.id]);
+  const [flag] = await db
+    .select({ open: sql<boolean>`${moneyDiscrepancy.resolvedAt} is null`, note: moneyDiscrepancy.resolutionNote })
+    .from(moneyDiscrepancy)
+    .where(eq(moneyDiscrepancy.id, card.id));
+  assert.deepEqual(flag, { open: true, note: "$8.75: Zelle" }, "the bounced $131.25 is still owed");
+  assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: card.id, note: "Venmo" }), { ok: true });
+  await assertMoneyInvariants(home.institutionId);
+});
+
+test("a Dashboard refund whose flag ops already answered is not foreign to the engagement's next refund", async () => {
+  const { engagementId, checkoutSessionId, refs } = await twoRefunds();
+  const [paid] = await db
+    .select({ pi: ledgerEntry.stripeReference })
+    .from(ledgerEntry)
+    .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, "package_purchase")));
+  const dashboard = await fakeStripe.dashboardRefund(paid.pi!, 500);
+  await db.insert(moneyDiscrepancy).values({
+    ...ids(engagementId),
+    kind: "ledger_vs_stripe_charge",
+    stripeReference: dashboard.id,
+    stripeAmountMinor: 500,
+    resolvedAt: new Date(),
+    resolutionNote: "goodwill refund by support",
+  });
+
+  assert.equal(await refundThroughStripe(refs[1]), "refunded");
+  assert.deepEqual((await fakeStripe.refunds(checkoutSessionId)).map((r) => r.amountMinor), [500, 13_125]);
 });
 
 test("money invariants hold after every refund path", async () => {

@@ -773,7 +773,7 @@ every ops answer names one row. The money check no longer allows one refund per
 engagement. It checks that refunds together never exceed the purchase, that deferred
 money never goes below zero, and that it is zero once the package is closed. A refund on
 the charge is foreign only when no refund row of the engagement accounts for it: one
-tagged with another of its rows, or a Dashboard refund ops booked onto one, is not.
+tagged with another of its rows, or a Dashboard refund ops booked onto one or answered, is not.
 
 A Dashboard refund that fails has no row of ours, so its `refund_failed` is keyed on the
 PaymentIntent and names no row. It holds every unsent refund of the engagement rather than
@@ -782,7 +782,12 @@ to a card that just bounced one. Its card on `/ops/money` lists each held refund
 amount, when it was booked and the session it is for. Ops pays one by hand with its own
 button, which stamps that row `manual:<discrepancy id>:<row id>` and the operator in
 `recorded_by_user_id`; the flag resolves once it holds nothing more. Resolving it instead
-releases the rest to the card. With nothing held, the flag can only be resolved. A further
+releases the rest to the card. With nothing held, the flag can only be resolved. A refund
+of one of our rows that Stripe took and the card then bounced holds the rest the same way,
+on that row's card. Paying a held refund there never resolves it, since the row still owes
+its own refund: ops resolves it once that is paid. A create Stripe refused names no bounce
+and holds nothing. Each by-hand payment adds its amount and note to the flag's note, which
+the final answer keeps. A further
 Dashboard refund that fails on the same PaymentIntent reopens that flag at its own amount
 and keeps ops' last note. A failure of one of our rows never lands on it: each row's failure
 has its own card, which says what that row owes. The flag records the id of every refund
