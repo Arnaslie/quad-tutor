@@ -225,7 +225,8 @@ function PackageCard({ pkg }: { pkg: StudentPackage }) {
         <EndPackage
           engagementId={pkg.engagementId}
           tutorName={tutor}
-          refundMinor={ending.refundMinor}
+          backMinor={ending.backMinor}
+          tutorMinor={ending.tutorMinor}
           currency={pkg.currency}
           delivered={pkg.sessionsDelivered}
           cancels={ending.cancels.map((when) => when.toISOString())}

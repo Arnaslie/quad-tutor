@@ -19,7 +19,7 @@ export const engagementRef = z.object({ engagementId: z.uuid() });
 
 export const slotsForRequestInput = requestRef;
 export const slotsForEngagementInput = engagementRef;
-export const endPackageInput = engagementRef;
+export const endPackageInput = engagementRef.extend({ shownBackMinor: z.coerce.number().int().min(0) });
 
 export const tutorCourseRef = z.object({ tutorCourseId: z.uuid() });
 

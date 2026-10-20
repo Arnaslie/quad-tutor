@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { escapeLike } from "@/server/db/like";
@@ -11,6 +11,8 @@ import {
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
+
+import { endFeeMinor } from "@/server/modules/engagements/cancel-rules";
 
 import { FEE_MILESTONE_MINOR, LOWER_TAKE_RATE_BP, TAKE_RATE_BP } from "./pricing";
 import { FORFEITED_PREFIX, MANUAL_PREFIX } from "./discrepancy";
@@ -41,6 +43,8 @@ export type MoneyFacts = {
     pricePaidMinor: number;
     betweenPersonas?: boolean;
     totals: Totals;
+    /** Rows naming no session. The end fee is the only revenue written this way. */
+    unattached?: Totals;
     references?: Partial<Record<LedgerType, (string | null)[]>>;
   }[];
   sessions: { id: string; tutorProfileId: string; totals: Totals }[];
@@ -97,6 +101,20 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
     if (deferred < 0) flag("deferred >= 0", subject, `deferred ${deferred}`);
     if (CLOSED.includes(e.status) && deferred !== 0) {
       flag("deferred = 0 once closed", subject, `${e.status}, deferred ${deferred}`);
+    }
+
+    const loose = e.unattached ?? {};
+    const endFee = minor(loose, EARNED);
+    if (rows(loose, EARNED) > 1) flag("one end fee per package", subject, `${rows(loose, EARNED)} end fee rows`);
+    if (endFee > 0) {
+      if (minor(loose, ACCRUED) !== endFee || rows(loose, FEE) > 0) {
+        flag("the end fee is the tutor's whole", subject, `fee ${endFee}, accrued ${minor(loose, ACCRUED)}, platform ${minor(loose, FEE)}`);
+      }
+      // A refund naming no session may predate the end, so what was left is bounded only from above.
+      const leftAtMost = paid - (minor(e.totals, EARNED) - endFee) - (refunded - minor(loose, REFUND));
+      if (endFee > endFeeMinor(leftAtMost)) {
+        flag("the end fee is at most 10% of what was left", subject, `fee ${endFee} of at most ${leftAtMost} left`);
+      }
     }
 
     const transferred = minor(e.totals, TRANSFER) - minor(e.totals, REVERSAL);
@@ -159,7 +177,7 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
   const count = sql<number>`count(${ledgerEntry.id})::int`;
   const persona = `${escapeLike(PERSONA_PREFIX)}%`;
 
-  const [engagements, byEngagement, bySession, referenceRows] = await Promise.all([
+  const [engagements, byEngagement, unattachedRows, bySession, referenceRows] = await Promise.all([
     tx
       .select({
         id: engagement.id,
@@ -176,6 +194,11 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
       .select({ key: ledgerEntry.engagementId, type: ledgerEntry.type, minor: total, rows: count })
       .from(ledgerEntry)
       .where(eq(ledgerEntry.institutionId, institutionId))
+      .groupBy(ledgerEntry.engagementId, ledgerEntry.type),
+    tx
+      .select({ key: ledgerEntry.engagementId, type: ledgerEntry.type, minor: total, rows: count })
+      .from(ledgerEntry)
+      .where(and(eq(ledgerEntry.institutionId, institutionId), isNull(ledgerEntry.sessionId)))
       .groupBy(ledgerEntry.engagementId, ledgerEntry.type),
     tx
       .select({
@@ -202,6 +225,7 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
   ]);
 
   const ledger = collect(byEngagement);
+  const unattached = collect(unattachedRows);
   const sessionTotals = collect(bySession);
   const tutorOf = new Map<string, string>();
   for (const row of bySession) if (row.key) tutorOf.set(row.key, row.tutorProfileId);
@@ -215,6 +239,7 @@ async function readFacts(tx: Tx, institutionId: string): Promise<MoneyFacts> {
     engagements: engagements.map((e) => ({
       ...e,
       totals: ledger.get(e.id) ?? {},
+      unattached: unattached.get(e.id) ?? {},
       references: references.get(e.id) ?? {},
     })),
     sessions: [...tutorOf].map(([id, tutorProfileId]) => ({ id, tutorProfileId, totals: sessionTotals.get(id) ?? {} })),

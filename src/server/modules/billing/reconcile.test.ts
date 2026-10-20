@@ -69,7 +69,7 @@ test("a stamped refund the card bounced days later is flagged on its row, and th
 
   assert.deepEqual(await reconcile(w), counts(1, 1));
   assert.deepEqual(await flags(w.institutionId), [
-    { kind: "refund_failed", engagementId, ledgerEntryId: row.id, stripeReference: row.id, ledgerAmountMinor: 10_500, stripeAmountMinor: 0, resolutionNote: null },
+    { kind: "refund_failed", engagementId, ledgerEntryId: row.id, stripeReference: row.id, ledgerAmountMinor: 9_450, stripeAmountMinor: 0, resolutionNote: null },
   ]);
   assert.equal((await rows(engagementId, "refund"))[0].stripeReference, row.stripeReference, "the row keeps the refund it was tried against");
   await assertMoneyInvariants(w.institutionId);
@@ -95,7 +95,7 @@ test("a failed Dashboard refund is flagged by the webhook and the reconciliation
   await db.update(moneyDiscrepancy).set({ resolvedAt: new Date() }).where(eq(moneyDiscrepancy.institutionId, w.institutionId));
   assert.equal(await blockedRefunds(w.institutionId), 0);
   assert.equal(await refundThroughStripe(await newestRefund(engagementId)), "refunded");
-  assert.deepEqual((await fakeStripe.refunds(checkoutSessionId)).map((r) => [r.amountMinor, r.status]), [[2_000, "failed"], [10_500, "succeeded"]]);
+  assert.deepEqual((await fakeStripe.refunds(checkoutSessionId)).map((r) => [r.amountMinor, r.status]), [[2_000, "failed"], [9_450, "succeeded"]]);
   await assertMoneyInvariants(w.institutionId);
 });
 
@@ -140,7 +140,7 @@ test("a charge flag ops resolved reopens when the PaymentIntent diverges again, 
   assert.deepEqual(await runTransfers(w.institutionId, Date.now() + 10_000), { sent: 0, settled: 0, waiting: 0, flagged: 0, blocked: 1, failed: 0 });
 });
 
-/** Support refunded `amountMinor` in the Dashboard before the package's own refund of 10_500 went out. */
+/** Support refunded `amountMinor` in the Dashboard before the package's own refund of 9_450 went out. */
 async function refundedInDashboard(w: World, amountMinor: number) {
   const bought = await delivered(w);
   const dashboard = await fakeStripe.dashboardRefund(bought.paymentIntentId, amountMinor);
@@ -158,21 +158,21 @@ const nets = async (w: World, engagementId: string, paymentIntentId: string) => 
 test("settling a Dashboard refund of the row's amount stamps the row with it, and the reconciliation then agrees", async () => {
   const w = await world();
   const ops = await operator(w.institutionId);
-  const { engagementId, paymentIntentId, dashboard } = await refundedInDashboard(w, 10_500);
+  const { engagementId, paymentIntentId, dashboard } = await refundedInDashboard(w, 9_450);
   const [item] = (await moneyForOperator(ops)).discrepancies;
   assert.deepEqual(
     [item.kind, item.stripeReference, item.ledgerAmountMinor, item.stripeAmountMinor, item.row?.type, item.canSettle, item.canResolve],
-    ["ledger_vs_stripe_charge", dashboard.id, 10_500, 10_500, "refund", true, false],
+    ["ledger_vs_stripe_charge", dashboard.id, 9_450, 9_450, "refund", true, false],
   );
 
   assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: item.id, note: "support refunded in the Dashboard" }), { ok: true });
-  assert.deepEqual((await rows(engagementId, "refund")).map((r) => [r.amountMinor, r.stripeReference]), [[10_500, dashboard.id]]);
+  assert.deepEqual((await rows(engagementId, "refund")).map((r) => [r.amountMinor, r.stripeReference]), [[9_450, dashboard.id]]);
 
   assert.deepEqual(await reconcile(w), counts(1));
   assert.deepEqual((await flags(w.institutionId)).map((f) => [f.kind, f.stripeReference, f.resolutionNote]), [
     ["ledger_vs_stripe_charge", dashboard.id, "support refunded in the Dashboard"],
   ]);
-  assert.deepEqual(await nets(w, engagementId, paymentIntentId), { ledger: 3_500, stripe: 3_500 });
+  assert.deepEqual(await nets(w, engagementId, paymentIntentId), { ledger: 4_550, stripe: 4_550 });
   assert.equal((await runTransfers(w.institutionId, Date.now() + 10_000)).sent, 1);
   await assertMoneyInvariants(w.institutionId);
 });
@@ -183,19 +183,19 @@ test("settling a smaller Dashboard refund books it on the row and leaves the res
   const { engagementId, paymentIntentId, dashboard } = await refundedInDashboard(w, 5_000);
   const [item] = (await moneyForOperator(ops)).discrepancies;
   assert.deepEqual(await recordManualSettlement({ operator: ops, discrepancyId: item.id, note: "support refunded part" }), { ok: true });
-  assert.deepEqual((await rows(engagementId, "refund")).map((r) => [r.amountMinor, r.stripeReference]), [[10_500, dashboard.id]]);
+  assert.deepEqual((await rows(engagementId, "refund")).map((r) => [r.amountMinor, r.stripeReference]), [[9_450, dashboard.id]]);
 
   assert.deepEqual(await reconcile(w), counts(1, 1));
   assert.deepEqual((await flags(w.institutionId)).map((f) => [f.kind, f.stripeReference, f.ledgerAmountMinor, f.stripeAmountMinor, f.resolutionNote]), [
-    ["ledger_vs_stripe_charge", dashboard.id, 10_500, 5_000, "support refunded part"],
-    ["ledger_vs_stripe_charge", paymentIntentId, 3_500, 9_000, null],
+    ["ledger_vs_stripe_charge", dashboard.id, 9_450, 5_000, "support refunded part"],
+    ["ledger_vs_stripe_charge", paymentIntentId, 4_550, 9_000, null],
   ]);
   await assertMoneyInvariants(w.institutionId);
 
-  await fakeStripe.dashboardRefund(paymentIntentId, 5_500);
+  await fakeStripe.dashboardRefund(paymentIntentId, 4_450);
   await aDayLater(w, engagementId);
   assert.deepEqual(await reconcile(w), counts(1));
-  assert.deepEqual(await nets(w, engagementId, paymentIntentId), { ledger: 3_500, stripe: 3_500 });
+  assert.deepEqual(await nets(w, engagementId, paymentIntentId), { ledger: 4_550, stripe: 4_550 });
   const [rest] = (await moneyForOperator(ops)).discrepancies;
   assert.deepEqual(await resolveDiscrepancy({ operator: ops, discrepancyId: rest.id, note: "refunded the rest in the Dashboard" }), { ok: true });
   assert.equal((await runTransfers(w.institutionId, Date.now() + 10_000)).sent, 1);
@@ -297,7 +297,7 @@ test("a refund and a transfer stamped between the Stripe reads and the ledger re
     assert.deepEqual(await reconcile(w), counts(1));
   });
   assert.deepEqual(await flags(w.institutionId), []);
-  assert.deepEqual([(await rows(engagementId, "refund"))[0].amountMinor, (await rows(engagementId, "tutor_transfer"))[0].amountMinor], [10_500, 3_150]);
+  assert.deepEqual([(await rows(engagementId, "refund"))[0].amountMinor, (await rows(engagementId, "tutor_transfer"))[0].amountMinor], [9_450, 3_150]);
   await assertMoneyInvariants(w.institutionId);
 });
 
@@ -397,7 +397,7 @@ test("a row unstamped for a day is flagged without naming it, and the flag goes 
 
   assert.deepEqual(await reconcile(w), counts(1, 1));
   assert.deepEqual(await flags(w.institutionId), [
-    { kind: "unstamped_reference", engagementId, ledgerEntryId: null, stripeReference: null, ledgerAmountMinor: 10_500, stripeAmountMinor: null, resolutionNote: null },
+    { kind: "unstamped_reference", engagementId, ledgerEntryId: null, stripeReference: null, ledgerAmountMinor: 9_450, stripeAmountMinor: null, resolutionNote: null },
   ]);
   assert.equal(await refundThroughStripe(await newestRefund(engagementId)), "refunded", "the flag names no row, so the retry still runs");
   assert.equal((await fakeStripe.refunds(checkoutSessionId)).length, 1);

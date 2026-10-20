@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { formatDayTime } from "@/components/format";
 import { db } from "@/server/db";
@@ -13,8 +13,10 @@ import { SWEEP_BUDGET_MS, refundThroughStripe } from "@/server/modules/billing/r
 import { errorFacts } from "@/server/modules/billing/stripe";
 import type { Actor } from "@/server/modules/identity/actor";
 
-import { SessionError, deliveredCount, heldAgainstPackage } from "./access";
+import { SessionError, deliveredCount, heldAgainstPackage, loadParticipation, lockSession } from "./access";
 import { END_BLOCK_MESSAGE, endBlock, type EndBlock } from "./attendance";
+import { chargeCancel, type CancelCharge } from "./cancel-charge";
+import { endFeeMinor, hoursBefore, keptShareBp } from "./cancel-rules";
 
 export type TermEndRefund = {
   engagementId: string;
@@ -36,6 +38,8 @@ const refundFields = () => ({
   currency: engagement.currency,
 });
 
+export const termHasEnded = () => sql<boolean>`${term.endsOn} < current_date`;
+
 export async function engagementsDueForTermEndRefund(
   institutionId: string,
 ): Promise<Omit<TermEndRefund, "refundId">[]> {
@@ -49,7 +53,7 @@ export async function engagementsDueForTermEndRefund(
       and(
         eq(engagement.status, "active"),
         eq(engagement.institutionId, institutionId),
-        lt(term.endsOn, sql`current_date`),
+        termHasEnded(),
       ),
     );
 
@@ -66,15 +70,22 @@ export class EndPackageError extends SessionError {
 
 type EngagementLock = "update" | "no key update";
 
+/** A package the student ended also carries what the tutor kept: the end fee, and each session charged at its tier. */
+export type EndedPackage = TermEndRefund & { feeMinor: number; charged: CancelCharge[] };
+
 export async function closeWithRefund(
   tx: Tx,
   params: { engagementId: string; institutionId: string; endedBy?: Actor; lock?: EngagementLock },
-): Promise<TermEndRefund | null> {
+): Promise<EndedPackage | null> {
   const { engagementId, endedBy } = params;
   const now = new Date();
 
   const rows = await tx
-    .select({ studentProfileId: engagement.studentProfileId, status: engagement.status })
+    .select({
+      studentProfileId: engagement.studentProfileId,
+      status: engagement.status,
+      courseOfferingId: engagement.courseOfferingId,
+    })
     .from(engagement)
     .where(
       and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)),
@@ -90,7 +101,7 @@ export async function closeWithRefund(
   if (target.status !== "active") return null;
 
   const sessions = await tx
-    .select({ status: sessionBooking.status, scheduledAt: sessionBooking.scheduledAt })
+    .select({ id: sessionBooking.id, status: sessionBooking.status, scheduledAt: sessionBooking.scheduledAt })
     .from(sessionBooking)
     .where(
       and(
@@ -100,8 +111,26 @@ export async function closeWithRefund(
       ),
     );
   const block = endBlock(sessions, now);
-  if (block && (endedBy || block.reason !== "cancel_costs")) {
-    throw new EndPackageError(block);
+  if (block) throw new EndPackageError(block);
+
+  // Once the term is over, ending is the term-end refund the sweep has not reached yet: no fee, no cancel price.
+  const [{ termOver }] = await tx
+    .select({ termOver: termHasEnded() })
+    .from(courseOffering)
+    .innerJoin(term, eq(term.id, courseOffering.termId))
+    .where(eq(courseOffering.id, target.courseOfferingId));
+  const charges = termOver ? undefined : endedBy;
+
+  const charged: CancelCharge[] = [];
+  if (charges) {
+    const priced = sessions.filter(
+      (session) => session.status === "scheduled" && keptShareBp(hoursBefore(session.scheduledAt, now), "student") > 0,
+    );
+    for (const { id } of priced) {
+      await lockSession(tx, id);
+      const session = await loadParticipation({ exec: tx, sessionId: id, actor: charges });
+      charged.push(await chargeCancel(tx, session, charges.userId, now));
+    }
   }
 
   await tx
@@ -124,19 +153,18 @@ export async function closeWithRefund(
     .from(engagement)
     .where(and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)));
 
-  const [written] =
-    due.refundMinor > 0
-      ? await record(tx, [
-          {
-            engagementId,
-            institutionId: params.institutionId,
-            type: "refund",
-            amountMinor: due.refundMinor,
-            currency: due.currency,
-          },
-        ])
-      : [];
-  const refund = { ...due, refundId: written?.id ?? null };
+  // The tutor's pay, not the platform's: no platform_fee row, so the fee meter never sees it.
+  const feeMinor = charges ? endFeeMinor(due.refundMinor) : 0;
+  const entry = { engagementId, institutionId: params.institutionId, currency: due.currency };
+  if (feeMinor > 0) {
+    await record(tx, [
+      { ...entry, type: "session_earned", amountMinor: feeMinor },
+      { ...entry, type: "tutor_accrued", amountMinor: feeMinor },
+    ]);
+  }
+  const refundMinor = due.refundMinor - feeMinor;
+  const [written] = refundMinor > 0 ? await record(tx, [{ ...entry, type: "refund", amountMinor: refundMinor }]) : [];
+  const refund = { ...due, refundMinor, refundId: written?.id ?? null, feeMinor, charged };
 
   await tx
     .update(engagement)
@@ -177,17 +205,40 @@ export async function closeIfUsedUp(
   return closeWithRefund(tx, { ...ids, lock });
 }
 
+export type EndQuote = { backMinor: number; tutorMinor: number };
+
+export function endQuote(ended: EndedPackage): EndQuote {
+  const sum = (pick: (charge: CancelCharge) => number) => ended.charged.reduce((total, charge) => total + pick(charge), 0);
+  return {
+    backMinor: ended.refundMinor + sum((charge) => charge.returnedMinor),
+    tutorMinor: ended.feeMinor + sum((charge) => charge.keptMinor),
+  };
+}
+
+/** What ending gives back differs from what the student was shown. Nothing was ended. */
+export class EndQuoteChanged extends SessionError {
+  constructor(readonly quote: EndQuote) {
+    super("What ending gives back changed since you opened this. Nothing was ended. Check the new amount and end again.");
+  }
+}
+
 export async function endPackage(params: {
   actor: Actor;
   engagementId: string;
-}): Promise<TermEndRefund | null> {
-  return db.transaction((tx) =>
-    closeWithRefund(tx, {
+  /** What the end form said goes back to the card. A different amount rolls the end back. */
+  shownBackMinor?: number;
+}): Promise<EndedPackage | null> {
+  return db.transaction(async (tx) => {
+    const ended = await closeWithRefund(tx, {
       engagementId: params.engagementId,
       institutionId: params.actor.institutionId,
       endedBy: params.actor,
-    }),
-  );
+    });
+    if (ended && params.shownBackMinor !== undefined && endQuote(ended).backMinor !== params.shownBackMinor) {
+      throw new EndQuoteChanged(endQuote(ended));
+    }
+    return ended;
+  });
 }
 
 export type TermEndSweep = { refunds: TermEndRefund[]; held: number; failed: number };

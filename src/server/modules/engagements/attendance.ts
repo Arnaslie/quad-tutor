@@ -1,5 +1,3 @@
-import { FULL_REFUND_HOURS, hoursBefore, keptShareBp } from "./cancel-rules";
-
 export const SESSION_MINUTES = 60;
 
 export const CONFIRMATION_WINDOW_HOURS = 24;
@@ -76,7 +74,7 @@ export function isLateCancel(scheduledAt: Date, now: Date): boolean {
 }
 
 export type EndBlock = {
-  reason: "cancel_costs" | "awaiting_answer" | "disputed";
+  reason: "awaiting_answer" | "disputed";
   scheduledAt: Date;
 };
 
@@ -89,11 +87,7 @@ export function endBlock(
   );
   return (
     first("disputed", sessions.filter((session) => session.status === "disputed")) ??
-    first("awaiting_answer", scheduled.filter((session) => now >= session.scheduledAt)) ??
-    first(
-      "cancel_costs",
-      scheduled.filter((session) => keptShareBp(hoursBefore(session.scheduledAt, now), "student") > 0),
-    )
+    first("awaiting_answer", scheduled.filter((session) => now >= session.scheduledAt))
   );
 }
 
@@ -103,8 +97,6 @@ function first(reason: EndBlock["reason"], hits: { scheduledAt: Date }[]): EndBl
 }
 
 export const END_BLOCK_MESSAGE: Record<EndBlock["reason"], (when: string) => string> = {
-  cancel_costs: (when) =>
-    `Your session on ${when} is less than ${FULL_REFUND_HOURS} hours away. Cancel it first, or end the package after it.`,
   awaiting_answer: (when) =>
     `Your session on ${when} is still being confirmed. You can end the package once it settles.`,
   disputed: (when) =>

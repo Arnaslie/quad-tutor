@@ -202,3 +202,27 @@ test("fixture references pass only between personas, and a fixture purchase pays
     ]);
   }
 });
+
+test("an end fee is the tutor's whole and at most 10% of what was left", () => {
+  const ended = (unattached: Totals, earned = 4_550, accrued = 4_200) => ({
+    ...healthy,
+    engagements: [
+      {
+        id: "ended",
+        status: "completed" as const,
+        pricePaidMinor: 14_000,
+        totals: { package_purchase: t(14_000), session_earned: t(earned, 2), tutor_accrued: t(accrued, 2), platform_fee: t(350), refund: t(14_000 - earned) },
+        unattached,
+      },
+    ],
+  });
+  assert.deepEqual(invariants(ended({ session_earned: t(1_050), tutor_accrued: t(1_050), refund: t(9_450) })), []);
+  assert.deepEqual(
+    invariants(ended({ session_earned: t(2_100), tutor_accrued: t(2_100), refund: t(8_400) }, 5_600, 5_250)),
+    ["the end fee is at most 10% of what was left"],
+  );
+  assert.deepEqual(
+    invariants(ended({ session_earned: t(1_050), tutor_accrued: t(945), platform_fee: t(105), refund: t(9_450) }, 4_550, 4_095)),
+    ["the end fee is the tutor's whole"],
+  );
+});

@@ -5,7 +5,7 @@ import { after, test } from "node:test";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { engagement, ledgerEntry, moneyDiscrepancy, paymentDispute, reliabilityEvent, tutorProfile } from "@/server/db/schema";
+import { engagement, ledgerEntry, moneyDiscrepancy, paymentDispute, reliabilityEvent, sessionBooking, tutorProfile } from "@/server/db/schema";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
 import { syncConnectAccount } from "./connect";
@@ -408,12 +408,17 @@ test("an engagement bought before Stripe is never sent, and the sweep makes no S
     .insert(engagement)
     .values({ institutionId: w.institutionId, studentProfileId: actor.studentProfileId, tutorCourseId: w.tutorCourseId, courseOfferingId: w.offeringId, kind: "exam_anchored", sessionsPurchased: 4, pricePaidMinor: 14_000 })
     .returning({ id: engagement.id });
+  const [done] = await db
+    .insert(sessionBooking)
+    .values({ engagementId: legacy.id, institutionId: w.institutionId, scheduledAt: new Date(Date.now() - 72 * 3_600_000), status: "completed", resolution: "both_confirmed" })
+    .returning({ id: sessionBooking.id });
   const row = { engagementId: legacy.id, institutionId: w.institutionId };
+  const recognised = { ...row, sessionId: done.id };
   await db.insert(ledgerEntry).values([
     { ...row, type: "package_purchase", amountMinor: 14_000 },
-    { ...row, type: "session_earned", amountMinor: 3_500 },
-    { ...row, type: "tutor_accrued", amountMinor: 3_150 },
-    { ...row, type: "platform_fee", amountMinor: 350 },
+    { ...recognised, type: "session_earned", amountMinor: 3_500 },
+    { ...recognised, type: "tutor_accrued", amountMinor: 3_150 },
+    { ...recognised, type: "platform_fee", amountMinor: 350 },
   ]);
 
   await noStripe(async () => {
