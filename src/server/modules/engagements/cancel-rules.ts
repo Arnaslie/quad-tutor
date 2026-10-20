@@ -26,7 +26,11 @@ export function cancelSplit(
   return { keptMinor, returnedMinor: sessionMinor - keptMinor };
 }
 
-/** A one-time session has no package to go back to, so a student cancel sends what it returns to the card. */
-export function cancelClosesPackage(sessionsPurchased: number, by: Canceller): boolean {
-  return by === "student" && sessionsPurchased === 1;
+/**
+ * Whether a cancel sends what it returns to the card at once. Only a student cancel 24 hours or more ahead, in a
+ * package of more than one session, puts the session back in the package instead. A one-time session has no
+ * package to go back to, a priced cancel uses the session up, and a tutor cancel refunds it in full.
+ */
+export function cancelRefundsCard(sessionsPurchased: number, hours: number, by: Canceller): boolean {
+  return by === "tutor" || sessionsPurchased === 1 || keptShareBp(hours, by) > 0;
 }

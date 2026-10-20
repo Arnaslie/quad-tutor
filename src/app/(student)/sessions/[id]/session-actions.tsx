@@ -12,7 +12,7 @@ import {
   lapseCopy,
 } from "@/server/modules/engagements/answer-outcome";
 import { isLateCancel, type ViewerAction } from "@/server/modules/engagements/attendance";
-import { cancelClosesPackage, cancelSplit, hoursBefore } from "@/server/modules/engagements/cancel-rules";
+import { cancelRefundsCard, cancelSplit, hoursBefore } from "@/server/modules/engagements/cancel-rules";
 
 import { cancel, confirm, deny, type ActionResult } from "../../actions";
 
@@ -20,7 +20,6 @@ type CancelPrice = {
   scheduledAt: Date;
   sessionMinor: number;
   currency: string;
-  lastInPackage: boolean;
   sessionsPurchased: number;
 };
 
@@ -114,7 +113,7 @@ function Cancel({
     cancel,
     null,
   );
-  const [split, setSplit] = useState<(ReturnType<typeof cancelSplit> & { late: boolean }) | null>(null);
+  const [split, setSplit] = useState<(ReturnType<typeof cancelSplit> & { toCard: boolean; late: boolean }) | null>(null);
 
   if (state?.ok) return <Result state={state} />;
 
@@ -127,8 +126,10 @@ function Cancel({
           variant="secondary"
           onClick={() => {
             const now = new Date();
+            const hours = hoursBefore(price.scheduledAt, now);
             setSplit({
-              ...cancelSplit(price.sessionMinor, hoursBefore(price.scheduledAt, now), "student"),
+              ...cancelSplit(price.sessionMinor, hours, "student"),
+              toCard: cancelRefundsCard(price.sessionsPurchased, hours, "student"),
               late: isLateCancel(price.scheduledAt, now),
             });
           }}
@@ -153,13 +154,11 @@ function Cancel({
               {money(split.keptMinor)} goes to {otherPartyName}.
             </p>
             <p className="text-muted">
-              {price.lastInPackage
-                ? "It goes back to your card now, and can take 5 to 10 days to show."
-                : "It goes back to your card when the package ends: at the end of term, or sooner if you end it yourself."}{" "}
+              It goes back to your card now, and can take 5 to 10 days to show.
               The session counts as used.
             </p>
           </>
-        ) : cancelClosesPackage(price.sessionsPurchased, "student") ? (
+        ) : split.toCard ? (
           <>
             <p className="font-medium">
               Cancel now and you get all {money(split.returnedMinor)} back.

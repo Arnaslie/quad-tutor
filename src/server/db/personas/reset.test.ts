@@ -253,7 +253,7 @@ test("each student persona sees its package, what it paid and whether it can end
       sessionsDelivered: 1,
       sessionsRemaining: 1,
       pricePaidMinor: 20_000,
-      refundMinor: 7_500,
+      refundMinor: 5_000,
       blocked: null,
     },
   ]);

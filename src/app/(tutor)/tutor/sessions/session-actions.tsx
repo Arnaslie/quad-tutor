@@ -151,8 +151,9 @@ function Cancel({
     <form action={submit} className="flex flex-col gap-3">
       <input type="hidden" name="sessionId" value={sessionId} />
       <p className="text-sm text-muted">
-        The session goes back to {studentName}&rsquo;s package and they can book
-        another time.
+        {studentName} gets the full price of this session back on their card
+        now. It comes out of their package, so they do not get it back as a
+        session.
       </p>
       <div className="flex flex-col gap-3 sm:grid sm:grid-cols-2">
         <Button type="submit" variant="danger" size="lg" disabled={pending}>
@@ -193,8 +194,8 @@ function copy(state: SessionActionState, studentName: string): string | null {
 
     case "cancelled":
       return state.late
-        ? `Cancelled, and recorded as a late cancel. ${studentName} gets an email and can book another time.`
-        : `Cancelled. ${studentName} gets an email and can book another time.`;
+        ? `Cancelled, and recorded as a late cancel. ${studentName} gets an email and the session's price back on their card.`
+        : `Cancelled. ${studentName} gets an email and the session's price back on their card.`;
 
     case "error":
       return state.message;

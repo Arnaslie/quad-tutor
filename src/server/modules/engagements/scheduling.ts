@@ -11,7 +11,9 @@ import {
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
+import { record } from "@/server/modules/billing/ledger";
 import { perSessionMinor } from "@/server/modules/billing/pricing";
+import type { RefundRef } from "@/server/modules/billing/refunds";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
 import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slots";
@@ -28,9 +30,9 @@ import {
   isLateCancel,
   remindedAtForNewBooking,
 } from "./attendance";
-import { cancelClosesPackage, cancelSplit, hoursBefore } from "./cancel-rules";
+import { cancelRefundsCard, cancelSplit, hoursBefore } from "./cancel-rules";
 import { recognise } from "./confirmation";
-import { closeIfUsedUp, closeWithRefund, type TermEndRefund } from "./termEnd";
+import { closeIfUsedUp } from "./termEnd";
 
 export async function sessionsRemaining(params: {
   exec?: Executor;
@@ -149,8 +151,8 @@ export async function bookSession(params: {
     if (remaining <= 0) {
       throw new SessionError("You have used every session in this package.");
     }
-    // A one-time cancel closes the package under no key update, which our key share does not block,
-    // and frees its session. Read after the count, so a close the count missed is seen here.
+    // A confirmation closing a used-up package takes it under no key update, which our key share does not
+    // block. Read after the count, so a close the count missed is seen here.
     const [current] = await tx
       .select({ status: engagement.status })
       .from(engagement)
@@ -180,7 +182,10 @@ export type CancelOutcome = {
   keptMinor: number;
   returnedMinor: number;
   currency: string;
-  refund: TermEndRefund | null;
+  /** What went back to the card: the session's returned share, and anything closing the package refunded. */
+  refundedMinor: number;
+  /** Refund rows the cancel wrote, each sent to the card after commit. */
+  refunds: RefundRef[];
 };
 
 export async function cancelSession(params: {
@@ -190,7 +195,7 @@ export async function cancelSession(params: {
   const now = new Date();
 
   const cancelled = await db.transaction(async (tx) => {
-    // A kept share writes ledger rows, whose foreign key takes the engagement for key share.
+    // A priced cancel writes ledger rows, whose foreign key takes the engagement for key share.
     // Taking it first keeps the term-end sweep's order: engagement, then its sessions.
     await tx
       .select({ id: engagement.id })
@@ -220,11 +225,9 @@ export async function cancelSession(params: {
     }
 
     const late = isLateCancel(session.scheduledAt, now);
-    const { keptMinor, returnedMinor } = cancelSplit(
-      perSessionMinor(session),
-      hoursBefore(session.scheduledAt, now),
-      session.role,
-    );
+    const hours = hoursBefore(session.scheduledAt, now);
+    const { keptMinor, returnedMinor } = cancelSplit(perSessionMinor(session), hours, session.role);
+    const toCard = cancelRefundsCard(session.sessionsPurchased, hours, session.role);
 
     await tx
       .update(sessionBooking)
@@ -245,6 +248,21 @@ export async function cancelSession(params: {
 
     if (keptMinor > 0) await recognise(tx, session, keptMinor);
 
+    // Naming the session marks it used, so it never goes back in the package.
+    const [refund] =
+      toCard && returnedMinor > 0
+        ? await record(tx, [
+            {
+              engagementId: session.engagementId,
+              institutionId: session.institutionId,
+              sessionId: session.sessionId,
+              type: "refund",
+              amountMinor: returnedMinor,
+              currency: session.currency,
+            },
+          ])
+        : [];
+
     if (late && session.role === "student") {
       await tx.insert(reliabilityEvent).values({
         userId: session.studentUserId,
@@ -255,45 +273,37 @@ export async function cancelSession(params: {
       });
     }
 
-    // Raises the engagement's key share to no key update, as a confirmation closing a used-up package does.
-    const refund = cancelClosesPackage(session.sessionsPurchased, session.role)
-      ? await closeWithRefund(tx, {
-          engagementId: session.engagementId,
-          institutionId: session.institutionId,
-          lock: "no key update",
-        })
-      : null;
-
     return {
       late,
       keptMinor,
       returnedMinor,
       currency: session.currency,
       engagementId: session.engagementId,
-      refund,
+      used: keptMinor > 0 || toCard,
+      refundId: refund?.id ?? null,
     };
   });
 
   // Its own transaction, so the engagement is locked before its sessions as the term-end sweep does.
   // The cancel has committed either way; a package left open here is refunded at term end or when ended.
   const ids = { engagementId: cancelled.engagementId, institutionId: params.actor.institutionId };
-  const refund =
-    cancelled.refund ??
-    (cancelled.keptMinor > 0
-      ? await db
-          .transaction((tx) => closeIfUsedUp(tx, ids))
-          .catch((error: unknown) => {
-            console.error(`[cancel] closing ${ids.engagementId} left for the term-end sweep`, error);
-            return null;
-          })
-      : null);
+  const closed = cancelled.used
+    ? await db
+        .transaction((tx) => closeIfUsedUp(tx, ids))
+        .catch((error: unknown) => {
+          console.error(`[cancel] closing ${ids.engagementId} left for the term-end sweep`, error);
+          return null;
+        })
+    : null;
 
+  const refunds = [cancelled.refundId, closed?.refundId ?? null].flatMap((id) => (id ? [{ ...ids, id }] : []));
   return {
     late: cancelled.late,
     keptMinor: cancelled.keptMinor,
     returnedMinor: cancelled.returnedMinor,
     currency: cancelled.currency,
-    refund,
+    refundedMinor: (cancelled.refundId ? cancelled.returnedMinor : 0) + (closed?.refundMinor ?? 0),
+    refunds,
   };
 }
 

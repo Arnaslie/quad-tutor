@@ -29,8 +29,7 @@ import { bookSession, cancelSession } from "@/server/modules/engagements/schedul
 import { endPackage } from "@/server/modules/engagements/termEnd";
 import { checkoutRedirect, resumeCheckout } from "@/server/modules/billing/checkout-session";
 import { formatMinor } from "@/server/modules/billing/pricing";
-import { refundThroughStripe } from "@/server/modules/billing/refunds";
-import { errorFacts } from "@/server/modules/billing/stripe";
+import { refundEachThroughStripe, type RefundRef } from "@/server/modules/billing/refunds";
 import {
   requestRenewalInput,
   requestTutorsInput,
@@ -320,7 +319,7 @@ export async function cancel(
     return toResult(error);
   }
 
-  if (outcome.refund) refundAfterCommit(outcome.refund, actor.institutionId);
+  refundAfterCommit(outcome.refunds);
   notifySessionChangesSoon(actor.institutionId);
   revalidateStanding();
   revalidatePath("/sessions");
@@ -330,21 +329,13 @@ export async function cancel(
 }
 
 function cancelledMessage(outcome: Awaited<ReturnType<typeof cancelSession>>): string {
-  if (outcome.refund) {
-    return `Cancelled. ${formatMinor(outcome.refund.refundMinor, outcome.refund.currency)} is on its way back to you.`;
-  }
-  if (outcome.keptMinor === 0) return "Cancelled. The session goes back in your package.";
-  return `Cancelled. ${formatMinor(outcome.returnedMinor, outcome.currency)} goes back to you when the package ends.`;
+  return outcome.refundedMinor > 0
+    ? `Cancelled. ${formatMinor(outcome.refundedMinor, outcome.currency)} is on its way back to your card.`
+    : "Cancelled. The session goes back in your package.";
 }
 
-function refundAfterCommit(refund: { refundId: string | null; engagementId: string }, institutionId: string): void {
-  const { refundId: id, engagementId } = refund;
-  if (!id) return;
-  after(() =>
-    refundThroughStripe({ id, engagementId, institutionId }).catch((error) =>
-      console.error(`[refund] ${id} left for the retry sweep`, errorFacts(error)),
-    ),
-  );
+function refundAfterCommit(refunds: RefundRef[]): void {
+  if (refunds.length > 0) after(() => refundEachThroughStripe(refunds));
 }
 
 export async function endEarly(
@@ -364,7 +355,9 @@ export async function endEarly(
   }
   if (!refund) return { ok: false, error: "That package is already closed." };
 
-  refundAfterCommit(refund, actor.institutionId);
+  if (refund.refundId) {
+    refundAfterCommit([{ id: refund.refundId, engagementId: refund.engagementId, institutionId: actor.institutionId }]);
+  }
   notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   revalidatePath("/sessions/[id]", "page");

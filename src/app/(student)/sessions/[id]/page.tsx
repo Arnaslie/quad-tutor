@@ -117,7 +117,6 @@ export default async function SessionPage(props: PageProps<"/sessions/[id]">) {
           scheduledAt: session.scheduledAt,
           sessionMinor: session.sessionMinor,
           currency: session.currency,
-          lastInPackage: session.lastInPackage,
           sessionsPurchased: session.sessionsPurchased,
         }}
       />

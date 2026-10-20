@@ -47,7 +47,7 @@ export function heldAgainstPackage(): SQL {
           and(
             eq(ledgerEntry.sessionId, sessionBooking.id),
             eq(ledgerEntry.institutionId, sessionBooking.institutionId),
-            eq(ledgerEntry.type, "session_earned"),
+            inArray(ledgerEntry.type, ["session_earned", "refund"]),
           ),
         ),
     ),

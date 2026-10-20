@@ -2,7 +2,7 @@ import { formatDayTime } from "@/components/format";
 
 import { formatMinor, packageSummary, type RequestedKind } from "@/server/modules/billing/pricing";
 import { lapseCopy } from "@/server/modules/engagements/answer-outcome";
-import { HALF_REFUND, QUARTER_REFUND, cancelClosesPackage, hoursBefore } from "@/server/modules/engagements/cancel-rules";
+import { HALF_REFUND, QUARTER_REFUND, cancelRefundsCard, hoursBefore } from "@/server/modules/engagements/cancel-rules";
 
 import type { Email } from "./email";
 
@@ -144,15 +144,15 @@ function studentCancelTerms(scheduledAt: Date, sessionsPurchased: number, now = 
   const back = (tier: { keptBp: number }) => `${(10_000 - tier.keptBp) / 100}%`;
   const left = hoursBefore(scheduledAt, now);
   if (left >= HALF_REFUND.underHours) {
-    const free = cancelClosesPackage(sessionsPurchased, "student")
+    const free = cancelRefundsCard(sessionsPurchased, left, "student")
       ? "you get all of it back on your card"
       : "the session goes back in your package";
-    return `Cancel before ${before(HALF_REFUND.underHours)} and ${free}. After that you get ${back(HALF_REFUND)} of it back, and ${back(QUARTER_REFUND)} inside ${QUARTER_REFUND.underHours} hours.`;
+    return `Cancel before ${before(HALF_REFUND.underHours)} and ${free}. After that you get ${back(HALF_REFUND)} of it back on your card, and ${back(QUARTER_REFUND)} inside ${QUARTER_REFUND.underHours} hours.`;
   }
   if (left >= QUARTER_REFUND.underHours) {
-    return `Cancel before ${before(QUARTER_REFUND.underHours)} and you get ${back(HALF_REFUND)} of the session back. After that, ${back(QUARTER_REFUND)}.`;
+    return `Cancel before ${before(QUARTER_REFUND.underHours)} and you get ${back(HALF_REFUND)} of the session back on your card. After that, ${back(QUARTER_REFUND)}.`;
   }
-  return `Cancelling now gets you ${back(QUARTER_REFUND)} of the session back.`;
+  return `Cancelling now gets you ${back(QUARTER_REFUND)} of the session back on your card.`;
 }
 
 function whereLines(params: {
@@ -322,9 +322,13 @@ function sessionUrl(params: Pick<SessionEmail, "recipient" | "sessionId">): stri
     : url(`/sessions/${params.sessionId}`);
 }
 
+type Amount = { minor: number; currency: string };
+
+/** `studentRefunded` is what the cancel sent to the card. Without it, the session went back in the package. */
 export function sessionCancelled(
-  params: SessionEmail & { tutorPaid: { minor: number; currency: string } | null; sessionsPurchased: number },
+  params: SessionEmail & { tutorPaid: Amount | null; studentRefunded: Amount | null },
 ): Email {
+  const refunded = params.studentRefunded;
   return {
     to: params.to,
     subject: `Cancelled: ${params.courseLabel} with ${params.otherPartyName}`,
@@ -334,10 +338,12 @@ export function sessionCancelled(
       `${params.otherPartyName} cancelled ${params.courseLabel} on ${formatDayTime(params.scheduledAt)}.`,
       "",
       params.recipient === "student"
-        ? "The session is back in your package. Book another time whenever suits you, or end the package to get the sessions you don't use refunded."
+        ? refunded
+          ? `You get ${formatMinor(refunded.minor, refunded.currency)} back on your card for this session. It can take 5 to 10 days to show.`
+          : "The session is back in your package. Book another time whenever suits you, or end the package to get the sessions you don't use refunded."
         : params.tutorPaid
           ? `That time is open again. You'll be paid ${formatMinor(params.tutorPaid.minor, params.tutorPaid.currency)} for this session.`
-          : cancelClosesPackage(params.sessionsPurchased, "student")
+          : refunded
             ? "That time is open again."
             : `That time is open again, and the session is back in ${params.otherPartyName}'s package.`,
       "",

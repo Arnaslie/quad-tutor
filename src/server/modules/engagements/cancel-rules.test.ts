@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cancelClosesPackage, cancelSplit, hoursBefore, keptShareBp } from "./cancel-rules";
+import { cancelRefundsCard, cancelSplit, hoursBefore, keptShareBp } from "./cancel-rules";
 
 test("a student cancelling 24 hours or more ahead keeps nothing back from the session", () => {
   assert.equal(keptShareBp(72, "student"), 0);
@@ -39,9 +39,12 @@ test("hours before counts fractions of an hour", () => {
   assert.equal(hoursBefore(at, new Date("2026-10-20T14:30:00Z")), 0.5);
 });
 
-test("only a student cancel of a one-time session closes the package and refunds the card", () => {
-  assert.equal(cancelClosesPackage(1, "student"), true);
-  assert.equal(cancelClosesPackage(1, "tutor"), false);
-  assert.equal(cancelClosesPackage(4, "student"), false);
-  assert.equal(cancelClosesPackage(8, "student"), false);
+test("only a student cancel 24 hours or more ahead in a multi-session package puts the session back instead of refunding the card", () => {
+  assert.equal(cancelRefundsCard(4, 30, "student"), false);
+  assert.equal(cancelRefundsCard(8, 24, "student"), false);
+  assert.equal(cancelRefundsCard(4, 23.99, "student"), true);
+  assert.equal(cancelRefundsCard(4, 3, "student"), true);
+  assert.equal(cancelRefundsCard(1, 72, "student"), true);
+  assert.equal(cancelRefundsCard(4, 72, "tutor"), true);
+  assert.equal(cancelRefundsCard(1, 0.5, "tutor"), true);
 });
