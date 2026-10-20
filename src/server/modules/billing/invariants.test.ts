@@ -112,9 +112,15 @@ test("transfers net of reversals may not exceed what the tutor accrued", () => {
   );
 });
 
-test("a second refund row on one engagement is flagged", () => {
-  const e = { id: "e", status: "refunded" as const, pricePaidMinor: 14_000, totals: { package_purchase: t(14_000), refund: t(14_000, 2) } };
-  assert.deepEqual(invariants({ ...healthy, engagements: [e] }), ["one refund per engagement"]);
+test("an engagement may carry many refund rows while together they stay within the purchase and the deferred money", () => {
+  const e = (status: "active" | "completed", totals: Totals) => ({ id: "e", status, pricePaidMinor: 14_000, totals: { package_purchase: t(14_000), ...totals } });
+  const cancelsThenEnd = { session_earned: t(5_250, 2), refund: t(8_750, 3) };
+  assert.deepEqual(invariants({ ...healthy, engagements: [e("completed", cancelsThenEnd)] }), []);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e("active", { session_earned: t(2_625), refund: t(875) })] }), []);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e("active", { refund: t(14_000, 2) })] }), []);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e("active", { session_earned: t(3_500), refund: t(14_000, 2) })] }), ["deferred >= 0"]);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e("active", { refund: t(14_001, 2) })] }), ["refund <= purchase", "deferred >= 0"]);
+  assert.deepEqual(invariants({ ...healthy, engagements: [e("completed", { session_earned: t(2_625), refund: t(875, 2) })] }), ["deferred = 0 once closed"]);
 });
 
 test("a refund row may carry only a Stripe refund or a manual settlement", () => {

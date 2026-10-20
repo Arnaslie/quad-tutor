@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -37,6 +37,20 @@ export async function feesToDate(
   return new Map(rows.map((row) => [row.tutorProfileId, row.feeMinor]));
 }
 
+/** Paid less recognised less refunded: what a package can still give back. */
+export function deferredMinor(engagementId: AnyColumn, institutionId: AnyColumn): SQL<number> {
+  return sql<number>`(${db
+    .select({
+      deferred: sql`coalesce(sum(case ${ledgerEntry.type}
+        when 'package_purchase' then ${ledgerEntry.amountMinor}
+        when 'session_earned' then -${ledgerEntry.amountMinor}
+        when 'refund' then -${ledgerEntry.amountMinor}
+        else 0 end), 0)::int`,
+    })
+    .from(ledgerEntry)
+    .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.institutionId, institutionId)))})`;
+}
+
 export type LedgerWrite = {
   engagementId: string;
   institutionId: string;
@@ -47,9 +61,9 @@ export type LedgerWrite = {
   stripeReference?: string | null;
 };
 
-export async function record(tx: Tx, entries: LedgerWrite[]): Promise<void> {
-  if (entries.length === 0) return;
-  await tx.insert(ledgerEntry).values(entries);
+export async function record(tx: Tx, entries: LedgerWrite[]): Promise<{ id: string }[]> {
+  if (entries.length === 0) return [];
+  return tx.insert(ledgerEntry).values(entries).returning({ id: ledgerEntry.id });
 }
 
 export type EngagementBalance = {

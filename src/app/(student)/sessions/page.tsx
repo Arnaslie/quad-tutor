@@ -212,8 +212,8 @@ function PackageCard({ pkg }: { pkg: StudentPackage }) {
         </ButtonLink>
       ) : (
         <p className="text-sm text-muted">
-          Every session is on the calendar. Anything you do not use refunds at the
-          end of term.
+          Nothing is left to book. Anything you do not use refunds at the end of
+          term.
         </p>
       )}
 

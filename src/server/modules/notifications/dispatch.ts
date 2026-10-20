@@ -27,6 +27,7 @@ import {
   courseOffering,
   demandSignal,
   engagement,
+  ledgerEntry,
   matchRequest,
   sessionBooking,
   studentProfile,
@@ -91,6 +92,7 @@ const sessionParties = {
   tutorName: tutorUser.name,
   code: courseCodeAlias.code,
   title: course.title,
+  sessionsPurchased: engagement.sessionsPurchased,
 };
 
 type SessionRow = Awaited<ReturnType<typeof sessionQuery>>[number];
@@ -117,6 +119,7 @@ function addressed(row: SessionRow, side: Side) {
     courseLabel: row.code ?? row.title,
     scheduledAt: row.scheduledAt,
     sessionId: row.sessionId,
+    sessionsPurchased: row.sessionsPurchased,
   };
 }
 
@@ -365,6 +368,8 @@ export async function notifyCancelledSessions(institutionId: string): Promise<nu
     ),
   );
 
+  const paid = await tutorPaidFor(institutionId, rows.map((row) => row.sessionId));
+
   let sent = 0;
   for (const row of rows) {
     const side: Side = row.cancelledByUserId === row.studentUserId ? "tutor" : "student";
@@ -383,7 +388,7 @@ export async function notifyCancelledSessions(institutionId: string): Promise<nu
       emails: row.bookedNotifiedAt
         ? [
             {
-              ...sessionCancelled(addressed(row, side)),
+              ...sessionCancelled({ ...addressed(row, side), tutorPaid: paid.get(row.sessionId) ?? null }),
               idempotencyKey: `session-cancelled/${row.sessionId}`,
             },
           ]
@@ -392,6 +397,24 @@ export async function notifyCancelledSessions(institutionId: string): Promise<nu
   }
 
   return sent;
+}
+
+async function tutorPaidFor(
+  institutionId: string,
+  sessionIds: string[],
+): Promise<Map<string, { minor: number; currency: string }>> {
+  if (sessionIds.length === 0) return new Map();
+  const rows = await db
+    .select({ sessionId: ledgerEntry.sessionId, minor: ledgerEntry.amountMinor, currency: ledgerEntry.currency })
+    .from(ledgerEntry)
+    .where(
+      and(
+        eq(ledgerEntry.institutionId, institutionId),
+        eq(ledgerEntry.type, "tutor_accrued"),
+        inArray(ledgerEntry.sessionId, sessionIds),
+      ),
+    );
+  return new Map(rows.flatMap((row) => (row.sessionId ? [[row.sessionId, row] as const] : [])));
 }
 
 function answeredAt(row: SessionRow, side: Side): Date | null {

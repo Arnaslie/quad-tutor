@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, ne, not, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, ne, not, or, sql, type SQL } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -20,15 +20,18 @@ import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 import {
   asRequestedKind,
   bookAgainOpen,
+  perSessionMinor,
   type PackageKind,
   type RequestedKind,
-  unusedRefundMinor,
 } from "@/server/modules/billing/pricing";
+import { deferredMinor } from "@/server/modules/billing/ledger";
 import { resumableUntil } from "@/server/modules/billing/checkout-window";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 
 import {
   bought,
+  deliveredCount,
+  heldAgainstPackage,
   liveEngagement,
   onCampus,
   sessionContext,
@@ -228,17 +231,12 @@ export type PackageEnding = {
   blocked: EndBlock | null;
 };
 
-const deliveredCount = sql<number>`(
-  select count(*)::int from ${sessionBooking}
-  where ${sessionBooking.engagementId} = ${engagement.id}
-    and ${sessionBooking.status} = 'completed'
-)`;
-
-const remainingCount = sql<number>`greatest(0, ${engagement.sessionsPurchased} - (
-  select count(*)::int from ${sessionBooking}
-  where ${sessionBooking.engagementId} = ${engagement.id}
-    and ${sessionBooking.status} <> 'cancelled'
-))`;
+function remainingCount(): SQL<number> {
+  return sql<number>`greatest(0, ${engagement.sessionsPurchased} - (${db
+    .select({ n: sql`count(*)::int` })
+    .from(sessionBooking)
+    .where(and(eq(sessionBooking.engagementId, engagement.id), heldAgainstPackage()))}))`;
+}
 
 export type BookAgain = {
   tutorCourseId: string;
@@ -356,7 +354,7 @@ async function bookAgainRows(
     .select({
       tutorCourseId: engagement.tutorCourseId,
       offeringId: engagement.courseOfferingId,
-      sessionsRemaining: sql<number>`coalesce(sum(${remainingCount}) filter (where ${liveEngagement}), 0)::int`,
+      sessionsRemaining: sql<number>`coalesce(sum(${remainingCount()}) filter (where ${liveEngagement}), 0)::int`,
       tutorProfileId: tutorProfile.id,
       tutorName: user.name,
       tutorLocation: tutorProfile.defaultLocation,
@@ -468,9 +466,10 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
       engagementId: engagement.id,
       kind: engagement.kind,
       sessionsPurchased: engagement.sessionsPurchased,
-      sessionsDelivered: deliveredCount,
-      sessionsRemaining: remainingCount,
+      sessionsDelivered: deliveredCount(engagement.id, engagement.institutionId),
+      sessionsRemaining: remainingCount(),
       pricePaidMinor: engagement.pricePaidMinor,
+      refundMinor: deferredMinor(engagement.id, engagement.institutionId),
       currency: engagement.currency,
       tutorName: user.name,
       tutorLocation: tutorProfile.defaultLocation,
@@ -525,12 +524,12 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
     .orderBy(asc(sessionBooking.scheduledAt));
 
   const now = new Date();
-  return packages.map((pkg) => {
+  return packages.map(({ refundMinor, ...pkg }) => {
     const sessions = open.filter((row) => row.engagementId === pkg.engagementId);
     return {
       ...pkg,
       ending: {
-        refundMinor: unusedRefundMinor(pkg),
+        refundMinor,
         cancels: sessions
           .filter((row) => row.status === "scheduled")
           .map((row) => row.scheduledAt),
@@ -552,6 +551,9 @@ export type SessionDetail = SessionListItem & {
   sessionsPurchased: number;
 
   sessionsRemaining: number;
+  sessionMinor: number;
+  currency: string;
+  lastInPackage: boolean;
 };
 
 export async function sessionDetail(params: {
@@ -566,6 +568,21 @@ export async function sessionDetail(params: {
     actor: params.actor,
   });
 
+  const [remaining, [others]] = await Promise.all([
+    sessionsRemaining({ engagementId: row.engagementId, sessionsPurchased: row.sessionsPurchased }),
+    db
+      .select({ open: sql<number>`count(*)::int` })
+      .from(sessionBooking)
+      .where(
+        and(
+          eq(sessionBooking.engagementId, row.engagementId),
+          eq(sessionBooking.institutionId, row.institutionId),
+          ne(sessionBooking.id, row.sessionId),
+          inArray(sessionBooking.status, ["held", "scheduled", "disputed"]),
+        ),
+      ),
+  ]);
+
   return {
     ...toListItem(row, row.role, now),
     courseId: row.courseId,
@@ -575,10 +592,10 @@ export async function sessionDetail(params: {
     denialNote: row.denialNote,
     viewerRole: row.role,
     sessionsPurchased: row.sessionsPurchased,
-    sessionsRemaining: await sessionsRemaining({
-      engagementId: row.engagementId,
-      sessionsPurchased: row.sessionsPurchased,
-    }),
+    sessionsRemaining: row.engagementStatus === "active" ? remaining : 0,
+    sessionMinor: perSessionMinor(row),
+    currency: row.currency,
+    lastInPackage: remaining === 0 && others.open === 0,
   };
 }
 

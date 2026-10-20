@@ -16,16 +16,16 @@ import {
   denyAttendance,
 } from "@/server/modules/engagements/confirmation";
 import {
-  cancelSessionInput,
   confirmAttendanceInput,
   denyAttendanceInput,
   endPackageInput,
   engagementSlotInput,
+  studentCancelInput,
   studentNote,
   topUpInput,
 } from "@/server/modules/engagements/input";
 import { SessionError } from "@/server/modules/engagements/access";
-import { bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
+import { CancelQuoteChanged, bookSession, cancelSession } from "@/server/modules/engagements/scheduling";
 import { endPackage } from "@/server/modules/engagements/termEnd";
 import { checkoutRedirect, resumeCheckout } from "@/server/modules/billing/checkout-session";
 import { formatMinor } from "@/server/modules/billing/pricing";
@@ -54,7 +54,7 @@ export type ActionResult =
       message?: string;
       answered?: { answer: "confirmed" | "denied"; outcome: AnswerOutcome };
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; requote?: CancelQuoteChanged["quote"] };
 
 function toResult(error: unknown): ActionResult {
   if (
@@ -63,7 +63,7 @@ function toResult(error: unknown): ActionResult {
     error instanceof SessionError ||
     error instanceof RatingError
   ) {
-    return { ok: false, error: error.message };
+    return { ok: false, error: error.message, ...(error instanceof CancelQuoteChanged ? { requote: error.quote } : {}) };
   }
   throw error;
 }
@@ -310,28 +310,44 @@ export async function cancel(
 ): Promise<ActionResult> {
   const actor = await requireActor();
 
-  const parsed = cancelSessionInput.safeParse({ sessionId: formData.get("sessionId") });
+  const parsed = studentCancelInput.safeParse({
+    sessionId: formData.get("sessionId"),
+    shownKeptMinor: formData.get("shownKeptMinor"),
+  });
   if (!parsed.success) return { ok: false, error: "That session no longer exists." };
 
-  let late: boolean;
+  let outcome: Awaited<ReturnType<typeof cancelSession>>;
   try {
-    const result = await cancelSession({ actor, sessionId: parsed.data.sessionId });
-    late = result.late;
+    outcome = await cancelSession({ actor, ...parsed.data });
   } catch (error) {
     return toResult(error);
   }
 
+  if (outcome.refund) refundAfterCommit(outcome.refund, actor.institutionId);
   notifySessionChangesSoon(actor.institutionId);
   revalidateStanding();
   revalidatePath("/sessions");
   revalidatePath(`/sessions/${parsed.data.sessionId}`);
 
-  return {
-    ok: true,
-    message: late
-      ? "Cancelled. The session goes back in your package and you can rebook it."
-      : "Cancelled. The session goes back in your package.",
-  };
+  return { ok: true, message: cancelledMessage(outcome) };
+}
+
+function cancelledMessage(outcome: Awaited<ReturnType<typeof cancelSession>>): string {
+  if (outcome.refund) {
+    return `Cancelled. ${formatMinor(outcome.refund.refundMinor, outcome.refund.currency)} is on its way back to you.`;
+  }
+  if (outcome.keptMinor === 0) return "Cancelled. The session goes back in your package.";
+  return `Cancelled. ${formatMinor(outcome.returnedMinor, outcome.currency)} goes back to you when the package ends.`;
+}
+
+function refundAfterCommit(refund: { refundId: string | null; engagementId: string }, institutionId: string): void {
+  const { refundId: id, engagementId } = refund;
+  if (!id) return;
+  after(() =>
+    refundThroughStripe({ id, engagementId, institutionId }).catch((error) =>
+      console.error(`[refund] ${id} left for the retry sweep`, errorFacts(error)),
+    ),
+  );
 }
 
 export async function endEarly(
@@ -351,12 +367,7 @@ export async function endEarly(
   }
   if (!refund) return { ok: false, error: "That package is already closed." };
 
-  const ids = { engagementId: parsed.data.engagementId, institutionId: actor.institutionId };
-  after(() =>
-    refundThroughStripe(ids).catch((error) =>
-      console.error(`[refund] ${ids.engagementId} left for the retry sweep`, errorFacts(error)),
-    ),
-  );
+  refundAfterCommit(refund, actor.institutionId);
   notifySessionChangesSoon(actor.institutionId);
   revalidatePath("/sessions");
   revalidatePath("/sessions/[id]", "page");

@@ -5,14 +5,24 @@ import { useActionState, useId, useState } from "react";
 import { Button } from "@/components/button";
 import { Card } from "@/components/card";
 import { Field, Textarea } from "@/components/field";
+import { Money } from "@/components/money";
 import {
   answerCopy,
   deliveredIfUnanswered,
   lapseCopy,
 } from "@/server/modules/engagements/answer-outcome";
-import type { ViewerAction } from "@/server/modules/engagements/attendance";
+import { isLateCancel, type ViewerAction } from "@/server/modules/engagements/attendance";
+import { cancelClosesPackage, cancelSplit, hoursBefore } from "@/server/modules/engagements/cancel-rules";
 
 import { cancel, confirm, deny, type ActionResult } from "../../actions";
+
+type CancelPrice = {
+  scheduledAt: Date;
+  sessionMinor: number;
+  currency: string;
+  lastInPackage: boolean;
+  sessionsPurchased: number;
+};
 
 export function SessionActions({
   sessionId,
@@ -20,18 +30,19 @@ export function SessionActions({
   otherPartyName,
   yourAnswer,
   theirAnswer,
+  price,
 }: {
   sessionId: string;
   action: ViewerAction;
   otherPartyName: string;
   yourAnswer: "confirmed" | "denied" | null;
   theirAnswer: "confirmed" | "denied" | null;
+  price: CancelPrice;
 }) {
   switch (action) {
     case "cancel":
-      return <Cancel sessionId={sessionId} late={false} />;
     case "late_cancel":
-      return <Cancel sessionId={sessionId} late />;
+      return <Cancel sessionId={sessionId} otherPartyName={otherPartyName} price={price} />;
     case "confirm_or_deny":
       return <Answer sessionId={sessionId} otherPartyName={otherPartyName} />;
     case "awaiting_other_party":
@@ -90,59 +101,104 @@ function Result({ state }: { state: ActionResult | null }) {
   );
 }
 
-function Cancel({ sessionId, late }: { sessionId: string; late: boolean }) {
+function Cancel({
+  sessionId,
+  otherPartyName,
+  price,
+}: {
+  sessionId: string;
+  otherPartyName: string;
+  price: CancelPrice;
+}) {
+  const [split, setSplit] = useState<(ReturnType<typeof cancelSplit> & { late: boolean }) | null>(null);
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
-    cancel,
+    async (previous, formData) => {
+      const result = await cancel(previous, formData);
+      if (!result.ok && result.requote) setSplit(result.requote);
+      return result;
+    },
     null,
   );
-  const [armed, setArmed] = useState(false);
 
   if (state?.ok) return <Result state={state} />;
 
-  if (!armed) {
+  if (!split) {
     return (
       <div className="flex flex-col gap-2">
         <Result state={state} />
-        <Button type="button" variant="secondary" onClick={() => setArmed(true)}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => {
+            const now = new Date();
+            setSplit({
+              ...cancelSplit(price.sessionMinor, hoursBefore(price.scheduledAt, now), "student"),
+              late: isLateCancel(price.scheduledAt, now),
+            });
+          }}
+        >
           Cancel this session
         </Button>
       </div>
     );
   }
 
+  const money = (minor: number) => <Money minor={minor} currency={price.currency} />;
+
   return (
     <form action={action} className="flex flex-col gap-3">
       <input type="hidden" name="sessionId" value={sessionId} />
+      <input type="hidden" name="shownKeptMinor" value={split.keptMinor} />
 
       <Card className="flex flex-col gap-2 text-sm">
-        {late ? (
+        {split.keptMinor > 0 ? (
           <>
-            <p className="font-medium">This is inside 12 hours.</p>
+            <p className="font-medium">
+              Cancel now and you get {money(split.returnedMinor)} back.{" "}
+              {money(split.keptMinor)} goes to {otherPartyName}.
+            </p>
             <p className="text-muted">
-              It is recorded as a late cancel, which is a fact about the timing
-              and nothing else. It costs you no money and the session goes back
-              into your package. Your next few attended sessions clear it.
+              {price.lastInPackage
+                ? "It goes back to your card now, and can take 5 to 10 days to show."
+                : "It goes back to your card when the package ends: at the end of term, or sooner if you end it yourself."}{" "}
+              The session counts as used.
+            </p>
+          </>
+        ) : cancelClosesPackage(price.sessionsPurchased, "student") ? (
+          <>
+            <p className="font-medium">
+              Cancel now and you get all {money(split.returnedMinor)} back.
+            </p>
+            <p className="text-muted">
+              It goes back to your card now, and can take 5 to 10 days to show.
             </p>
           </>
         ) : (
           <p className="text-muted">
-            The session goes back into your package and you can book it again for
-            another time. Nothing is charged either way.
+            Cancel now and the session goes back in your package. You can book
+            another time. Nothing is charged.
           </p>
         )}
+        {split.late ? (
+          <p className="text-muted">
+            Inside 12 hours it is also recorded as a late cancel, which is a fact
+            about the timing and nothing else. Your next few attended sessions
+            clear it.
+          </p>
+        ) : null}
       </Card>
 
       <Result state={state} />
 
       <div className="flex gap-2">
         <Button type="submit" variant="danger" className="flex-1" disabled={pending}>
-          {pending ? "Cancelling…" : late ? "Cancel anyway" : "Cancel it"}
+          {pending ? "Cancelling…" : split.keptMinor > 0 ? "Cancel anyway" : "Cancel it"}
         </Button>
         <Button
           type="button"
           variant="ghost"
           className="flex-1"
-          onClick={() => setArmed(false)}
+          onClick={() => setSplit(null)}
           disabled={pending}
         >
           Keep it

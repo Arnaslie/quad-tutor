@@ -1,7 +1,8 @@
 import { formatDayTime } from "@/components/format";
 
-import { packageSummary, type RequestedKind } from "@/server/modules/billing/pricing";
+import { formatMinor, packageSummary, type RequestedKind } from "@/server/modules/billing/pricing";
 import { lapseCopy } from "@/server/modules/engagements/answer-outcome";
+import { HALF_REFUND, QUARTER_REFUND, cancelClosesPackage, hoursBefore } from "@/server/modules/engagements/cancel-rules";
 
 import type { Email } from "./email";
 
@@ -113,6 +114,7 @@ export function sessionBooked(params: {
   recipient: "student" | "tutor";
   location: string | null;
   studentNote: string | null;
+  sessionsPurchased: number;
 }): Email {
   return {
     to: params.to,
@@ -124,13 +126,33 @@ export function sessionBooked(params: {
       formatDayTime(params.scheduledAt),
       ...whereLines(params),
       "",
-      `Cancelling is free until ${formatDayTime(params.freeUntil)}. After that it`,
-      "counts as a late cancel.",
+      ...(params.recipient === "student"
+        ? [studentCancelTerms(params.scheduledAt, params.sessionsPurchased)]
+        : [
+            `Cancelling is free until ${formatDayTime(params.freeUntil)}. After that it`,
+            "counts as a late cancel.",
+          ]),
       "",
       url("/sessions"),
       ...SIGN_OFF,
     ].join("\n"),
   };
+}
+
+function studentCancelTerms(scheduledAt: Date, sessionsPurchased: number, now = new Date()): string {
+  const before = (hours: number) => formatDayTime(new Date(scheduledAt.getTime() - hours * 3_600_000));
+  const back = (tier: { keptBp: number }) => `${(10_000 - tier.keptBp) / 100}%`;
+  const left = hoursBefore(scheduledAt, now);
+  if (left >= HALF_REFUND.underHours) {
+    const free = cancelClosesPackage(sessionsPurchased, "student")
+      ? "you get all of it back on your card"
+      : "the session goes back in your package";
+    return `Cancel before ${before(HALF_REFUND.underHours)} and ${free}. After that you get ${back(HALF_REFUND)} of it back, and ${back(QUARTER_REFUND)} inside ${QUARTER_REFUND.underHours} hours.`;
+  }
+  if (left >= QUARTER_REFUND.underHours) {
+    return `Cancel before ${before(QUARTER_REFUND.underHours)} and you get ${back(HALF_REFUND)} of the session back. After that, ${back(QUARTER_REFUND)}.`;
+  }
+  return `Cancelling now gets you ${back(QUARTER_REFUND)} of the session back.`;
 }
 
 function whereLines(params: {
@@ -187,6 +209,7 @@ export function sessionTomorrow(params: {
   recipient: "student" | "tutor";
   location: string | null;
   studentNote: string | null;
+  sessionsPurchased: number;
 }): Email {
   return {
     to: params.to,
@@ -197,8 +220,12 @@ export function sessionTomorrow(params: {
       `${params.courseLabel} with ${params.otherPartyName} is ${formatDayTime(params.scheduledAt)}.`,
       ...whereLines(params),
       "",
-      `Can't make it? Cancelling is free until ${formatDayTime(params.freeUntil)} —`,
-      "after that it counts as a late cancel.",
+      ...(params.recipient === "student"
+        ? [`Can't make it? ${studentCancelTerms(params.scheduledAt, params.sessionsPurchased)}`]
+        : [
+            `Can't make it? Cancelling is free until ${formatDayTime(params.freeUntil)} —`,
+            "after that it counts as a late cancel.",
+          ]),
       "",
       url("/sessions"),
       ...SIGN_OFF,
@@ -295,7 +322,9 @@ function sessionUrl(params: Pick<SessionEmail, "recipient" | "sessionId">): stri
     : url(`/sessions/${params.sessionId}`);
 }
 
-export function sessionCancelled(params: SessionEmail): Email {
+export function sessionCancelled(
+  params: SessionEmail & { tutorPaid: { minor: number; currency: string } | null; sessionsPurchased: number },
+): Email {
   return {
     to: params.to,
     subject: `Cancelled: ${params.courseLabel} with ${params.otherPartyName}`,
@@ -305,8 +334,12 @@ export function sessionCancelled(params: SessionEmail): Email {
       `${params.otherPartyName} cancelled ${params.courseLabel} on ${formatDayTime(params.scheduledAt)}.`,
       "",
       params.recipient === "student"
-        ? "The session is back in your package. Book another time whenever suits you."
-        : `That time is open again, and the session is back in ${params.otherPartyName}'s package.`,
+        ? "The session is back in your package. Book another time whenever suits you, or end the package to get the sessions you don't use refunded."
+        : params.tutorPaid
+          ? `That time is open again. You'll be paid ${formatMinor(params.tutorPaid.minor, params.tutorPaid.currency)} for this session.`
+          : cancelClosesPackage(params.sessionsPurchased, "student")
+            ? "That time is open again."
+            : `That time is open again, and the session is back in ${params.otherPartyName}'s package.`,
       "",
       sessionUrl(params),
       ...SIGN_OFF,

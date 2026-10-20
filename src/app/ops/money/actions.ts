@@ -62,10 +62,14 @@ export async function resolveDiscrepancyAction(_previous: MoneyFormState, formDa
   );
 }
 
-export async function recordManualPaymentAction(_previous: MoneyFormState, formData: FormData) {
+/** Bound per button: `heldRefundId` names the held refund it pays, or is null for the row the flag names. */
+export async function recordManualPaymentAction(heldRefundId: string | null, _previous: MoneyFormState, formData: FormData) {
+  const held = id.nullable().safeParse(heldRefundId);
+  if (!held.success) return { error: GONE, note: String(formData.get("note") ?? "") };
   return withNote(
     formData,
-    (operator, discrepancyId, note) => recordManualSettlement({ operator, discrepancyId, note }),
+    (operator, discrepancyId, note) =>
+      recordManualSettlement({ operator, discrepancyId, note, heldRefundId: held.data ?? undefined }),
     {
       gone: GONE,
       not_settleable: "Something changed on this one. Reload the page to see what is left to do.",

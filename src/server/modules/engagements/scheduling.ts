@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import {
@@ -11,16 +11,26 @@ import {
   tutorCourse,
   tutorProfile,
 } from "@/server/db/schema";
+import { perSessionMinor } from "@/server/modules/billing/pricing";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
 
 import { availableSlots, confirmationDeadline, lockTutor, slotOpen } from "./slots";
-import { SessionError, lockSession, loadParticipation, type Executor } from "./access";
+import {
+  SessionError,
+  heldAgainstPackage,
+  lockSession,
+  loadParticipation,
+  type Executor,
+} from "./access";
 import {
   LATE_CANCEL_HOURS,
   SESSION_MINUTES,
   isLateCancel,
   remindedAtForNewBooking,
 } from "./attendance";
+import { cancelClosesPackage, cancelSplit, hoursBefore } from "./cancel-rules";
+import { recognise } from "./confirmation";
+import { closeIfUsedUp, closeWithRefund, type TermEndRefund } from "./termEnd";
 
 export async function sessionsRemaining(params: {
   exec?: Executor;
@@ -33,10 +43,7 @@ export async function sessionsRemaining(params: {
     .select({ n: sql<number>`count(*)::int` })
     .from(sessionBooking)
     .where(
-      and(
-        eq(sessionBooking.engagementId, params.engagementId),
-        ne(sessionBooking.status, "cancelled"),
-      ),
+      and(eq(sessionBooking.engagementId, params.engagementId), heldAgainstPackage()),
     );
 
   return Math.max(0, params.sessionsPurchased - (rows.at(0)?.n ?? 0));
@@ -142,6 +149,13 @@ export async function bookSession(params: {
     if (remaining <= 0) {
       throw new SessionError("You have used every session in this package.");
     }
+    // A one-time cancel closes the package under no key update, which our key share does not block,
+    // and frees its session. Read after the count, so a close the count missed is seen here.
+    const [current] = await tx
+      .select({ status: engagement.status })
+      .from(engagement)
+      .where(and(eq(engagement.id, target.id), eq(engagement.institutionId, params.actor.institutionId)));
+    if (current?.status !== "active") throw new SessionError("That package is closed.");
 
     const [created] = await tx
       .insert(sessionBooking)
@@ -161,13 +175,43 @@ export async function bookSession(params: {
   });
 }
 
+export type CancelOutcome = {
+  late: boolean;
+  keptMinor: number;
+  returnedMinor: number;
+  currency: string;
+  refund: TermEndRefund | null;
+};
+
+/** The session crossed a cancel line between the quote the student saw and the submit. Nothing was cancelled. */
+export class CancelQuoteChanged extends SessionError {
+  constructor(readonly quote: { keptMinor: number; returnedMinor: number; late: boolean }) {
+    super("The amount changed since you opened this. Nothing was cancelled. Check the new amount and cancel again.");
+  }
+}
+
 export async function cancelSession(params: {
   actor: Actor;
   sessionId: string;
-}): Promise<{ late: boolean }> {
+  /** The kept share the cancel form showed. A different one on the server's clock refuses the cancel. */
+  shownKeptMinor?: number;
+}): Promise<CancelOutcome> {
   const now = new Date();
 
-  return db.transaction(async (tx) => {
+  const cancelled = await db.transaction(async (tx) => {
+    // A kept share writes ledger rows, whose foreign key takes the engagement for key share.
+    // Taking it first keeps the term-end sweep's order: engagement, then its sessions.
+    await tx
+      .select({ id: engagement.id })
+      .from(engagement)
+      .innerJoin(sessionBooking, eq(sessionBooking.engagementId, engagement.id))
+      .where(
+        and(
+          eq(sessionBooking.id, params.sessionId),
+          eq(sessionBooking.institutionId, params.actor.institutionId),
+        ),
+      )
+      .for("key share", { of: engagement });
     await lockSession(tx, params.sessionId);
     const session = await loadParticipation({
       exec: tx,
@@ -185,6 +229,14 @@ export async function cancelSession(params: {
     }
 
     const late = isLateCancel(session.scheduledAt, now);
+    const { keptMinor, returnedMinor } = cancelSplit(
+      perSessionMinor(session),
+      hoursBefore(session.scheduledAt, now),
+      session.role,
+    );
+    if (params.shownKeptMinor !== undefined && params.shownKeptMinor !== keptMinor) {
+      throw new CancelQuoteChanged({ keptMinor, returnedMinor, late });
+    }
 
     await tx
       .update(sessionBooking)
@@ -203,6 +255,8 @@ export async function cancelSession(params: {
 
     // TODO(v1): the tutor side of this is `cancelled_at` + `cancelled_by_user_id`
 
+    if (keptMinor > 0) await recognise(tx, session, keptMinor);
+
     if (late && session.role === "student") {
       await tx.insert(reliabilityEvent).values({
         userId: session.studentUserId,
@@ -213,8 +267,46 @@ export async function cancelSession(params: {
       });
     }
 
-    return { late };
+    // Raises the engagement's key share to no key update, as a confirmation closing a used-up package does.
+    const refund = cancelClosesPackage(session.sessionsPurchased, session.role)
+      ? await closeWithRefund(tx, {
+          engagementId: session.engagementId,
+          institutionId: session.institutionId,
+          lock: "no key update",
+        })
+      : null;
+
+    return {
+      late,
+      keptMinor,
+      returnedMinor,
+      currency: session.currency,
+      engagementId: session.engagementId,
+      refund,
+    };
   });
+
+  // Its own transaction, so the engagement is locked before its sessions as the term-end sweep does.
+  // The cancel has committed either way; a package left open here is refunded at term end or when ended.
+  const ids = { engagementId: cancelled.engagementId, institutionId: params.actor.institutionId };
+  const refund =
+    cancelled.refund ??
+    (cancelled.keptMinor > 0
+      ? await db
+          .transaction((tx) => closeIfUsedUp(tx, ids))
+          .catch((error: unknown) => {
+            console.error(`[cancel] closing ${ids.engagementId} left for the term-end sweep`, error);
+            return null;
+          })
+      : null);
+
+  return {
+    late: cancelled.late,
+    keptMinor: cancelled.keptMinor,
+    returnedMinor: cancelled.returnedMinor,
+    currency: cancelled.currency,
+    refund,
+  };
 }
 
 export async function setSessionLocation(params: {

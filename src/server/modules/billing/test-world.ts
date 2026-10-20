@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { isLocalHost } from "@/server/db/local-host.mjs";
@@ -173,6 +173,18 @@ export async function rows(engagementId: string, type: LedgerType) {
     .from(ledgerEntry)
     .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, type)))
     .orderBy(ledgerEntry.occurredAt, ledgerEntry.id);
+}
+
+/** The engagement's newest refund row, named the way the call after commit names it. */
+export async function newestRefund(engagementId: string): Promise<{ id: string; engagementId: string; institutionId: string }> {
+  const [row] = await db
+    .select({ id: ledgerEntry.id, engagementId: ledgerEntry.engagementId, institutionId: ledgerEntry.institutionId })
+    .from(ledgerEntry)
+    .where(and(eq(ledgerEntry.engagementId, engagementId), eq(ledgerEntry.type, "refund")))
+    .orderBy(desc(ledgerEntry.occurredAt), desc(ledgerEntry.id))
+    .limit(1);
+  assert.ok(row, `no refund row on ${engagementId}`);
+  return row;
 }
 
 /** Puts the rows back in time, as if the call after commit died that long ago. */

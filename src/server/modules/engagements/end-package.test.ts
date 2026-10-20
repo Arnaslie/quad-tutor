@@ -236,21 +236,40 @@ test("ending refunds what the sweep would for the same state, as one refund row 
   assert.deepEqual(await facts(ended), []);
 });
 
-test("refused at 11h before a session, allowed at 13h; the future booking is cancelled as the student's on-time cancel", async () => {
+test("the refund is what the ledger still defers, the same as price less delivered sessions for every kind", async () => {
+  const cases = [
+    { kind: "exam_anchored", delivered: 0, refund: 14_000 },
+    { kind: "exam_anchored", delivered: 1, refund: 10_500 },
+    { kind: "exam_anchored", delivered: 3, refund: 3_500 },
+    { kind: "through_final", delivered: 5, refund: 9_450 },
+    { kind: "top_up", delivered: 0, refund: 3_500 },
+  ] as const;
+  for (const { kind, delivered: n, refund } of cases) {
+    const student = await person(home.institutionId);
+    const id = await pkg(student, { kind });
+    for (let i = 0; i < n; i += 1) await delivered(id, hours(-100 - i));
+    const [preview] = (await packagesForStudent(student)).filter((row) => row.engagementId === id);
+    assert.equal(preview.ending.refundMinor, refund, `${kind} with ${n} delivered, preview`);
+    assert.equal((await endPackage({ actor: student, engagementId: id }))?.refundMinor, refund, `${kind} with ${n} delivered`);
+  }
+});
+
+test("refused at 23h before a session, allowed at 25h; the future booking is cancelled as the student's on-time cancel", async () => {
   const student = await person(home.institutionId);
   const id = await pkg(student);
-  const soon = await session(id, hours(11), { bookedNotifiedAt: new Date() });
+  const soon = await session(id, hours(23), { bookedNotifiedAt: new Date() });
 
   await assert.rejects(endPackage({ actor: student, engagementId: id }), (error: unknown) => {
     assert.ok(error instanceof EndPackageError);
-    assert.equal(error.block.reason, "late_cancel_window");
+    assert.equal(error.block.reason, "cancel_costs");
+    assert.match(error.message, /less than 24 hours away\. Cancel it first/);
     return true;
   });
   const [preview] = (await packagesForStudent(student)).filter((row) => row.engagementId === id);
-  assert.equal(preview.ending.blocked?.reason, "late_cancel_window");
+  assert.equal(preview.ending.blocked?.reason, "cancel_costs");
   assert.equal(await statusOf(id), "active");
 
-  await db.update(sessionBooking).set({ scheduledAt: hours(13) }).where(eq(sessionBooking.id, soon));
+  await db.update(sessionBooking).set({ scheduledAt: hours(25) }).where(eq(sessionBooking.id, soon));
   const [ready] = (await packagesForStudent(student)).filter((row) => row.engagementId === id);
   assert.deepEqual(ready.ending, { refundMinor: 14_000, cancels: [ready.ending.cancels[0]], blocked: null });
 
@@ -336,7 +355,7 @@ test("ending and booking at once: never a live session on a closed package", asy
   for (const headStartMs of [0, 2, 4, 8, 12]) {
     const student = await person(home.institutionId);
     const id = await pkg(student);
-    const slot = (await slotsForEngagement({ actor: student, engagementId: id })).find((at) => at > hours(14));
+    const slot = (await slotsForEngagement({ actor: student, engagementId: id })).find((at) => at > hours(26));
     assert.ok(slot);
 
     const results = await Promise.allSettled([

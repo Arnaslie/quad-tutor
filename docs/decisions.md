@@ -45,13 +45,75 @@ guarantee as the way out of a bad fit. Ending runs the term-end refund on demand
   `refunded`.
 
 It moves only deferred money: no fee, no payout, and the fee meter is not touched.
-Ending writes no reliability fact. It is refused while a session is inside the
-late-cancel window, past its start and unconfirmed, or disputed. A late cancel stays
-something only the cancel action records, and a session that may have happened is
-never refunded. Only the student can end their package.
+Ending writes no reliability fact. It is refused while a session is less than 24
+hours away, past its start and unconfirmed, or disputed. A cancel inside 24 hours has
+a price (see below), and ending the package must not dodge it, so the refusal tells
+the student to cancel that session first. A late cancel stays something only the
+cancel action records, and a session that may have happened is never refunded. Only
+the student can end their package. (The window was the 12-hour late-cancel window
+until 2026-10-18.)
 
 **Unused sessions refund at term end, or when the student ends the package.**
 Breakage income is a trap on a campus where everyone talks.
+
+**A student cancel inside 24 hours keeps part of the session's price. A tutor cancel
+never costs the student anything** (user, 2026-10-18). This settles the open question
+of whether a late cancel should move money. The tiers live in
+`engagements/cancel-rules.ts`, shared by the server and the cancel form:
+
+| The student cancels | The student gets back | The tutor's side keeps |
+|---|---|---|
+| 24 hours or more before | the session, back in the package (a one-time session: all of it, to the card) | nothing |
+| 12 to 24 hours before | 50% of the session's price | 50% |
+| under 12 hours before | 25% | 75% |
+| the tutor cancels, at any time | the session, back in the package | nothing |
+
+The reason is supply. A tutor who held 9pm on a Tuesday and was cancelled at 8pm
+earned nothing, and with 15 tutors in week one, tutor churn is the failure mode that
+kills a campus. The kept share is the price of the hour, the same for every student,
+and never keyed on their history. It is not a reliability consequence, so the rule
+that those stay recoverable does not apply to it. The reliability fact is unchanged:
+only a student cancel under 12 hours (`LATE_CANCEL_HOURS`) writes `late_cancelled`.
+Spot moves and reminders keep the 12-hour window too.
+
+How the money moves:
+- **The kept share is revenue.** `cancelSession` passes it to `recognise()`, which
+  writes `session_earned`, `tutor_accrued` and `platform_fee` exactly as for a
+  delivered session, against the fee meter. The kept share rounds down, so an odd
+  cent goes back to the student. The session stays `cancelled`, but it counts as used:
+  it is not back in the package.
+- **The rest of its price stays deferred.** It goes back to the card in the package
+  refund: at term end, when the student ends the package, or straight away when
+  the cancel leaves nothing to book and nothing scheduled or disputed. When the
+  package is used up by a later confirmation instead, the refund row is written then
+  and the refund retry sweep sends it on its next run.
+- **A student cancel of a one-time session refunds the card at once, at every tier**
+  (user, 2026-10-19). A one-time session is an engagement with one session bought.
+  It has no package for the session to go back to, so the cancel closes the
+  engagement in the same transaction and refunds whatever the tier returns: all of
+  it from 24 hours out, 50% or 25% inside. The rule is `cancelClosesPackage()` in
+  `cancel-rules.ts`. A tutor cancel still puts the session back.
+- **A package with no attended session closes `refunded`** even when a kept cancel
+  paid the tutor. The status says nothing was delivered, not that nothing was earned;
+  the ledger says what was.
+- **The partial refund waits for the package refund.** The package refund is what the
+  ledger still defers, purchase less `session_earned` less refunds, which covers both
+  undelivered sessions and the returned share of kept cancels. (It waited because the
+  ledger allowed one refund per engagement. Since 2026-10-19 it allows many, below.)
+- **A tutor cancel moves no money.** The session goes back in the package. When the
+  student is refunded in the end, the platform has already paid the card fee to
+  collect, and it absorbs that, as it does for every refund.
+- **A kept cancel is never rateable.** Rating needs a `completed` session, not just a
+  `session_earned` row. The tutor's earnings count it as a paid session.
+
+Copy says what happens before it happens. The cancel form shows "Cancel now and you
+get $X back. $Y goes to <tutor>." and when the money reaches the card. The tutor's
+cancel email says what they will be paid for the session. The student's booking and
+reminder emails give the tiers instead of "cancelling is free until 12 hours before".
+The form posts the kept share it showed. If the server's clock puts the cancel in a
+different tier, because a line passed while the card was open or the phone's clock is
+off, the cancel is refused, nothing moves, and the form shows the server's new quote
+to confirm. Instant cash-out treats a changed fee quote the same way.
 
 **A single session exists, but only for an existing pair.** One session, full
 price, offered to a student whose packages with that tutor in a course have nothing
@@ -107,7 +169,8 @@ drift:
 - **Charged at recognition, never at purchase.** A package is deferred revenue, and its
   split is unknown until each session is delivered. The fee is fixed in `recognise()`
   (`engagements/confirmation.ts`), the one place a session becomes revenue — two
-  confirmations, auto-release, or a dispute resolved as attended. It is written as a
+  confirmations, auto-release, a dispute resolved as attended, or the kept share of a
+  student cancel inside 24 hours. It is written as a
   `platform_fee` row beside `session_earned` and `tutor_accrued`, so every delivered
   session satisfies `session_earned = tutor_accrued + platform_fee`, and the meter is
   the sum of `platform_fee` for that tutor.
@@ -116,7 +179,7 @@ drift:
   step stay as they are. If `FEE_MILESTONE_MINOR` is raised later, tutors between the
   old and the new line go back to 10% (accepted 2026-10-16).
 - **Reversals follow the tutor's pay.** A term-end refund, and a package the student
-  ends early, return only undelivered sessions, which never charged a fee, so
+  ends early, return only money no session earned, which never charged a fee, so
   neither touches the meter. A disputed session charges nothing while it holds;
   resolved as attended, it is charged at resolution against the meter as it stands
   then; resolved as not attended, never. Nothing today reverses a recognised session.
@@ -132,12 +195,13 @@ drift:
   | `acceptRequest` | `student_profile`, then that `match_request` (for update of `match_request`) |
   | `purchasePackage` | `tutor_profile` (no key update), then `match_request` |
   | `purchaseTopUp` | `tutor_profile` |
-  | `bookSession` | `engagement` (for key share; re-read, refused unless `active`), then `tutor_profile` |
-  | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update) |
+  | `bookSession` | `engagement` (for key share; re-read, refused unless `active`), then `tutor_profile`. The status is read again after the count of sessions left: a one-time cancel closes the package under no key update, which the key share does not block, and frees its session |
+  | confirm / `recognise()` | `session_booking` (for update), then `tutor_profile`, then `engagement` (no key update). When the package is used up, `closeIfUsedUp` closes it under that same no-key-update lock |
+  | `cancelSession` | `engagement` (for key share), then `session_booking` (for update), then `tutor_profile` when the cancel keeps part of the price. The kept share's ledger rows take the engagement for key share through their foreign key, so the cancel takes it first, in the term-end refund's order, or the two deadlock. A student cancel of a one-time session closes it in the same transaction, raising the engagement to no key update. Closing a used-up package otherwise runs after commit in its own transaction: `engagement` (for update), then its sessions |
   | term-end refund | `engagement` (for update), then its scheduled `session_booking` rows |
-  | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation could hold (inside 12h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
+  | `endPackage` | `engagement` (for update), then its scheduled `session_booking` rows, only after refusing any session a confirmation or a priced cancel could hold (inside 24h, started but unanswered, or disputed). Shares `closeWithRefund` with the term-end refund |
   | `fulfilCheckout`, `releaseCheckout` | `engagement` (for update; returns unless `pending_payment` and the Checkout Session id matches), then its `held` `session_booking` rows. An amount or currency mismatch cancels both and inserts a `money_discrepancy` row in the same transaction |
-  | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the unstamped `refund` row, calls Stripe, then stamps `re_…` with `where stripe_reference is null`. The retry sweep runs each campus under a `sweep_lease` row (a timestamp claimed by one conditional upsert, not a lock) |
+  | card refund (after `closeWithRefund` commits: `after()` in `endEarly`, the term-end sweep, the retry sweep, refund webhooks) | none. Reads the one unstamped `refund` row it names by id, calls Stripe, then stamps `re_…` with `where stripe_reference is null`. A held refund ops pays by hand is stamped with the same guard repeated on the row, since the subquery that finds it is not re-checked after a lock wait. The retry sweep runs each campus under a `sweep_lease` row (a timestamp claimed by one conditional upsert, not a lock) |
   | transfer sweep | `engagement` (no key update) alone. Re-reads what is owed and the pause after the lock, inserts the unstamped `tutor_transfer` row and commits; Stripe is called after commit, and the stamp `where stripe_reference is null` is the only guard after that. Each campus runs under its own `sweep_lease` row |
 
   The rules behind it:
@@ -725,8 +789,8 @@ on an engagement with no `processor_fee` row (no charge was ever recorded, as wi
 with a fee is never flagged on a 404, so a key for the wrong account cannot flag paid
 refunds en masse. A refusal first re-lists the refunds and settles with ours if Stripe
 already holds one. A refund refused with none, or that fails later (closed or lost card),
-writes a `refund_failed` discrepancy keyed on the PaymentIntent, and the row keeps any
-`re_…` it was tried against.
+writes a `refund_failed` discrepancy keyed on that refund row (its id in `stripe_reference`),
+and the row keeps any `re_…` it was tried against.
 
 Code never re-sends a refund to that card. A discrepancy carries `ledger_entry_id` when it
 is about a ledger refund row (a failure or a foreign refund), and any discrepancy on a row
@@ -734,40 +798,59 @@ stops that row's automatic refund whether or not it is resolved. A refund of a p
 that was never booked has no row; a `refund_failed` on its PaymentIntent stops that
 PaymentIntent's refunds the same way. The halt is per row or per PaymentIntent, never per
 engagement: a failed refund of a stray payment on a superseded Checkout Session does not
-hold up the engagement's own term-end or end-early refund. The retry sweep reports rows it
-skips as `blocked`, so a halted row stays visible in the cron response. A Dashboard refund
-that fails has no row of ours, so its `refund_failed` names only the PaymentIntent. It holds
-the engagement's own refund rather than stopping it: the term-end or end-early refund waits,
-counted as `blocked`, until ops answers the flag, so it is not sent to a card that just
-bounced one. Resolving the flag releases that refund to the card. Settling it by hand
-stamps the held refund row `manual:<discrepancy id>` in the same transaction, so it stays
-the engagement's one refund and no sweep sends it; settled before the package ends, there
-is no row yet and the flag only resolves. A row that fails on a `refund_failed` ops already
-resolved reopens it at that row's amount, because the money it names is new. So does a
-further Dashboard refund that fails on the same PaymentIntent, at its own amount, and it
-holds the package refund again. The flag records the id of every refund whose failure it
-carries in `failed_refund_ids`, and only a refund not in that list is news: the
-reconciliation replays every failed refund on the PaymentIntent each day, so an amount
+hold up the engagement's own refunds. The retry sweep reports rows it skips as `blocked`,
+so a halted row stays visible in the cron response.
+
+**An engagement can carry many refund rows** (user, 2026-10-19). Each is its own unit: it
+is sent on its own key `refund:<ledger_entry_id>`, its failure is flagged on that row, and
+every ops answer names one row. The money check no longer allows one refund per
+engagement. It checks that refunds together never exceed the purchase, that deferred
+money never goes below zero, and that it is zero once the package is closed. A refund on
+the charge is foreign only when no refund row of the engagement accounts for it: one
+tagged with another of its rows, or a Dashboard refund ops booked onto one or answered, is not.
+
+A Dashboard refund that fails has no row of ours, so its `refund_failed` is keyed on the
+PaymentIntent and names no row. It holds every unsent refund of the engagement rather than
+stopping them: each waits, counted as `blocked`, until ops answers the flag, so none is sent
+to a card that just bounced one. Its card on `/ops/money` lists each held refund with its
+amount, when it was booked and the session it is for. Ops pays one by hand with its own
+button, which stamps that row `manual:<discrepancy id>:<row id>` and the operator in
+`recorded_by_user_id`; the flag resolves once it holds nothing more. Resolving it instead
+releases the rest to the card. With nothing held, the flag can only be resolved. A refund
+of one of our rows that Stripe took and the card then bounced holds the rest the same way,
+on that row's card. Paying a held refund there never resolves it, since the row still owes
+its own refund: ops resolves it once that is paid. A create Stripe refused names no bounce
+and holds nothing. Each by-hand payment adds its amount and note to the flag's note, which
+the final answer keeps. A further
+Dashboard refund that fails on the same PaymentIntent reopens that flag at its own amount
+and keeps ops' last note. A failure of one of our rows never lands on it: each row's failure
+has its own card, which says what that row owes. The flag records the id of every refund
+whose failure it carries in `failed_refund_ids`, and only a refund not in that list is news:
+the reconciliation replays every failed refund on the PaymentIntent each day, so an amount
 cannot tell a new failure from an old one, and two failures of different amounts would
-reopen the flag every day. A reopen keeps the note ops resolved it with, unless the news
-is a row of ours failing. So a flag that names the package refund and still carries a note
-was answered after that refund failed, and its card does not ask ops to pay it again. A
-newest-failure test cannot tell this: a Dashboard refund that bounces before ops answers
-would read as answered. Ops pays the
-student another way and records it with `recordManualSettlement` in `billing/ops.ts`
-(formerly `recordManualRefund`), which resolves the discrepancy and, when it names an
-unstamped refund or transfer row, stamps that row `manual:<discrepancy id>` in the same
-transaction. A row Stripe stamped in the meantime refuses the settlement, since the money
-moved there. A flag on a refund made in the Dashboard instead stamps the row with that
-refund's `re_…`, since it is the refund that happened, so the reconciliation counts it and
-the row references the Stripe object. The row keeps its amount, as a stamp is the only
-update a row takes: a Dashboard refund smaller or larger than the row leaves the
-difference on the PaymentIntent's charge flag, which ops clears by refunding the rest in
-the Dashboard or resolves. The row stays the engagement's one row of its kind, no sweep
-sees a stamped row, and `db:check-money` accepts only `re_…` or `manual:…` on a refund
-row. A flag naming an unstamped refund or transfer row can only be settled, never just
-resolved: resolved, the row would stay stopped, unsent and unstamped for good, and the
-transfer sweep would count it as sent.
+reopen the flag every day.
+
+A live Dashboard refund found by one row is flagged on that row, and the engagement's other
+unsent refunds wait behind it until ops books it. Ops pays the student another way and
+records it with `recordManualSettlement` in `billing/ops.ts`, which resolves the
+discrepancy and, when it names an unstamped refund or transfer row, stamps that row
+`manual:<discrepancy id>` in the same transaction. A row Stripe stamped in the meantime
+refuses the settlement, since the money moved there. A flag on a refund made in the
+Dashboard instead stamps the row with that refund's `re_…`, since it is the refund that
+happened, so the reconciliation counts it and the row references the Stripe object. The row
+keeps its amount, as a stamp is the only update a row takes: a Dashboard refund smaller or
+larger than the row leaves the difference on the PaymentIntent's charge flag, which ops
+clears by refunding the rest in the Dashboard or resolves. No sweep sees a stamped row, and
+`db:check-money` accepts only `re_…` or `manual:…` on a refund row. A flag naming an
+unstamped refund or transfer row can only be settled, never just resolved: resolved, the
+row would stay stopped, unsent and unstamped for good, and the transfer sweep would count
+it as sent.
+
+Migration 0034 re-keys the `refund_failed` flags that already named a row from their
+PaymentIntent to that row. A flag that had also carried a Dashboard failure on the same
+PaymentIntent keeps that refund's id in `failed_refund_ids`, so its next daily replay opens
+a new PaymentIntent flag for it. That is accepted: before launch every such flag is test
+money.
 
 **Tutor pay moves in the sweep, not inline, and is never clawed back by code.** Transfers
 go per engagement once the tutor is verified and the engagement has no open discrepancy or
@@ -1029,15 +1112,6 @@ mechanism — a student who has paid for four sessions won't defect mid-package,
 leakage concentrates entirely at the renewal boundary. Exam-anchored 4-session
 packages therefore create 3–4 leakage moments per semester where "through the final"
 creates one. Conversion and retention pull in opposite directions here. Not resolved.
-
-**A late cancel costs the student nothing and pays the tutor nothing.** It writes the
-timestamped fact and moves no money. Charging for it was rejected because a fee is an
-unrecoverable consequence and reliability consequences must always be recoverable —
-but that leaves a tutor who blocked 9pm on a Tuesday and was cancelled at 8pm earning
-zero. With 15 tutors in week one, tutor churn is the failure mode that kills a campus;
-student leakage is not. The alternative is to consume the session and pay the tutor,
-which trades an unrecoverable money consequence for supply protection. Revisit with
-real cancellation data, deliberately — this is currently a default, not a decision.
 
 **Disintermediation generally** — now the top business risk, and not solvable by
 engineering. Two adults on one campus with no safeguarding reason to stay on-platform.

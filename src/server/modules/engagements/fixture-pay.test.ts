@@ -4,10 +4,10 @@ import { after, test } from "node:test";
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { engagement, ledgerEntry } from "@/server/db/schema";
+import { engagement, ledgerEntry, sessionBooking } from "@/server/db/schema";
 import { checkMoneyInvariants } from "@/server/modules/billing/invariants";
 import { retryUnstampedRefunds, refundThroughStripe } from "@/server/modules/billing/refunds";
-import { accepted, age, cleanup, delivered, firstSessionDelivered, noStripe, rows, world } from "@/server/modules/billing/test-world";
+import { accepted, age, cleanup, delivered, firstSessionDelivered, newestRefund, noStripe, rows, world } from "@/server/modules/billing/test-world";
 import { runTransfers } from "@/server/modules/billing/transfers";
 import { earningsForTutor } from "@/server/modules/tutoring/earnings";
 
@@ -107,11 +107,14 @@ test("ending a fixture package books its refund and never sends it to Stripe", a
   const w = await world(PERSONA);
   const { actor, buy } = await accepted(w);
   const { engagementId } = await fixturePay(await buy());
-  const ids = { engagementId, institutionId: w.institutionId };
+  await db
+    .update(sessionBooking)
+    .set({ scheduledAt: new Date(Date.now() + 48 * 3_600_000) })
+    .where(eq(sessionBooking.engagementId, engagementId));
 
   await noStripe(async () => {
     assert.notEqual(await endPackage({ actor, engagementId }), null);
-    assert.equal(await refundThroughStripe(ids), "skipped");
+    assert.equal(await refundThroughStripe(await newestRefund(engagementId)), "skipped");
     await age(engagementId, "refund", 10 * 60 * 1000);
     assert.deepEqual(await retryUnstampedRefunds(w.institutionId, Date.now() + 10_000), { settled: 0, flagged: 0, blocked: 0, failed: 0 });
   });

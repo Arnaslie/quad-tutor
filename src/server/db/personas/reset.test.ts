@@ -251,9 +251,9 @@ test("each student persona sees its package, what it paid and whether it can end
       courseCode: "ST 260",
       tutorName: "Sam Novak",
       sessionsDelivered: 1,
-      sessionsRemaining: 3,
+      sessionsRemaining: 1,
       pricePaidMinor: 20_000,
-      refundMinor: 15_000,
+      refundMinor: 7_500,
       blocked: null,
     },
   ]);
@@ -364,7 +364,9 @@ test("a tester can buy and end student-refund's package and top up student-done"
   const [request] = await requestsForStudent(refunder);
   const slots = await slotsForRequest({ actor: refunder, requestId: request.id });
   const { engagementId } = await buyPackage({ actor: refunder, requestId: request.id, anchorExamId: null, slotStartsAt: slots.at(-1)! });
-  assert.deepEqual(await endPackage({ actor: refunder, engagementId }), {
+  const { refundId, ...ended } = (await endPackage({ actor: refunder, engagementId }))!;
+  assert.match(refundId ?? "", /^[0-9a-f-]{36}$/, "names the refund row it wrote");
+  assert.deepEqual(ended, {
     engagementId,
     studentProfileId: refunder.studentProfileId,
     sessionsPurchased: 8,
