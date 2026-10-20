@@ -51,7 +51,9 @@ with one done leave $105: the fee is $10.50 and $94.50 goes to the card. The fee
 rounds down to the cent. It is the tutor's pay, written as `session_earned` and
 `tutor_accrued` with no session and no `platform_fee` row, so no refund claws it back
 and it never counts toward the fee milestone. It is charged only when the student
-ends the package: never at term end, and never on a refund the tutor caused.
+ends the package: never at term end, and never on a refund the tutor caused. A
+package whose term is over but which the sweep has not closed yet ends as the sweep
+would: no fee, and sessions under 24 hours away are cancelled free.
 
 Three parts are defaults the user has not yet confirmed (2026-10-20): the rounding,
 the 24-hour handling below, and the confirmation copy. A session less than 24 hours

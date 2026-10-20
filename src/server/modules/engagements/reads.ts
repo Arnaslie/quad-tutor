@@ -47,6 +47,7 @@ import {
   type ViewerAction,
 } from "./attendance";
 import { endSplit, hoursBefore } from "./cancel-rules";
+import { termHasEnded } from "./termEnd";
 import { releaseLapsedConfirmations } from "./confirmation";
 import { sessionsRemaining } from "./scheduling";
 
@@ -473,6 +474,7 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
       sessionsRemaining: remainingCount(),
       pricePaidMinor: engagement.pricePaidMinor,
       refundMinor: deferredMinor(engagement.id, engagement.institutionId),
+      termOver: termHasEnded(),
       currency: engagement.currency,
       tutorName: user.name,
       tutorLocation: tutorProfile.defaultLocation,
@@ -490,7 +492,7 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
     .innerJoin(user, eq(user.id, tutorProfile.userId))
     .innerJoin(courseOffering, eq(courseOffering.id, engagement.courseOfferingId))
     .innerJoin(course, eq(course.id, courseOffering.courseId))
-
+    .innerJoin(term, eq(term.id, courseOffering.termId))
     .leftJoin(
       courseCodeAlias,
       and(eq(courseCodeAlias.courseId, course.id), isNull(courseCodeAlias.validToTermId)),
@@ -527,17 +529,19 @@ export async function packagesForStudent(actor: Actor): Promise<StudentPackage[]
     .orderBy(asc(sessionBooking.scheduledAt));
 
   const now = new Date();
-  return packages.map(({ refundMinor, ...pkg }) => {
+  return packages.map(({ refundMinor, termOver, ...pkg }) => {
     const sessions = open.filter((row) => row.engagementId === pkg.engagementId);
     const cancels = sessions.filter((row) => row.status === "scheduled").map((row) => row.scheduledAt);
     return {
       ...pkg,
       ending: {
-        ...endSplit(
-          refundMinor,
-          perSessionMinor(pkg),
-          cancels.map((when) => hoursBefore(when, now)).filter((hours) => hours > 0),
-        ),
+        ...(termOver
+          ? { backMinor: refundMinor, tutorMinor: 0 }
+          : endSplit(
+              refundMinor,
+              perSessionMinor(pkg),
+              cancels.map((when) => hoursBefore(when, now)).filter((hours) => hours > 0),
+            )),
         cancels,
         blocked: endBlock(sessions, now),
       },

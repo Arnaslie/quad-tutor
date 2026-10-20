@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { formatDayTime } from "@/components/format";
 import { db } from "@/server/db";
@@ -38,6 +38,8 @@ const refundFields = () => ({
   currency: engagement.currency,
 });
 
+export const termHasEnded = () => sql<boolean>`${term.endsOn} < current_date`;
+
 export async function engagementsDueForTermEndRefund(
   institutionId: string,
 ): Promise<Omit<TermEndRefund, "refundId">[]> {
@@ -51,7 +53,7 @@ export async function engagementsDueForTermEndRefund(
       and(
         eq(engagement.status, "active"),
         eq(engagement.institutionId, institutionId),
-        lt(term.endsOn, sql`current_date`),
+        termHasEnded(),
       ),
     );
 
@@ -79,7 +81,11 @@ export async function closeWithRefund(
   const now = new Date();
 
   const rows = await tx
-    .select({ studentProfileId: engagement.studentProfileId, status: engagement.status })
+    .select({
+      studentProfileId: engagement.studentProfileId,
+      status: engagement.status,
+      courseOfferingId: engagement.courseOfferingId,
+    })
     .from(engagement)
     .where(
       and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)),
@@ -107,15 +113,23 @@ export async function closeWithRefund(
   const block = endBlock(sessions, now);
   if (block) throw new EndPackageError(block);
 
+  // Once the term is over, ending is the term-end refund the sweep has not reached yet: no fee, no cancel price.
+  const [{ termOver }] = await tx
+    .select({ termOver: termHasEnded() })
+    .from(courseOffering)
+    .innerJoin(term, eq(term.id, courseOffering.termId))
+    .where(eq(courseOffering.id, target.courseOfferingId));
+  const charges = termOver ? undefined : endedBy;
+
   const charged: CancelCharge[] = [];
-  if (endedBy) {
+  if (charges) {
     const priced = sessions.filter(
       (session) => session.status === "scheduled" && keptShareBp(hoursBefore(session.scheduledAt, now), "student") > 0,
     );
     for (const { id } of priced) {
       await lockSession(tx, id);
-      const session = await loadParticipation({ exec: tx, sessionId: id, actor: endedBy });
-      charged.push(await chargeCancel(tx, session, endedBy.userId, now));
+      const session = await loadParticipation({ exec: tx, sessionId: id, actor: charges });
+      charged.push(await chargeCancel(tx, session, charges.userId, now));
     }
   }
 
@@ -140,7 +154,7 @@ export async function closeWithRefund(
     .where(and(eq(engagement.id, engagementId), eq(engagement.institutionId, params.institutionId)));
 
   // The tutor's pay, not the platform's: no platform_fee row, so the fee meter never sees it.
-  const feeMinor = endedBy ? endFeeMinor(due.refundMinor) : 0;
+  const feeMinor = charges ? endFeeMinor(due.refundMinor) : 0;
   const entry = { engagementId, institutionId: params.institutionId, currency: due.currency };
   if (feeMinor > 0) {
     await record(tx, [

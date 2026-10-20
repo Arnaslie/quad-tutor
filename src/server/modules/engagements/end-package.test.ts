@@ -347,6 +347,21 @@ test("four $35 sessions, one done: ending sends $94.50 to the card and pays the 
   assert.equal(await statusOf(id), "completed");
 });
 
+test("ending after the term is over, before the sweep reaches it, is the term-end refund: no fee and no cancel price", async () => {
+  const student = await person(home.institutionId);
+  const id = await pkg(student, { offeringId: endedOfferingId });
+  await delivered(id, hours(-100));
+  await session(id, hours(20));
+
+  const [preview] = (await packagesForStudent(student)).filter((row) => row.engagementId === id);
+  assert.deepEqual({ back: preview.ending.backMinor, tutor: preview.ending.tutorMinor }, { back: 10_500, tutor: 0 });
+
+  const ended = await endPackage({ actor: student, engagementId: id, shownBackMinor: 10_500 });
+  assert.deepEqual({ refund: ended?.refundMinor, fee: ended?.feeMinor, charged: ended?.charged }, { refund: 10_500, fee: 0, charged: [] });
+  assert.deepEqual(await facts(student), []);
+  assert.equal(await scheduledLeft(id), 0);
+});
+
 test("a second end is a no-op, and only the package's own student on its own campus can end it", async () => {
   const student = await person(home.institutionId);
   const id = await pkg(student);
