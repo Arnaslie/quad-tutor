@@ -454,6 +454,20 @@ test("the sweep racing a confirmation of the last session: no deadlock, the sess
   }
 });
 
+test("the sweep closes a package past its term that cancels used up, with nothing left to refund", async () => {
+  const student = await person(home.institutionId);
+  const id = await pkg(student, { offeringId: endedOfferingId });
+  for (const h of [-400, -300, -200, -100]) {
+    const sessionId = await session(id, hours(h), { status: "cancelled" });
+    await db.insert(ledgerEntry).values({ engagementId: id, sessionId, institutionId: home.institutionId, type: "refund", amountMinor: 3_500, stripeReference: `re_used_${run}_${h}` });
+  }
+
+  const { refunds } = await runTermEndRefunds(home.institutionId);
+  assert.equal(refunds.some((refund) => refund.engagementId === id), false, "nothing was refunded");
+  assert.equal(await statusOf(id), "refunded");
+  assert.equal((await ledger(id)).filter((row) => row.type === "refund").length, 4);
+});
+
 test("one package failing does not stop the sweep: the rest refund and the failure is counted", async () => {
   const ids = [];
   for (let i = 0; i < 2; i += 1) ids.push(await pkg(await person(home.institutionId), { offeringId: endedOfferingId }));

@@ -368,7 +368,11 @@ export async function notifyCancelledSessions(institutionId: string): Promise<nu
     ),
   );
 
-  const paid = await tutorPaidFor(institutionId, rows.map((row) => row.sessionId));
+  const sessionIds = rows.map((row) => row.sessionId);
+  const [paid, refunded] = await Promise.all([
+    perSession(institutionId, sessionIds, "tutor_accrued"),
+    perSession(institutionId, sessionIds, "refund"),
+  ]);
 
   let sent = 0;
   for (const row of rows) {
@@ -388,7 +392,11 @@ export async function notifyCancelledSessions(institutionId: string): Promise<nu
       emails: row.bookedNotifiedAt
         ? [
             {
-              ...sessionCancelled({ ...addressed(row, side), tutorPaid: paid.get(row.sessionId) ?? null }),
+              ...sessionCancelled({
+                ...addressed(row, side),
+                tutorPaid: paid.get(row.sessionId) ?? null,
+                studentRefunded: refunded.get(row.sessionId) ?? null,
+              }),
               idempotencyKey: `session-cancelled/${row.sessionId}`,
             },
           ]
@@ -399,9 +407,11 @@ export async function notifyCancelledSessions(institutionId: string): Promise<nu
   return sent;
 }
 
-async function tutorPaidFor(
+/** A cancel writes at most one row of each type for its session. */
+async function perSession(
   institutionId: string,
   sessionIds: string[],
+  type: "tutor_accrued" | "refund",
 ): Promise<Map<string, { minor: number; currency: string }>> {
   if (sessionIds.length === 0) return new Map();
   const rows = await db
@@ -410,7 +420,7 @@ async function tutorPaidFor(
     .where(
       and(
         eq(ledgerEntry.institutionId, institutionId),
-        eq(ledgerEntry.type, "tutor_accrued"),
+        eq(ledgerEntry.type, type),
         inArray(ledgerEntry.sessionId, sessionIds),
       ),
     );

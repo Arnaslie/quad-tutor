@@ -336,6 +336,15 @@ export async function refundThroughStripe(ref: RefundRef): Promise<RefundOutcome
   return row ? issue(row, false) : "skipped";
 }
 
+/** After commit, each row on its own: one that throws is left for the retry sweep and the rest still go. */
+export async function refundEachThroughStripe(refs: RefundRef[]): Promise<void> {
+  for (const ref of refs) {
+    await refundThroughStripe(ref).catch((error) =>
+      console.error(`[refund] ${ref.id} left for the retry sweep`, errorFacts(error)),
+    );
+  }
+}
+
 /**
  * Rows whose after-commit call died. The grace keeps the sweep off a call still in flight, and the lease
  * keeps a second sweep off this campus, so two never race onto different hour-suffixed keys.

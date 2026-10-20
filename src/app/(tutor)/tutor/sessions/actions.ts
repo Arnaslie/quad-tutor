@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 
+import { refundEachThroughStripe } from "@/server/modules/billing/refunds";
 import { SessionError } from "@/server/modules/engagements/access";
 import { outcomeOf, type AnswerOutcome } from "@/server/modules/engagements/answer-outcome";
 import { confirmAttendance, denyAttendance } from "@/server/modules/engagements/confirmation";
@@ -63,7 +65,8 @@ export async function cancelTutorSession(
 
   try {
     const input = cancelSessionInput.parse({ sessionId: formData.get("sessionId") });
-    const { late } = await cancelSession({ actor, ...input });
+    const { late, refunds } = await cancelSession({ actor, ...input });
+    if (refunds.length > 0) after(() => refundEachThroughStripe(refunds));
     notifySessionChangesSoon(actor.institutionId);
     return { status: "cancelled", late };
   } catch (error) {
