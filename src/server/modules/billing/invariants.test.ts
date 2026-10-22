@@ -223,6 +223,23 @@ test("an end fee is the tutor's whole and at most 10% of what was left", () => {
   );
   assert.deepEqual(
     invariants(ended({ session_earned: t(1_050), tutor_accrued: t(945), platform_fee: t(105), refund: t(9_450) }, 4_550, 4_095)),
-    ["the end fee is the tutor's whole"],
+    ["pay without a session is only the end fee"],
   );
+});
+
+test("tutor pay naming no session is only the end fee, and a platform fee always names one", () => {
+  const withLoose = (unattached: Totals) => ({
+    ...healthy,
+    engagements: [
+      {
+        id: "open",
+        status: "active" as const,
+        pricePaidMinor: 14_000,
+        totals: { package_purchase: t(14_000), tutor_accrued: t(2_000), platform_fee: t(500) },
+        unattached,
+      },
+    ],
+  });
+  assert.deepEqual(invariants(withLoose({ tutor_accrued: t(2_000) })), ["pay without a session is only the end fee"]);
+  assert.deepEqual(invariants(withLoose({ platform_fee: t(500) })), ["pay without a session is only the end fee"]);
 });

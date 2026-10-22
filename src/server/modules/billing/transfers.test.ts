@@ -73,8 +73,25 @@ test("a confirmed session's pay is transferred once, from the student's charge, 
 
 test("past the $100 fee milestone the tutor is sent 95% of the session price", async () => {
   const w = await world();
-  const { engagementId } = await delivered(w);
-  await db.insert(ledgerEntry).values({ engagementId, institutionId: w.institutionId, type: "platform_fee", amountMinor: 10_000 - 350 });
+  const { actor, engagementId } = await delivered(w);
+  const feeMinor = 10_000 - 350;
+  const earnedMinor = feeMinor * 10;
+  const [earlier] = await db
+    .insert(engagement)
+    .values({ institutionId: w.institutionId, studentProfileId: actor.studentProfileId, tutorCourseId: w.tutorCourseId, courseOfferingId: w.offeringId, kind: "exam_anchored", status: "completed", sessionsPurchased: 1, pricePaidMinor: earnedMinor })
+    .returning({ id: engagement.id });
+  const [session] = await db
+    .insert(sessionBooking)
+    .values({ engagementId: earlier.id, institutionId: w.institutionId, scheduledAt: new Date(Date.now() - 72 * 3_600_000), status: "completed", resolution: "both_confirmed" })
+    .returning({ id: sessionBooking.id });
+  const row = { engagementId: earlier.id, institutionId: w.institutionId };
+  const recognised = { ...row, sessionId: session.id };
+  await db.insert(ledgerEntry).values([
+    { ...row, type: "package_purchase", amountMinor: earnedMinor },
+    { ...recognised, type: "session_earned", amountMinor: earnedMinor },
+    { ...recognised, type: "tutor_accrued", amountMinor: earnedMinor - feeMinor },
+    { ...recognised, type: "platform_fee", amountMinor: feeMinor },
+  ]);
 
   const { engagementId: past } = await delivered(w);
   assert.deepEqual((await rows(past, "tutor_accrued")).map((r) => r.amountMinor), [3_325]);
@@ -437,8 +454,9 @@ test("money invariants hold on every campus after every transfer path", async ()
 test("lifetime earnings past $21M still add up", async () => {
   const w = await world();
   const { engagementId } = await delivered(w);
+  const [session] = await db.select({ id: sessionBooking.id }).from(sessionBooking).where(eq(sessionBooking.engagementId, engagementId));
   await db.insert(ledgerEntry).values(
-    Array.from({ length: 22 }, () => ({ engagementId, institutionId: w.institutionId, type: "tutor_accrued" as const, amountMinor: 99_999_999 })),
+    Array.from({ length: 22 }, () => ({ engagementId, sessionId: session.id, institutionId: w.institutionId, type: "tutor_accrued" as const, amountMinor: 99_999_999 })),
   );
   assert.equal((await earningsForTutor(w.tutor)).earnedMinor, 2_200_003_128);
 });
