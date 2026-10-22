@@ -72,6 +72,7 @@ export function PurchasePanel({
             Nothing is charged until you pick one, so nothing is lost. Their
             hours change week to week — check back, or ask someone else.
           </p>
+          {priceChange ? <p className="text-sm">{priceChange}</p> : null}
         </div>
         <ButtonLink href="/requests" variant="secondary">
           Back to your asks

@@ -320,7 +320,7 @@ test("a rate change between ask and accept is shown to the tutor, on the purchas
       "",
       `Riley said yes to RAT ${run}.`,
       "",
-      "Riley raised their price from $35.00 to $40.00 a session since you asked. You can still pick someone else.",
+      "Riley raised their price from $35.00 to $40.00 a session since you asked.",
       "",
       "Pick a package and a time to lock it in. Nothing is charged until you do.",
       "",

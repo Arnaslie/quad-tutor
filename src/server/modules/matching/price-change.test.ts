@@ -3,10 +3,10 @@ import { test } from "node:test";
 
 import { priceChangeForStudent, priceChangeForTutor } from "./price-change";
 
-test("a raise tells the student the old and new price and that they can pick someone else", () => {
+test("a raise tells the student the old and new price", () => {
   assert.equal(
     priceChangeForStudent({ tutorName: "Sam", askedMinor: 3_500, quotedMinor: 4_000 }),
-    "Sam raised their price from $35.00 to $40.00 a session since you asked. You can still pick someone else.",
+    "Sam raised their price from $35.00 to $40.00 a session since you asked.",
   );
 });
 

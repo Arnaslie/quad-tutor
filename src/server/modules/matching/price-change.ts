@@ -15,7 +15,7 @@ export function priceChangeForStudent(params: {
   const moved = change(params.askedMinor, params.quotedMinor);
   if (!moved) return null;
   return moved.raised
-    ? `${params.tutorName} raised their price from ${moved.from} to ${moved.to} a session since you asked. You can still pick someone else.`
+    ? `${params.tutorName} raised their price from ${moved.from} to ${moved.to} a session since you asked.`
     : `${params.tutorName} lowered their price from ${moved.from} to ${moved.to} a session since you asked.`;
 }
 
