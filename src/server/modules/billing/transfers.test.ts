@@ -454,8 +454,9 @@ test("money invariants hold on every campus after every transfer path", async ()
 test("lifetime earnings past $21M still add up", async () => {
   const w = await world();
   const { engagementId } = await delivered(w);
+  const [session] = await db.select({ id: sessionBooking.id }).from(sessionBooking).where(eq(sessionBooking.engagementId, engagementId));
   await db.insert(ledgerEntry).values(
-    Array.from({ length: 22 }, () => ({ engagementId, institutionId: w.institutionId, type: "tutor_accrued" as const, amountMinor: 99_999_999 })),
+    Array.from({ length: 22 }, () => ({ engagementId, sessionId: session.id, institutionId: w.institutionId, type: "tutor_accrued" as const, amountMinor: 99_999_999 })),
   );
   assert.equal((await earningsForTutor(w.tutor)).earnedMinor, 2_200_003_128);
 });

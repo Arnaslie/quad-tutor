@@ -227,7 +227,7 @@ test("an end fee is the tutor's whole and at most 10% of what was left", () => {
   );
 });
 
-test("tutor pay or a platform fee naming no session needs an end fee", () => {
+test("tutor pay naming no session is only the end fee, and a platform fee always names one", () => {
   const withLoose = (unattached: Totals) => ({
     ...healthy,
     engagements: [
