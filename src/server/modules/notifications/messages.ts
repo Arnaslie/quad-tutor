@@ -3,6 +3,7 @@ import { formatDayTime } from "@/components/format";
 import { formatMinor, packageSummary, type RequestedKind } from "@/server/modules/billing/pricing";
 import { lapseCopy } from "@/server/modules/engagements/answer-outcome";
 import { HALF_REFUND, QUARTER_REFUND, cancelRefundsCard, hoursBefore } from "@/server/modules/engagements/cancel-rules";
+import { priceChangeForStudent } from "@/server/modules/matching/price-change";
 
 import type { Email } from "./email";
 
@@ -64,7 +65,14 @@ export function requestAccepted(params: {
   studentName: string;
   tutorName: string;
   courseLabel: string;
+  askedRateMinor: number | null;
+  quotedRateMinor: number | null;
 }): Email {
+  const priceChange = priceChangeForStudent({
+    tutorName: params.tutorName,
+    askedMinor: params.askedRateMinor,
+    quotedMinor: params.quotedRateMinor,
+  });
   return {
     to: params.to,
     subject: `${params.tutorName} can help with ${params.courseLabel}`,
@@ -72,6 +80,7 @@ export function requestAccepted(params: {
       `${params.studentName},`,
       "",
       `${params.tutorName} said yes to ${params.courseLabel}.`,
+      ...(priceChange ? ["", priceChange] : []),
       "",
       "Pick a package and a time to lock it in. Nothing is charged until you do.",
       "",

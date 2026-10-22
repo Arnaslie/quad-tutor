@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/page-header";
 import { payoutsOf } from "@/server/modules/billing/connect";
 import { packageSummary } from "@/server/modules/billing/pricing";
 import { requireTutor, type TutorActor } from "@/server/modules/identity/actor";
+import { priceChangeForTutor } from "@/server/modules/matching/price-change";
 import { inboxForTutor, type TutorInboxItem } from "@/server/modules/matching/requests";
 import { availabilityForTutor } from "@/server/modules/tutoring/availability";
 import { coursesForTutor } from "@/server/modules/tutoring/courses";
@@ -143,6 +144,10 @@ function RequestCard({ request, payoutsPrompt }: { request: TutorInboxItem; payo
   ]
     .filter(Boolean)
     .join(" · ");
+  const priceChange = priceChangeForTutor({
+    askedMinor: request.requestedRateMinor,
+    currentMinor: request.sessionRateMinor,
+  });
 
   return (
     <Card className="flex flex-col gap-4">
@@ -162,6 +167,8 @@ function RequestCard({ request, payoutsPrompt }: { request: TutorInboxItem; payo
           Asking for {packageSummary(request.requestedKind)}
         </p>
       ) : null}
+
+      {priceChange ? <p className="text-sm text-muted">{priceChange}</p> : null}
 
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <span

@@ -269,6 +269,8 @@ async function PurchaseStep({
         slots={slots.map((slot) => slot.toISOString())}
         exams={exams}
         options={packageOptions(actorRequest.rateMinor)}
+        askedRateMinor={actorRequest.requestedRateMinor}
+        rateMinor={actorRequest.rateMinor}
         requestedKind={actorRequest.requestedKind}
       />
     </div>
