@@ -137,7 +137,7 @@ async function insertRequests(
   const room = standing.parallelAskLimit - pending.length;
 
   const eligible = await tx
-    .select({ id: tutorCourse.id })
+    .select({ id: tutorCourse.id, rateMinor: tutorCourse.sessionRateMinor })
     .from(tutorCourse)
     .innerJoin(tutorProfile, eq(tutorProfile.id, tutorCourse.tutorProfileId))
     .innerJoin(courseOffering, eq(courseOffering.courseId, tutorCourse.courseId))
@@ -153,29 +153,27 @@ async function insertRequests(
       ),
     );
 
-  const toCreate = eligible
-    .map((row) => row.id)
-    .filter((id) => !alreadyAsked.has(id))
-    .slice(0, room);
+  const toCreate = eligible.filter((row) => !alreadyAsked.has(row.id)).slice(0, room);
 
   if (toCreate.length === 0) return { created: 0, limit: standing.parallelAskLimit };
 
   await tx.insert(matchRequest).values(
-    toCreate.map((tutorCourseId) => ({
+    toCreate.map((row) => ({
       studentProfileId: params.actor.studentProfileId,
       institutionId: params.actor.institutionId,
-      tutorCourseId,
+      tutorCourseId: row.id,
       courseOfferingId: params.courseOfferingId,
       requestedKind: params.kind,
+      requestedRateMinor: row.rateMinor,
       expiresAt,
     })),
   );
 
   await openThreads(
     tx,
-    toCreate.map((tutorCourseId) => ({
+    toCreate.map((row) => ({
       studentProfileId: params.actor.studentProfileId,
-      tutorCourseId,
+      tutorCourseId: row.id,
       institutionId: params.actor.institutionId,
     })),
   );
@@ -316,6 +314,7 @@ export type StudentRequest = {
   professorName: string | null;
   requestedKind: RequestedKind | null;
   rateMinor: number;
+  requestedRateMinor: number | null;
 
   expiresInMinutes: number;
 
@@ -341,6 +340,7 @@ export async function requestsForStudent(actor: Actor): Promise<StudentRequest[]
       professorName: professor.name,
       requestedKind: matchRequest.requestedKind,
       rateMinor: quotedRate,
+      requestedRateMinor: matchRequest.requestedRateMinor,
       engagementId: engagement.id,
       threadId: messageThread.id,
     })
@@ -388,6 +388,8 @@ export type TutorInboxItem = {
   section: string | null;
   professorName: string | null;
   requestedKind: RequestedKind | null;
+  requestedRateMinor: number | null;
+  sessionRateMinor: number;
 
   takenTermName: string;
   gradeEarned: string;
@@ -412,6 +414,8 @@ export async function inboxForTutor(tutor: TutorActor): Promise<TutorInboxItem[]
       section: courseOffering.section,
       professorName: professor.name,
       requestedKind: matchRequest.requestedKind,
+      requestedRateMinor: matchRequest.requestedRateMinor,
+      sessionRateMinor: tutorCourse.sessionRateMinor,
       takenTermName: takenTerm.name,
       gradeEarned: tutorCourse.gradeEarned,
       threadId: messageThread.id,

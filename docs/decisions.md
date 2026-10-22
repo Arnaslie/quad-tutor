@@ -173,7 +173,9 @@ It replaces the 10-session step from 10% to 5% and the $100-per-term cap, and ap
 existing tutors with no grandfathering. The student pays the tutor's rate and nothing on top: a student
 booking fee was rejected because the student is already paying for the tutor. The price
 is fixed when the tutor accepts the request, or when a top-up's checkout is created, and
-a later rate change never re-prices it. The meter never resets at term end, and there
+a later rate change never re-prices it. When the accepted rate differs from the rate
+when the student asked, the purchase panel and the "said yes" email tell the student
+(`docs/proposals/price-change-notice.md`). The meter never resets at term end, and there
 is no 0% rate. The rate is shown to students and is never a ranking input. The $200
 ceiling is a fraud guard, not a market limit: without it, a stolen card and a colluding
 tutor could move large sums through payouts.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, before, test } from "node:test";
+import { after, before, test, type TestContext } from "node:test";
 
 import { and, eq, inArray } from "drizzle-orm";
 
@@ -35,7 +35,13 @@ import {
   type PurchaseResult,
 } from "@/server/modules/engagements/purchase";
 import type { Actor, TutorActor } from "@/server/modules/identity/actor";
-import { acceptRequest, requestTutors, requestsForStudent } from "@/server/modules/matching/requests";
+import {
+  acceptRequest,
+  inboxForTutor,
+  requestTutors,
+  requestsForStudent,
+} from "@/server/modules/matching/requests";
+import { notifyAcceptedRequests } from "@/server/modules/notifications/dispatch";
 
 import { TutoringError, coursesForTutor, setCourseRate } from "./courses";
 
@@ -314,4 +320,64 @@ test("the tutor's course list carries each claim's rate", async () => {
     claims.map((claim) => ({ id: claim.id, sessionRateMinor: claim.sessionRateMinor })),
     [{ id: claimId, sessionRateMinor: 4_200 }],
   );
+});
+
+async function acceptedEmailText(t: TestContext, requestId: string): Promise<string> {
+  const lines: string[] = [];
+  t.mock.method(console, "log", (...args: unknown[]) => lines.push(args.join(" ")));
+  await notifyAcceptedRequests(home.institutionId);
+  t.mock.restoreAll();
+  const key = lines.findIndex((line) => line.includes(`[email] idempotency-key: request-accepted/${requestId}`));
+  assert.notEqual(key, -1, "the accept email was sent");
+  return lines[key + 1].trimEnd();
+}
+
+test("a rate change between ask and accept is shown to the tutor, on the purchase panel and in the accept email", async (t) => {
+  const { tutor, claimId } = await tutorWithClaim();
+  await db.update(user).set({ name: "Riley" }).where(eq(user.id, tutor.userId));
+  await setCourseRate({ tutor, tutorCourseId: claimId, rateMinor: 3_500 });
+  const student = await person();
+  await requestTutors({ actor: student, courseOfferingId: home.offeringId, tutorCourseIds: [claimId], kind: "exam_anchored" });
+
+  const [asked] = await requestsForStudent(student);
+  assert.equal(asked.requestedRateMinor, 3_500);
+
+  await setCourseRate({ tutor, tutorCourseId: claimId, rateMinor: 4_000 });
+  const [inbox] = await inboxForTutor(tutor);
+  assert.deepEqual(
+    { requestedRateMinor: inbox.requestedRateMinor, sessionRateMinor: inbox.sessionRateMinor },
+    { requestedRateMinor: 3_500, sessionRateMinor: 4_000 },
+  );
+
+  await acceptRequest({ tutor, requestId: asked.id });
+  const [saidYes] = await requestsForStudent(student);
+  assert.deepEqual(
+    { requestedRateMinor: saidYes.requestedRateMinor, rateMinor: saidYes.rateMinor },
+    { requestedRateMinor: 3_500, rateMinor: 4_000 },
+  );
+
+  assert.equal(
+    await acceptedEmailText(t, asked.id),
+    [
+      `${student.name},`,
+      "",
+      `Riley said yes to RAT ${run}.`,
+      "",
+      "Riley raised their price from $35.00 to $40.00 a session since you asked.",
+      "",
+      "Pick a package and a time to lock it in. Nothing is charged until you do.",
+      "",
+      `${process.env.BETTER_AUTH_URL ?? "http://localhost:3000"}/requests`,
+      "",
+      "— Quad Tutor",
+    ].join("\n"),
+  );
+});
+
+test("an accept at the price the student asked at sends the email without a price line", async (t) => {
+  const { tutor, claimId } = await tutorWithClaim();
+  const student = await person();
+  const requestId = await accepted(student, tutor, claimId);
+
+  assert.equal((await acceptedEmailText(t, requestId)).includes("price"), false);
 });

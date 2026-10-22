@@ -1,0 +1,1 @@
+ALTER TABLE "match_request" ADD COLUMN "requested_rate_minor" integer;

@@ -12,6 +12,7 @@ import type {
   PackageOption,
   RequestedKind,
 } from "@/server/modules/billing/pricing";
+import { priceChangeForStudent } from "@/server/modules/matching/price-change";
 
 import { purchase, type ActionResult } from "../actions";
 import { MeetingSpot, StudentNoteField } from "../meeting-spot";
@@ -31,6 +32,8 @@ export function PurchasePanel({
   slots,
   exams,
   options,
+  askedRateMinor,
+  rateMinor,
   requestedKind,
 }: {
   requestId: string;
@@ -39,6 +42,8 @@ export function PurchasePanel({
   slots: string[];
   exams: ExamChoice[];
   options: PackageOption[];
+  askedRateMinor: number | null;
+  rateMinor: number;
   requestedKind: RequestedKind | null;
 }) {
   const [state, action, pending] = useActionState<ActionResult | null, FormData>(
@@ -54,6 +59,7 @@ export function PurchasePanel({
 
   const visibleSlots = showAllSlots ? slots : slots.slice(0, 8);
   const price = options.find((option) => option.kind === kind)?.priceMinor;
+  const priceChange = priceChangeForStudent({ tutorName, askedMinor: askedRateMinor, quotedMinor: rateMinor });
 
   if (slots.length === 0) {
     return (
@@ -66,6 +72,7 @@ export function PurchasePanel({
             Nothing is charged until you pick one, so nothing is lost. Their
             hours change week to week — check back, or ask someone else.
           </p>
+          {priceChange ? <p className="text-sm">{priceChange}</p> : null}
         </div>
         <ButtonLink href="/requests" variant="secondary">
           Back to your asks
@@ -80,6 +87,10 @@ export function PurchasePanel({
       {requestedKind ? null : <input type="hidden" name="kind" value={kind} />}
       <input type="hidden" name="anchorExamId" value={anchor?.id ?? ""} />
       <input type="hidden" name="slotStartsAt" value={slot} />
+
+      {priceChange ? (
+        <p className="rounded-xl bg-surface-sunken px-3 py-2 text-sm">{priceChange}</p>
+      ) : null}
 
       <fieldset className="flex flex-col gap-2">
         <legend className="pb-2 text-sm font-semibold uppercase tracking-wide text-muted">

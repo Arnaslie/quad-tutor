@@ -412,6 +412,7 @@ export const matchRequest = pgTable(
 
     status: matchRequestStatus("status").notNull().default("pending"),
     requestedKind: packageKind("requested_kind"),
+    requestedRateMinor: integer("requested_rate_minor"),
     quotedRateMinor: integer("quoted_rate_minor"),
 
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),

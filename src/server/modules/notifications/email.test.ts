@@ -100,7 +100,14 @@ async function resendBody(t: TestContext, email: Email): Promise<Record<string, 
 }
 
 const accepted = (to: string) =>
-  requestAccepted({ to, studentName: "Sam", tutorName: "Riley", courseLabel: "MATH 125" });
+  requestAccepted({
+    to,
+    studentName: "Sam",
+    tutorName: "Riley",
+    courseLabel: "MATH 125",
+    askedRateMinor: null,
+    quotedRateMinor: null,
+  });
 
 test("a persona's notification is copied to the test reader, whatever the address case", async (t) => {
   const body = await resendBody(t, accepted("Arnutislie12+Student-New@Gmail.com"));

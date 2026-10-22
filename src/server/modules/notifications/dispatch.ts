@@ -281,6 +281,8 @@ export async function notifyAcceptedRequests(institutionId: string): Promise<num
       tutorName: tutorUser.name,
       code: courseCodeAlias.code,
       title: course.title,
+      askedRateMinor: matchRequest.requestedRateMinor,
+      quotedRateMinor: matchRequest.quotedRateMinor,
     })
     .from(matchRequest)
     .innerJoin(tutorCourse, eq(tutorCourse.id, matchRequest.tutorCourseId))
@@ -316,6 +318,8 @@ export async function notifyAcceptedRequests(institutionId: string): Promise<num
             studentName: displayName(row.studentName, "student"),
             tutorName: displayName(row.tutorName, "tutor"),
             courseLabel: row.code ?? row.title,
+            askedRateMinor: row.askedRateMinor,
+            quotedRateMinor: row.quotedRateMinor,
           }),
           idempotencyKey: `request-accepted/${row.id}`,
         },
