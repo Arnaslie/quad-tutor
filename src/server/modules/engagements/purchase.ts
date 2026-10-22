@@ -19,6 +19,7 @@ import type { Actor } from "@/server/modules/identity/actor";
 import { displayName } from "@/server/modules/identity/display-name";
 
 import {
+  formatMinor,
   packageOption,
   packageSummary,
   topUpOption,
@@ -383,6 +384,7 @@ export async function purchaseTopUp(params: {
   tutorCourseId: string;
   slotStartsAt: Date;
   studentNote?: string | null;
+  shownPriceMinor?: number;
 }): Promise<PurchaseResult> {
   return db.transaction(async (tx) => {
     const claim = await tx
@@ -418,6 +420,11 @@ export async function purchaseTopUp(params: {
         anchorExamId: null,
         slotStartsAt: params.slotStartsAt,
       });
+    }
+    if (params.shownPriceMinor !== undefined && params.shownPriceMinor !== option.priceMinor) {
+      throw new PurchaseError(
+        `${displayName(gate.tutorName, "tutor")}'s price changed to ${formatMinor(option.priceMinor, gate.currency)} a session. Check the new price and try again.`,
+      );
     }
 
     const open = await slotOpen(tx, {
