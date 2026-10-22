@@ -58,8 +58,8 @@ the student cancelled those sessions, so the tutor is emailed for each. The mone
 reads the rows that name no session as the end fee: one per package, all of it
 `tutor_accrued` with no `platform_fee`, and never more than 10% of what was left.
 
-Three parts are defaults the user has not yet confirmed (2026-10-20): the rounding,
-the 24-hour handling below, and the confirmation copy. A session less than 24 hours
+The user confirmed the rounding, the 24-hour handling below, and the confirmation copy
+on 2026-10-20. A session less than 24 hours
 away no longer blocks ending. It is cancelled at its
 cancel tier first, exactly as if the student cancelled it, late-cancel fact included
 under 12 hours, and the 10% is taken from what is left after it, so one session never
