@@ -26,6 +26,7 @@ import {
 } from "@/server/db/schema";
 import { pay } from "@/server/modules/engagements/buy-and-pay";
 import {
+  PurchaseError,
   purchasePackage,
   purchaseTopUp,
   slotsForRequest,
@@ -216,6 +217,48 @@ test("a rate change after the accept keeps the quoted package price, and a top-u
     { kind: "exam_anchored", pricePaidMinor: 16_000 },
     { kind: "top_up", pricePaidMinor: 5_000 },
   ]);
+});
+
+test("a top-up at a price the student was not shown is refused, and an open top-up resumes at its own price", async () => {
+  const { tutor, claimId } = await tutorWithClaim();
+  await setCourseRate({ tutor, tutorCourseId: claimId, rateMinor: 4_000 });
+  const student = await person();
+  const requestId = await accepted(student, tutor, claimId);
+  const [slot] = await slotsForRequest({ actor: student, requestId });
+  const { engagementId } = await pay(
+    await purchasePackage({ actor: student, requestId, anchorExamId: null, slotStartsAt: slot }),
+  );
+  await db.update(engagement).set({ sessionsPurchased: 1 }).where(eq(engagement.id, engagementId));
+  const topUps = () =>
+    db
+      .select({ pricePaidMinor: engagement.pricePaidMinor })
+      .from(engagement)
+      .where(and(eq(engagement.studentProfileId, student.studentProfileId), eq(engagement.kind, "top_up")));
+
+  const [topUpSlot] = await slotsForTopUp({ actor: student, tutorCourseId: claimId });
+  await setCourseRate({ tutor, tutorCourseId: claimId, rateMinor: 4_500 });
+  await assert.rejects(
+    purchaseTopUp({ actor: student, tutorCourseId: claimId, slotStartsAt: topUpSlot, shownPriceMinor: 4_000 }),
+    (error: unknown) => {
+      assert.ok(error instanceof PurchaseError);
+      assert.equal(
+        error.message,
+        `${tutor.name}'s price changed to $45.00 a session. Check the new price and try again.`,
+      );
+      return true;
+    },
+  );
+  assert.deepEqual(await topUps(), []);
+
+  const shown = { actor: student, tutorCourseId: claimId, slotStartsAt: topUpSlot, shownPriceMinor: 4_500 };
+  const topUp = await purchaseTopUp(shown);
+  assert.equal(opened(topUp).amountMinor, 4_500);
+
+  await setCourseRate({ tutor, tutorCourseId: claimId, rateMinor: 5_000 });
+  const resumed = await purchaseTopUp(shown);
+  assert.equal(opened(resumed).engagementId, topUp.engagementId);
+  assert.equal(opened(resumed).amountMinor, 4_500);
+  assert.deepEqual(await topUps(), [{ pricePaidMinor: 4_500 }]);
 });
 
 test("a request accepted before quotes existed keeps the flat price after a rate change", async () => {

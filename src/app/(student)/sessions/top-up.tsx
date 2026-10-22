@@ -38,6 +38,7 @@ export function TopUp({
     <form action={action} className="flex flex-col gap-6">
       <input type="hidden" name="tutorCourseId" value={tutorCourseId} />
       <input type="hidden" name="slotStartsAt" value={slot} />
+      <input type="hidden" name="shownPriceMinor" value={priceMinor} />
 
       <fieldset className="flex flex-col gap-2">
         <legend className="pb-2 text-sm font-semibold uppercase tracking-wide text-muted">

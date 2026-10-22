@@ -37,6 +37,7 @@ export const engagementSlotInput = z.object({
 export const topUpInput = tutorCourseRef.extend({
   slotStartsAt: z.coerce.date(),
   studentNote,
+  shownPriceMinor: z.coerce.number().int().positive(),
 });
 
 export const setSessionLocationInput = sessionRef.extend({ location: meetingLocation });

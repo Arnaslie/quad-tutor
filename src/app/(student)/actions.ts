@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { z } from "zod";
@@ -208,21 +208,16 @@ export async function topUp(
     tutorCourseId: formData.get("tutorCourseId"),
     slotStartsAt: formData.get("slotStartsAt"),
     studentNote: noteFrom(formData),
+    shownPriceMinor: formData.get("shownPriceMinor"),
   });
 
   if (!parsed.success) return { ok: false, error: "Pick a time for this session." };
 
   let target: Awaited<ReturnType<typeof checkoutRedirect>>;
   try {
-    target = await checkoutRedirect(actor.institutionId, () =>
-      purchaseTopUp({
-        actor,
-        tutorCourseId: parsed.data.tutorCourseId,
-        slotStartsAt: parsed.data.slotStartsAt,
-        studentNote: parsed.data.studentNote,
-      }),
-    );
+    target = await checkoutRedirect(actor.institutionId, () => purchaseTopUp({ actor, ...parsed.data }));
   } catch (error) {
+    refresh();
     return toResult(error);
   }
 
