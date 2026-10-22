@@ -42,7 +42,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.key.outputs.run == 'true'
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: npm
       - if: steps.key.outputs.run == 'true'
         run: npm ci
