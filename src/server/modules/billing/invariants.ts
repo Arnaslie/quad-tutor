@@ -106,10 +106,10 @@ export function moneyViolations(facts: MoneyFacts): MoneyViolation[] {
     const loose = e.unattached ?? {};
     const endFee = minor(loose, EARNED);
     if (rows(loose, EARNED) > 1) flag("one end fee per package", subject, `${rows(loose, EARNED)} end fee rows`);
+    if (minor(loose, ACCRUED) !== endFee || rows(loose, FEE) > 0) {
+      flag("pay without a session is only the end fee", subject, `fee ${endFee}, accrued ${minor(loose, ACCRUED)}, platform ${minor(loose, FEE)}`);
+    }
     if (endFee > 0) {
-      if (minor(loose, ACCRUED) !== endFee || rows(loose, FEE) > 0) {
-        flag("the end fee is the tutor's whole", subject, `fee ${endFee}, accrued ${minor(loose, ACCRUED)}, platform ${minor(loose, FEE)}`);
-      }
       // A refund naming no session may predate the end, so what was left is bounded only from above.
       const leftAtMost = paid - (minor(e.totals, EARNED) - endFee) - (refunded - minor(loose, REFUND));
       if (endFee > endFeeMinor(leftAtMost)) {
