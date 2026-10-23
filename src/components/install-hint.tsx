@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useId, useState, useSyncExternalStore } from "react";
 
 import { Button } from "./button";
 import { Card } from "./card";
@@ -29,6 +29,7 @@ const subscribe = () => () => {};
 export function InstallHint() {
   const offered = useSyncExternalStore(subscribe, shouldOffer, () => false);
   const [dismissed, setDismissed] = useState(false);
+  const titleId = useId();
 
   if (!offered || dismissed) return null;
 
@@ -36,7 +37,7 @@ export function InstallHint() {
     <Card className="mb-6 flex items-start gap-3">
       <Icon name="share" className="mt-0.5 size-5 shrink-0 text-accent" />
       <p className="flex-1 text-sm">
-        <span className="font-medium">Add Quad Tutor to your home screen.</span>{" "}
+        <span id={titleId} className="font-medium">Add Quad Tutor to your home screen.</span>{" "}
         <span className="text-muted">
           Tap Share, then Add to Home Screen. It opens like an app.
         </span>
@@ -44,6 +45,7 @@ export function InstallHint() {
       <Button
         variant="ghost"
         className="-my-2 -mr-2 shrink-0"
+        aria-describedby={titleId}
         onClick={() => {
           try {
             window.localStorage.setItem(DISMISSED_KEY, "1");
