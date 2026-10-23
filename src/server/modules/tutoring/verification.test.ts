@@ -25,6 +25,7 @@ import {
   notifyCoveredSections,
   notifyVerificationDecisions,
 } from "@/server/modules/notifications/dispatch";
+import { stubResend } from "@/server/modules/notifications/test-resend";
 
 import { RENEWAL_PRIOR_BP, STAR_PRIOR_BP } from "@/server/modules/scoring/posterior";
 
@@ -141,7 +142,7 @@ async function currentFiles(id: string) {
 }
 
 before(async () => {
-  home = await campus("home", 2);
+  home = await campus("home", 3);
   const away = await campus("away", 0);
 
   const tutorPerson = await person("tutor", home.institutionId);
@@ -259,4 +260,58 @@ test("rejection records the reason and a re-upload returns the same row to pendi
   assert.equal(await purgeProofFiles(home.institutionId), 1);
   assert.equal(await proofStore().get(stale.pathname), null);
   assert.equal((await claimRow(id)).status, "pending_verification");
+});
+
+test("a refused verification email is never sent again; a failed one is retried", async (t) => {
+  const id = await claim(home.courseIds[2]);
+  await submitProof({ tutor, tutorCourseId: id, kind: "official_transcript", files: [PDF] });
+  await verifyClaim({ operator: ops, tutorCourseId: id });
+  const resend = stubResend(t);
+
+  resend.answer(500, "application_error");
+  assert.equal(await notifyVerificationDecisions(home.institutionId), 0);
+  assert.equal((await claimRow(id)).decisionNotifiedAt, null);
+
+  resend.answer(422, "validation_error");
+  assert.equal(await notifyVerificationDecisions(home.institutionId), 0);
+  const refused = (await claimRow(id)).decisionNotifiedAt;
+  assert.ok(refused, "a refusal keeps the claim");
+
+  resend.answer(200);
+  assert.equal(await notifyVerificationDecisions(home.institutionId), 0);
+  assert.deepEqual((await claimRow(id)).decisionNotifiedAt, refused);
+  assert.equal(resend.attempts, 2);
+  assert.deepEqual(resend.logged, [
+    `[notifications] verification-decision ${id} not sent (500 application_error)`,
+    `[notifications] verification-decision ${id} refused (422 validation_error), not retrying`,
+  ]);
+});
+
+test("a refused covered-section email is never sent again; a failed one is retried", async (t) => {
+  const [signal] = await db
+    .update(demandSignal)
+    .set({ requestedAt: new Date(), notifiedAt: null })
+    .where(eq(demandSignal.studentProfileId, studentProfileId))
+    .returning({ id: demandSignal.id });
+  const notifiedAt = async () =>
+    (await db.select().from(demandSignal).where(eq(demandSignal.id, signal.id)))[0].notifiedAt;
+  const resend = stubResend(t);
+
+  resend.answer(500, "application_error");
+  assert.equal(await notifyCoveredSections(home.institutionId), 0);
+  assert.equal(await notifiedAt(), null);
+
+  resend.answer(422, "validation_error");
+  assert.equal(await notifyCoveredSections(home.institutionId), 0);
+  const refused = await notifiedAt();
+  assert.ok(refused, "a refusal keeps the claim");
+
+  resend.answer(200);
+  assert.equal(await notifyCoveredSections(home.institutionId), 0);
+  assert.deepEqual(await notifiedAt(), refused);
+  assert.equal(resend.attempts, 2);
+  assert.deepEqual(resend.logged, [
+    `[notifications] section-covered ${signal.id} not sent (500 application_error)`,
+    `[notifications] section-covered ${signal.id} refused (422 validation_error), not retrying`,
+  ]);
 });

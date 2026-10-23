@@ -40,6 +40,7 @@ import type { Actor, OperatorActor, TutorActor } from "@/server/modules/identity
 import { buildDeck } from "@/server/modules/matching/candidates";
 import { acceptRequest, requestTutors } from "@/server/modules/matching/requests";
 import { notifyCoveredSections } from "@/server/modules/notifications/dispatch";
+import { stubResend } from "@/server/modules/notifications/test-resend";
 
 import { alertThread, notifyUnreadMessages } from "./alerts";
 import { openReportedThread, reportThread, reportsForOperator, reviewReport } from "./reports";
@@ -293,6 +294,32 @@ test("after() and the sweep overlapping send one email", async () => {
     await passMinutes(16);
   }
   assert.equal(alerts.length, 5);
+});
+
+test("a refused message alert is never sent again; a failed one is retried", async (t) => {
+  const alertedAt = async () =>
+    (await db.select().from(messageThread).where(eq(messageThread.id, threadId)))[0].studentAlertedAt;
+  const resend = stubResend(t);
+
+  resend.answer(500, "application_error");
+  assert.equal(await tutorSays("Are you free Thursday?"), 0);
+  assert.equal(await alertedAt(), null);
+
+  resend.answer(422, "validation_error");
+  assert.equal(await notifyUnreadMessages(home.institutionId), 0);
+  const refused = await alertedAt();
+  assert.ok(refused, "a refusal keeps the claim");
+
+  resend.answer(200);
+  assert.equal(await notifyUnreadMessages(home.institutionId), 0);
+  assert.deepEqual(await alertedAt(), refused);
+  await passMinutes(16);
+  assert.equal(await notifyUnreadMessages(home.institutionId), 0);
+  assert.equal(resend.attempts, 2);
+  assert.deepEqual(resend.logged, [
+    `[notifications] studentAlertedAt ${threadId} not sent (500 application_error)`,
+    `[notifications] studentAlertedAt ${threadId} refused (422 validation_error), not retrying`,
+  ]);
 });
 
 test("a blocked pair can't send, gets no email, and drops out of matching", async () => {

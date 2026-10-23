@@ -13,7 +13,7 @@ import {
 } from "@/server/db/schema";
 import { tutorUser } from "@/server/modules/engagements/access";
 import { displayName } from "@/server/modules/identity/display-name";
-import { failureStatus, sendEmail } from "@/server/modules/notifications/email";
+import { sendClaimed } from "@/server/modules/notifications/email";
 import { messageWaiting } from "@/server/modules/notifications/messages";
 
 import { ALERT_GAP_MINUTES, THREAD_SIDES, otherSide, previewLine, type ThreadSide } from "./rules";
@@ -92,8 +92,9 @@ async function alertSide(side: ThreadSide, scope: SQL): Promise<number> {
     const claimedAt = claimed.at(0)?.at;
     if (!claimedAt) continue;
 
-    try {
-      await sendEmail({
+    const outcome = await sendClaimed(
+      `${alerted.key} ${row.threadId}`,
+      {
         ...messageWaiting({
           to: row.to,
           recipientName: displayName(row.recipientName, side),
@@ -103,15 +104,14 @@ async function alertSide(side: ThreadSide, scope: SQL): Promise<number> {
           threadId: row.threadId,
         }),
         idempotencyKey: `message-alert/${row.threadId}/${side}/${row.messageId}`,
-      });
-      sent += 1;
-    } catch (error) {
-      await db
-        .update(messageThread)
-        .set({ [alerted.key]: row.alertedAt })
-        .where(and(eq(messageThread.id, row.threadId), eq(alerted.column, claimedAt)));
-      console.error(`[notifications] ${alerted.key} ${row.threadId} not sent (${failureStatus(error)})`);
-    }
+      },
+      () =>
+        db
+          .update(messageThread)
+          .set({ [alerted.key]: row.alertedAt })
+          .where(and(eq(messageThread.id, row.threadId), eq(alerted.column, claimedAt))),
+    );
+    if (outcome === "sent") sent += 1;
   }
 
   return sent;

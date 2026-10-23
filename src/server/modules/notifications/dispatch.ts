@@ -46,7 +46,7 @@ import { notifyUnreadMessages } from "@/server/modules/messaging/alerts";
 import { blockedBetween } from "@/server/modules/messaging/blocks";
 import { REJECTION_REASON_COPY } from "@/server/modules/tutoring/proof-rules";
 
-import { EmailError, failureStatus, sendEmail, type Email } from "./email";
+import { sendClaimed, type Email } from "./email";
 import {
   answerDue,
   claimNeedsNewProof,
@@ -154,20 +154,11 @@ async function claimAndSend<T extends typeof sessionBooking | typeof matchReques
   const mine = and(eq(table.id, params.id), eq(table.notifyClaimedAt, claimedAt));
   let sent = 0;
   for (const email of params.emails) {
-    try {
-      await sendEmail(email);
-      sent += 1;
-    } catch (error) {
-      if (error instanceof EmailError && error.terminal) {
-        console.error(
-          `[notifications] ${params.marker} ${params.id} refused (${failureStatus(error)}), not retrying`,
-        );
-        continue;
-      }
-      await db.update(table).set({ notifyClaimedAt: null }).where(mine);
-      console.error(`[notifications] ${params.marker} ${params.id} not sent (${failureStatus(error)})`);
-      return 0;
-    }
+    const outcome = await sendClaimed(`${params.marker} ${params.id}`, email, () =>
+      db.update(table).set({ notifyClaimedAt: null }).where(mine),
+    );
+    if (outcome === "released") return 0;
+    if (outcome === "sent") sent += 1;
   }
   const done = await db
     .update(table)
@@ -623,8 +614,9 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
       .returning({ id: demandSignal.id });
     if (claimed.length === 0) continue;
 
-    try {
-      await sendEmail({
+    const outcome = await sendClaimed(
+      `section-covered ${row.id}`,
+      {
         ...sectionCovered({
           to: row.studentEmail,
           studentName: displayName(row.studentName, "student"),
@@ -632,15 +624,14 @@ export async function notifyCoveredSections(institutionId: string): Promise<numb
           offeringId: row.offeringId,
         }),
         idempotencyKey: `section-covered/${row.id}/${row.requestedAt.getTime()}`,
-      });
-      sent += 1;
-    } catch (error) {
-      await db
-        .update(demandSignal)
-        .set({ notifiedAt: null })
-        .where(and(eq(demandSignal.id, row.id), eq(demandSignal.notifiedAt, claimedAt)));
-      console.error(`[notifications] section-covered ${row.id} not sent (${failureStatus(error)})`);
-    }
+      },
+      () =>
+        db
+          .update(demandSignal)
+          .set({ notifiedAt: null })
+          .where(and(eq(demandSignal.id, row.id), eq(demandSignal.notifiedAt, claimedAt))),
+    );
+    if (outcome === "sent") sent += 1;
   }
 
   return sent;
@@ -701,21 +692,21 @@ export async function notifyVerificationDecisions(institutionId: string): Promis
       courseLabel: row.code ?? row.title,
     };
 
-    try {
-      await sendEmail({
+    const outcome = await sendClaimed(
+      `verification-decision ${row.id}`,
+      {
         ...(row.status === "rejected" && row.rejectionReason
           ? claimNeedsNewProof({ ...shared, reason: REJECTION_REASON_COPY[row.rejectionReason] })
           : claimVerified(shared)),
         idempotencyKey: `verification-decision/${row.id}/${row.reviewedAt.getTime()}`,
-      });
-      sent += 1;
-    } catch (error) {
-      await db
-        .update(tutorCourse)
-        .set({ decisionNotifiedAt: null })
-        .where(and(eq(tutorCourse.id, row.id), eq(tutorCourse.decisionNotifiedAt, claimedAt)));
-      console.error(`[notifications] verification-decision ${row.id} not sent (${failureStatus(error)})`);
-    }
+      },
+      () =>
+        db
+          .update(tutorCourse)
+          .set({ decisionNotifiedAt: null })
+          .where(and(eq(tutorCourse.id, row.id), eq(tutorCourse.decisionNotifiedAt, claimedAt))),
+    );
+    if (outcome === "sent") sent += 1;
   }
 
   return sent;

@@ -42,6 +42,7 @@ import {
   requestsForStudent,
 } from "@/server/modules/matching/requests";
 import { notifyAcceptedRequests } from "@/server/modules/notifications/dispatch";
+import { stubResend } from "@/server/modules/notifications/test-resend";
 
 import { TutoringError, coursesForTutor, setCourseRate } from "./courses";
 
@@ -380,4 +381,32 @@ test("an accept at the price the student asked at sends the email without a pric
   const requestId = await accepted(student, tutor, claimId);
 
   assert.equal((await acceptedEmailText(t, requestId)).includes("price"), false);
+});
+
+test("a refused accept email is never sent again; a failed one is retried", async (t) => {
+  t.mock.method(console, "log", () => {});
+  await notifyAcceptedRequests(home.institutionId);
+  const { tutor, claimId } = await tutorWithClaim();
+  const requestId = await accepted(await person(), tutor, claimId);
+  const notifiedAt = async () =>
+    (await db.select().from(matchRequest).where(eq(matchRequest.id, requestId)))[0].studentNotifiedAt;
+  const resend = stubResend(t);
+
+  resend.answer(500, "application_error");
+  assert.equal(await notifyAcceptedRequests(home.institutionId), 0);
+  assert.equal(await notifiedAt(), null);
+
+  resend.answer(422, "validation_error");
+  assert.equal(await notifyAcceptedRequests(home.institutionId), 0);
+  const refused = await notifiedAt();
+  assert.ok(refused, "a refusal marks the email done");
+
+  resend.answer(200);
+  assert.equal(await notifyAcceptedRequests(home.institutionId), 0);
+  assert.deepEqual(await notifiedAt(), refused);
+  assert.equal(resend.attempts, 2);
+  assert.deepEqual(resend.logged, [
+    `[notifications] studentNotifiedAt ${requestId} not sent (500 application_error)`,
+    `[notifications] studentNotifiedAt ${requestId} refused (422 validation_error), not retrying`,
+  ]);
 });
