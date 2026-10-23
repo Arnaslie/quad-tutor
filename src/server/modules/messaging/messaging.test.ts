@@ -303,9 +303,10 @@ test("a refused message alert is never sent again; a failed one is retried", asy
 
   resend.answer(500, "application_error");
   assert.equal(await tutorSays("Are you free Thursday?"), 0);
+  assert.equal(resend.attempts, 1);
   assert.equal(await alertedAt(), null);
 
-  resend.answer(422, "validation_error");
+  resend.answer(422, "missing_required_field");
   assert.equal(await notifyUnreadMessages(home.institutionId), 0);
   const refused = await alertedAt();
   assert.ok(refused, "a refusal keeps the claim");
@@ -318,7 +319,7 @@ test("a refused message alert is never sent again; a failed one is retried", asy
   assert.equal(resend.attempts, 2);
   assert.deepEqual(resend.logged, [
     `[notifications] studentAlertedAt ${threadId} not sent (500 application_error)`,
-    `[notifications] studentAlertedAt ${threadId} refused (422 validation_error), not retrying`,
+    `[notifications] studentAlertedAt ${threadId} refused (422 missing_required_field), not retrying`,
   ]);
 });
 

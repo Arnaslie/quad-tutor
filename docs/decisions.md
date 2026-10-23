@@ -440,7 +440,8 @@ new one only after the recipient has read what the last one was about. The email
 out right after the message via `after()`, with the cron sweep as a backstop. Both
 paths claim with one conditional update on the thread (the pacing condition is in the
 `where`), send with a Resend idempotency key, and release on failure — so overlapping
-runs send once. No real-time transport: a server-rendered thread and a server action
+runs send once. A 4xx refusal from Resend (other than 409 or 429) keeps the claim, so a
+refused address is not retried every sweep. No real-time transport: a server-rendered thread and a server action
 are enough at one campus, and a push channel would be a second system to keep
 authorised.
 
