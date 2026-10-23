@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type { Actor } from "@/server/modules/identity/actor";
+import { InstallHint } from "./install-hint";
 import { MessagesLink } from "./messages-link";
 import { NAV, type NavItem, type Surface } from "./nav-items";
 import { NavLink } from "./nav-link";
@@ -78,6 +79,7 @@ export function AppShell({
           items.length > 0 ? "pb-28" : "pb-12"
         }`}
       >
+        <InstallHint />
         {children}
       </main>
 
