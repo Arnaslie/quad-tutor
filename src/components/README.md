@@ -1,7 +1,7 @@
 # Shared UI
 
 Everything here is a **server component** unless the file starts with `"use client"`.
-Only `nav-link.tsx`, `profile-menu.tsx` and `sign-out-button.tsx` do. Keep it that
+Only `nav-link.tsx`, `profile-menu.tsx`, `sign-out-button.tsx` and `install-hint.tsx` do. Keep it that
 way: reach for `"use client"` at the leaf that actually needs interaction, not at
 the screen.
 
@@ -125,7 +125,7 @@ them" reads honest, "that is all we found" reads broken.
 ```
 
 `IconName`: `book | send | calendar | inbox | clock | cap | user | check |
-arrow-right | chevron-down | pin | chat | flag | star | bank | alert`. No icon package. Need another? Add a path to `PATHS` — do not inline
+arrow-right | chevron-down | pin | chat | flag | star | bank | alert | share`. No icon package. Need another? Add a path to `PATHS` — do not inline
 an `<svg>` in a screen.
 
 ---
@@ -198,7 +198,7 @@ thread. It reaches every surface through a header icon with an unread count
 
 `/tutor/start` is the `becomeTutor` entry point and is deliberately not a tab.
 
-### `nav-link.tsx` · `profile-menu.tsx` · `sign-out-button.tsx` · `surface-switch.tsx`
+### `nav-link.tsx` · `profile-menu.tsx` · `sign-out-button.tsx` · `surface-switch.tsx` · `install-hint.tsx`
 
 Shell internals. You should not need to import these directly.
 
