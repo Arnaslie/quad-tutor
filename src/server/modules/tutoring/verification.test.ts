@@ -142,7 +142,7 @@ async function currentFiles(id: string) {
 }
 
 before(async () => {
-  home = await campus("home", 3);
+  home = await campus("home", 4);
   const away = await campus("away", 0);
 
   const tutorPerson = await person("tutor", home.institutionId);
@@ -270,9 +270,10 @@ test("a refused verification email is never sent again; a failed one is retried"
 
   resend.answer(500, "application_error");
   assert.equal(await notifyVerificationDecisions(home.institutionId), 0);
+  assert.equal(resend.attempts, 1);
   assert.equal((await claimRow(id)).decisionNotifiedAt, null);
 
-  resend.answer(422, "validation_error");
+  resend.answer(422, "missing_required_field");
   assert.equal(await notifyVerificationDecisions(home.institutionId), 0);
   const refused = (await claimRow(id)).decisionNotifiedAt;
   assert.ok(refused, "a refusal keeps the claim");
@@ -283,15 +284,18 @@ test("a refused verification email is never sent again; a failed one is retried"
   assert.equal(resend.attempts, 2);
   assert.deepEqual(resend.logged, [
     `[notifications] verification-decision ${id} not sent (500 application_error)`,
-    `[notifications] verification-decision ${id} refused (422 validation_error), not retrying`,
+    `[notifications] verification-decision ${id} refused (422 missing_required_field), not retrying`,
   ]);
 });
 
 test("a refused covered-section email is never sent again; a failed one is retried", async (t) => {
+  await db
+    .update(tutorCourse)
+    .set({ status: "active" })
+    .where(eq(tutorCourse.id, await claim(home.courseIds[3])));
   const [signal] = await db
-    .update(demandSignal)
-    .set({ requestedAt: new Date(), notifiedAt: null })
-    .where(eq(demandSignal.studentProfileId, studentProfileId))
+    .insert(demandSignal)
+    .values({ studentProfileId, institutionId: home.institutionId, courseOfferingId: home.offeringIds[3] })
     .returning({ id: demandSignal.id });
   const notifiedAt = async () =>
     (await db.select().from(demandSignal).where(eq(demandSignal.id, signal.id)))[0].notifiedAt;
@@ -299,9 +303,10 @@ test("a refused covered-section email is never sent again; a failed one is retri
 
   resend.answer(500, "application_error");
   assert.equal(await notifyCoveredSections(home.institutionId), 0);
+  assert.equal(resend.attempts, 1);
   assert.equal(await notifiedAt(), null);
 
-  resend.answer(422, "validation_error");
+  resend.answer(422, "missing_required_field");
   assert.equal(await notifyCoveredSections(home.institutionId), 0);
   const refused = await notifiedAt();
   assert.ok(refused, "a refusal keeps the claim");
@@ -312,6 +317,6 @@ test("a refused covered-section email is never sent again; a failed one is retri
   assert.equal(resend.attempts, 2);
   assert.deepEqual(resend.logged, [
     `[notifications] section-covered ${signal.id} not sent (500 application_error)`,
-    `[notifications] section-covered ${signal.id} refused (422 validation_error), not retrying`,
+    `[notifications] section-covered ${signal.id} refused (422 missing_required_field), not retrying`,
   ]);
 });
