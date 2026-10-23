@@ -24,7 +24,7 @@ export class EmailError extends Error {
   }
 }
 
-export function failureStatus(error: unknown): string {
+function failureStatus(error: unknown): string {
   if (error instanceof EmailError) {
     if (error.status === undefined) return error.message;
     return error.code ? `${error.status} ${error.code}` : String(error.status);
@@ -114,4 +114,23 @@ export async function sendEmail(message: Email): Promise<void> {
     response.status,
     name,
   );
+}
+
+export async function sendClaimed(
+  label: string,
+  message: Email,
+  release: () => Promise<unknown>,
+): Promise<"sent" | "refused" | "released"> {
+  try {
+    await sendEmail(message);
+    return "sent";
+  } catch (error) {
+    if (error instanceof EmailError && error.terminal) {
+      console.error(`[notifications] ${label} refused (${failureStatus(error)}), not retrying`);
+      return "refused";
+    }
+    await release();
+    console.error(`[notifications] ${label} not sent (${failureStatus(error)})`);
+    return "released";
+  }
 }
