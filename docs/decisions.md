@@ -404,7 +404,8 @@ hash of the spot, so a reused key whose body has since changed (Resend's
 `invalid_idempotent_request`) can only mean the wording changed, and counts as delivered. The copy
 never mentions late cancels or no-shows: those are reliability facts and stay unseen.
 These are not filtered by blocks — a block stops messages, not word of a session that
-was paid for.
+was paid for. Every claimed email, here and below, keeps its claim when Resend refuses it
+with a 4xx other than 409 or 429, so a refused address is not retried every sweep.
 
 **Intake under 45 seconds.** Course selection is the primary input (schedule
 screenshot → OCR, with catalog type-ahead as fallback); section and professor are a
@@ -440,8 +441,7 @@ new one only after the recipient has read what the last one was about. The email
 out right after the message via `after()`, with the cron sweep as a backstop. Both
 paths claim with one conditional update on the thread (the pacing condition is in the
 `where`), send with a Resend idempotency key, and release on failure — so overlapping
-runs send once. A 4xx refusal from Resend (other than 409 or 429) keeps the claim, so a
-refused address is not retried every sweep. No real-time transport: a server-rendered thread and a server action
+runs send once. No real-time transport: a server-rendered thread and a server action
 are enough at one campus, and a push channel would be a second system to keep
 authorised.
 

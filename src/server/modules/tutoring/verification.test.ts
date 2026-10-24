@@ -289,10 +289,8 @@ test("a refused verification email is never sent again; a failed one is retried"
 });
 
 test("a refused covered-section email is never sent again; a failed one is retried", async (t) => {
-  await db
-    .update(tutorCourse)
-    .set({ status: "active" })
-    .where(eq(tutorCourse.id, await claim(home.courseIds[3])));
+  const coveredId = await claim(home.courseIds[3]);
+  await db.update(tutorCourse).set({ status: "active" }).where(eq(tutorCourse.id, coveredId));
   const [signal] = await db
     .insert(demandSignal)
     .values({ studentProfileId, institutionId: home.institutionId, courseOfferingId: home.offeringIds[3] })
