@@ -394,9 +394,10 @@ test("a refused accept email is never sent again; a failed one is retried", asyn
 
   resend.answer(500, "application_error");
   assert.equal(await notifyAcceptedRequests(home.institutionId), 0);
+  assert.equal(resend.attempts, 1);
   assert.equal(await notifiedAt(), null);
 
-  resend.answer(422, "validation_error");
+  resend.answer(422, "missing_required_field");
   assert.equal(await notifyAcceptedRequests(home.institutionId), 0);
   const refused = await notifiedAt();
   assert.ok(refused, "a refusal marks the email done");
@@ -407,6 +408,6 @@ test("a refused accept email is never sent again; a failed one is retried", asyn
   assert.equal(resend.attempts, 2);
   assert.deepEqual(resend.logged, [
     `[notifications] studentNotifiedAt ${requestId} not sent (500 application_error)`,
-    `[notifications] studentNotifiedAt ${requestId} refused (422 validation_error), not retrying`,
+    `[notifications] studentNotifiedAt ${requestId} refused (422 missing_required_field), not retrying`,
   ]);
 });
