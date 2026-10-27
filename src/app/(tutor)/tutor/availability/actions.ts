@@ -37,7 +37,7 @@ export async function addAvailabilityAction(
   const tutor = await requireTutor();
 
   const parsed = addAvailabilityInput.safeParse({
-    weekday: Number(formData.get("weekday")),
+    weekday: formData.get("weekday"),
     start: clockFields(formData, "start"),
     end: clockFields(formData, "end"),
   });

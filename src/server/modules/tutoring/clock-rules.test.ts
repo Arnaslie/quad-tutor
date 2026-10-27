@@ -6,7 +6,7 @@ import { addAvailabilityInput } from "./input";
 
 function hours(start: [string, string, string], end: [string, string, string]) {
   const clock = ([hour, minute, period]: [string, string, string]) => ({ hour, minute, period });
-  const parsed = addAvailabilityInput.safeParse({ weekday: 2, start: clock(start), end: clock(end) });
+  const parsed = addAvailabilityInput.safeParse({ weekday: "2", start: clock(start), end: clock(end) });
   if (!parsed.success) return "rejected";
   return [parsed.data.startMinute, parsed.data.endMinute];
 }
@@ -50,4 +50,20 @@ test("a stored minute shows back as the same hour, minute and AM/PM", () => {
     { hour: 12, minute: 0, period: "AM" },
     { hour: 12, minute: 0, period: "PM" },
   ]);
+});
+
+test("the form takes a day only as one of the seven it offers", () => {
+  const day = (weekday: unknown) => {
+    const parsed = addAvailabilityInput.safeParse({
+      weekday,
+      start: { hour: "6", minute: "0", period: "PM" },
+      end: { hour: "9", minute: "0", period: "PM" },
+    });
+    return parsed.success ? parsed.data.weekday : "rejected";
+  };
+
+  assert.deepEqual(
+    ["0", "1", "2", "3", "4", "5", "6", null, undefined, "", " ", "7", "-1", "06", "1.0", 3].map(day),
+    [0, 1, 2, 3, 4, 5, 6, "rejected", "rejected", "rejected", "rejected", "rejected", "rejected", "rejected", "rejected", "rejected"],
+  );
 });
