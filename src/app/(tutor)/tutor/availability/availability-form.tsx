@@ -11,17 +11,18 @@ import { TimePicker } from "./time-picker";
 
 const INITIAL: AvailabilityState = { status: "idle" };
 
-const DEFAULT_START = 18 * 60;
-const DEFAULT_END = 21 * 60;
+const DEFAULTS = { weekday: 1, startMinute: 18 * 60, endMinute: 21 * 60 };
 
 export function AvailabilityForm() {
   const [state, submit, pending] = useActionState(addAvailabilityAction, INITIAL);
   const dayId = useId();
+  const { weekday, startMinute, endMinute } = (state.status === "error" && state.picked) || DEFAULTS;
+  const key = `${weekday}-${startMinute}-${endMinute}`;
 
   return (
     <form action={submit} className="flex flex-col gap-4">
       <Field id={dayId} label="Day">
-        <Select id={dayId} name="weekday" defaultValue="1">
+        <Select key={key} id={dayId} name="weekday" defaultValue={weekday}>
           {WEEKDAYS.map((day, index) => (
             <option key={day} value={index}>
               {day}
@@ -30,8 +31,8 @@ export function AvailabilityForm() {
         </Select>
       </Field>
 
-      <TimePicker label="From" name="start" defaultMinute={DEFAULT_START} />
-      <TimePicker label="Until" name="end" defaultMinute={DEFAULT_END} />
+      <TimePicker key={`start-${key}`} label="From" name="start" defaultMinute={startMinute} />
+      <TimePicker key={`end-${key}`} label="Until" name="end" defaultMinute={endMinute} />
 
       {state.status === "error" ? (
         <p role="alert" className="text-sm text-danger">
