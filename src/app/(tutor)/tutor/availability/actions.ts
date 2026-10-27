@@ -12,6 +12,7 @@ import {
   addAvailabilityInput,
   removeAvailabilityInput,
   setDefaultLocationInput,
+  type AddAvailabilityInput,
 } from "@/server/modules/tutoring/input";
 import { setDefaultLocation } from "@/server/modules/tutoring/location";
 
@@ -20,7 +21,7 @@ import type { LocationState } from "../location-form";
 export type AvailabilityState =
   | { status: "idle" }
   | { status: "added" }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; picked?: AddAvailabilityInput };
 
 function clockFields(formData: FormData, prefix: "start" | "end") {
   return {
@@ -49,7 +50,7 @@ export async function addAvailabilityAction(
   try {
     await addAvailabilityWindow({ tutor, ...parsed.data });
   } catch (error) {
-    if (error instanceof TutoringError) return { status: "error", message: error.message };
+    if (error instanceof TutoringError) return { status: "error", message: error.message, picked: parsed.data };
     throw error;
   }
 

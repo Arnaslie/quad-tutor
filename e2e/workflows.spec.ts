@@ -126,6 +126,31 @@ test("a new user starts tutoring in one click", async ({ browser, campus }) => {
   await expect(page.getByRole("heading", { name: "Claim a course first" })).toBeVisible();
 });
 
+test("a tutor's picks stay on the form after a save fails", async ({ browser, campus }) => {
+  const page = await openAs(browser, await tutorFor(campus, EC110));
+  await page.goto("/tutor/availability");
+
+  const picks = {
+    Day: "3",
+    "From hour": "6",
+    "From minute": "20",
+    "From AM or PM": "AM",
+    "Until hour": "6",
+    "Until minute": "50",
+    "Until AM or PM": "AM",
+  };
+  for (const [label, value] of Object.entries(picks)) await page.getByLabel(label).selectOption(value);
+  await page.getByRole("button", { name: "Add these hours" }).click();
+
+  await expect(page.getByText("Sessions run 60 minutes, so a window has to be at least that long.")).toBeVisible();
+  for (const [label, value] of Object.entries(picks)) await expect(page.getByLabel(label)).toHaveValue(value);
+
+  await page.getByLabel("Until hour").selectOption("7");
+  await page.getByRole("button", { name: "Add these hours" }).click();
+
+  await expect(page.getByRole("listitem").filter({ hasText: "Wednesday" })).toContainText(/6:20\sAM – 7:50\sAM/);
+});
+
 test("the scheduled sweep runs with the secret and refuses without it", async ({ request }) => {
   expect((await request.get("/api/cron")).status()).toBe(401);
 
