@@ -18,7 +18,7 @@ export const submitProofInput = z.object({
   kind: z.enum(PROOF_KINDS),
 });
 
-const weekday = z.number().int().min(0).max(6);
+const weekday = z.string().regex(/^[0-6]$/).transform(Number);
 
 const clockField = (allowed: readonly number[]) =>
   z
