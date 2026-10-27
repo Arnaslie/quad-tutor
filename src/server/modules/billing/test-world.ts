@@ -10,6 +10,7 @@ import {
   courseCodeAlias,
   courseOffering,
   engagement,
+  exam,
   institution,
   ledgerEntry,
   ledgerEntryType,
@@ -117,7 +118,10 @@ export async function accepted(w: World, prefix = w.prefix) {
     .where(and(eq(matchRequest.studentProfileId, actor.studentProfileId), eq(matchRequest.status, "pending")));
   await acceptRequest({ tutor: w.tutor, requestId: request.id });
   const [slot] = await slotsForRequest({ actor, requestId: request.id });
-  return { actor, buy: () => purchasePackage({ actor, requestId: request.id, anchorExamId: null, slotStartsAt: slot }) };
+  return {
+    actor,
+    buy: (anchorExamId: string | null = null) => purchasePackage({ actor, requestId: request.id, anchorExamId, slotStartsAt: slot }),
+  };
 }
 
 /** A four-pack held at checkout, not yet paid. */
@@ -240,6 +244,7 @@ export async function cleanup() {
   await db.delete(tutorProfile).where(inArray(tutorProfile.userId, users));
   await db.delete(studentProfile).where(inArray(studentProfile.userId, users));
   await db.delete(user).where(inArray(user.id, users));
+  await db.delete(exam).where(inArray(exam.institutionId, campuses));
   await db.delete(courseOffering).where(inArray(courseOffering.institutionId, campuses));
   await db.delete(courseCodeAlias).where(inArray(courseCodeAlias.institutionId, campuses));
   await db.delete(course).where(inArray(course.institutionId, campuses));

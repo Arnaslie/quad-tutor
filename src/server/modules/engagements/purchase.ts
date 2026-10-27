@@ -7,6 +7,7 @@ import {
   courseCodeAlias,
   courseOffering,
   engagement,
+  exam,
   matchRequest,
   sessionBooking,
   studentProfile,
@@ -321,6 +322,20 @@ export async function purchasePackage(params: {
     if (!kind || kind === "top_up") throw new PurchaseError("Pick a package.");
     if (params.kind && params.kind !== kind) {
       throw new PurchaseError(`The tutor agreed to ${packageSummary(kind).toLowerCase()}.`);
+    }
+    if (params.anchorExamId) {
+      const anchor = await tx
+        .select({ id: exam.id })
+        .from(exam)
+        .where(
+          and(
+            eq(exam.id, params.anchorExamId),
+            eq(exam.courseOfferingId, request.courseOfferingId),
+            eq(exam.institutionId, params.actor.institutionId),
+          ),
+        )
+        .limit(1);
+      if (!anchor.at(0)) throw new PurchaseError("That exam is not part of this course.");
     }
     if (already) {
       return resume(tx, params.actor.institutionId, already, {
