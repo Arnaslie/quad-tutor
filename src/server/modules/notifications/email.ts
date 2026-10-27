@@ -49,9 +49,12 @@ export type Email = {
   subject: string;
   text: string;
   idempotencyKey?: string;
+  // Never copied to PERSONA_MAIL_READER: a copied sign-in link signs the reader in as that persona.
+  credential?: true;
 };
 
 async function copies(message: Email): Promise<string[]> {
+  if (message.credential) return [];
   const [recipient] = await db
     .select({ id: user.id })
     .from(user)
