@@ -9,8 +9,11 @@ import {
   demandSignal,
   enrollment,
   exam,
+  institution,
   professor,
   term,
+  tutorCourse,
+  tutorProfile,
 } from "@/server/db/schema";
 import { PERSONA_SECTION } from "@/server/modules/billing/fixtures";
 import type { Actor } from "@/server/modules/identity/actor";
@@ -34,6 +37,16 @@ export type OfferingSummary = {
   professorName: string | null;
   termName: string;
 };
+
+export type CourseTickerItem = {
+  courseId: string;
+  code: string;
+  title: string;
+  tutorCount: number;
+  nextExamOn: string | null;
+};
+
+const LAUNCH_CAMPUS_SLUG = "ua";
 
 const currentCode = and(
   eq(courseCodeAlias.courseId, course.id),
@@ -146,6 +159,67 @@ export async function offeringsForCourse(params: {
       ),
     )
     .orderBy(courseOffering.section);
+}
+
+export async function launchCampusId(): Promise<string | null> {
+  const rows = await db
+    .select({ id: institution.id })
+    .from(institution)
+    .where(eq(institution.slug, LAUNCH_CAMPUS_SLUG))
+    .limit(1);
+
+  return rows.at(0)?.id ?? null;
+}
+
+export async function courseTicker(institutionId: string): Promise<CourseTickerItem[]> {
+  const nextExamOn = sql<string | null>`(
+    select min(${exam.occursOn})::text
+    from ${exam}
+    inner join ${courseOffering} on ${courseOffering.id} = ${exam.courseOfferingId}
+    inner join ${term} on ${term.id} = ${courseOffering.termId}
+    where ${courseOffering.courseId} = ${course.id}
+      and ${exam.institutionId} = ${institutionId}
+      and ${courseOffering.institutionId} = ${institutionId}
+      and ${term.institutionId} = ${institutionId}
+      and current_date between ${term.startsOn} and ${term.endsOn}
+      and ${exam.occursOn} >= current_date
+      and ${courseOffering.section} is distinct from ${PERSONA_SECTION}
+  )`;
+
+  return db
+    .select({
+      courseId: course.id,
+      code: courseCodeAlias.code,
+      title: course.title,
+      tutorCount: sql<number>`count(distinct ${tutorProfile.id})::int`,
+      nextExamOn,
+    })
+    .from(course)
+    .innerJoin(courseCodeAlias, currentCode)
+    .innerJoin(
+      tutorCourse,
+      and(
+        eq(tutorCourse.courseId, course.id),
+        eq(tutorCourse.institutionId, institutionId),
+        eq(tutorCourse.status, "active"),
+      ),
+    )
+    .innerJoin(
+      tutorProfile,
+      and(
+        eq(tutorProfile.id, tutorCourse.tutorProfileId),
+        eq(tutorProfile.institutionId, institutionId),
+      ),
+    )
+    .where(
+      and(
+        eq(course.institutionId, institutionId),
+        eq(course.isSeeded, true),
+        eq(courseCodeAlias.institutionId, institutionId),
+      ),
+    )
+    .groupBy(course.id, courseCodeAlias.code)
+    .orderBy(courseCodeAlias.code);
 }
 
 export async function courseById(params: {

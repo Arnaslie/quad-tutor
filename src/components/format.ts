@@ -22,6 +22,15 @@ export function formatDay(value: Date | string, timeZone?: string): string {
   }).format(it.date);
 }
 
+export function formatMonthDay(value: Date | string): string {
+  const it = parts(value);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: it.timeZone,
+  }).format(it.date);
+}
+
 export function formatTime(value: Date | string, timeZone = CAMPUS_TIME_ZONE): string {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
